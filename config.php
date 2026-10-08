@@ -850,7 +850,7 @@ function table_registry(): array
         'cp_trainingofficers' => ['label' => 'Training officers', 'group' => 'People', 'roles' => ['Administrator', 'Super User', 'User'], 'office' => 'tro_office'],
         'cp_trrequirements' => ['label' => 'Training needs', 'group' => 'Plan', 'roles' => ['Administrator', 'Super User', 'User'], 'office' => 'req_addoffice'],
         'cp_treqperiod' => ['label' => 'Needs collection period', 'group' => 'Plan', 'roles' => ['Administrator']],
-        'trdate' => ['label' => 'Needs closing date', 'group' => 'Plan', 'roles' => ['Administrator']],
+        'trdate' => ['label' => 'Needs closing date', 'group' => 'Plan', 'roles' => ['Administrator', 'Super User']],
         'cp_atp' => ['label' => 'Annual training plan', 'group' => 'Plan', 'roles' => ['Administrator', 'Super User', 'User'], 'user_write' => false],
         'cp_trainingapplications' => ['label' => 'Training applications', 'group' => 'Delivery', 'roles' => ['Administrator', 'Super User', 'User'], 'admin_change' => true, 'office' => 'tapp_office'],
         'cp_trainingattendance' => ['label' => 'Attendance', 'group' => 'Delivery', 'roles' => ['Administrator', 'Super User', 'User'], 'user_write' => false],

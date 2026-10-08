@@ -62,7 +62,8 @@ $csrf = csrf_token();
   <main id="stage"></main>
   <footer class="footer">
     <div class="wrap" id="foot-note" data-i18n="footer">© 2026 කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත් සභාව · +94 37 2222018</div>
-   </footer>
+    <p class="footer-credit">Web Developer and System Administrator · M. A. Wickramanayake (Development Officer) · E mail: <a href="mailto:anurasiri123@gmail.com">anurasiri123@gmail.com</a> · WhatsApp: <a href="https://wa.me/94774940944">0774940944</a></p>
+  </footer>
   <script src="qrcode.min.js"></script>
   <script src="app.js"></script>
 </body>

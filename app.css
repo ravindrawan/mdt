@@ -1009,27 +1009,8 @@ html[data-theme="color"] .provision-box-add { background: #f4fbe8; border-color:
 .provision-send-report { margin: 8px 16px 20px; }
 .provision-send-report h2 { margin: 0 0 8px; }
 @media print {
-  .no-print, .desig-tabs, .sheet-tools, #provision-send-form, .provision-actions, .scheduled-copy, #office-out, .tamil-tools { display: none !important; }
+  .no-print, .desig-tabs, .sheet-tools, #provision-send-form, .provision-actions, .scheduled-copy { display: none !important; }
   .provision-send-report { margin: 0; border: 0; box-shadow: none; }
-  body.printing-ahead .gov-banner,
-  body.printing-ahead .menubar,
-  body.printing-ahead .footer,
-  body.printing-ahead .helper,
-  body.printing-ahead .side,
-  body.printing-ahead .crumb,
-  body.printing-ahead .toolbar,
-  body.printing-ahead #stage { display: none !important; }
-  body.printing-ahead > *:not(.ahead-official) { display: none !important; }
-  body.printing-ahead .ahead-official {
-    display: block !important;
-    position: static;
-    width: 100%;
-    color: #111;
-    background: #fff;
-  }
-  body.printing-ahead .ahead-official table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  body.printing-ahead .ahead-official th,
-  body.printing-ahead .ahead-official td { border: 1px solid #333; padding: 4px 6px; }
 }
 .attended-tools { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 14px; }
 .attended-tools label { display: grid; gap: 4px; font-weight: 600; }
@@ -1835,6 +1816,12 @@ html[data-theme="dark"] .inbox-person { background: #243044; color: #e7edf5; }
 .progress-order th { background: #87ceeb; color: #08324a; }
 .progress-order tbody tr { cursor: pointer; }
 .progress-order tbody tr:hover { background: #f4f8ff; }
+.pace-top .table-wrap { overflow: auto; }
+.pace-top .progress-order { table-layout: auto; width: max-content; min-width: 100%; font-size: 0.8rem; }
+.pace-top .progress-order th, .pace-top .progress-order td { padding: 4px 7px; white-space: nowrap; }
+.gemini-make { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 8px 0 14px; }
+.gemini-make .classic-field { flex: 1 1 240px; margin: 0; }
+#module-source-name { font-size: 0.9rem; }
 .panel-sign { background: #fff; color: #111; padding: 18px 12px 8px; }
 .panel-sign h2, .panel-sign h3, .panel-sign .panel-date { text-align: center; margin: 0 0 4px; font-family: "Noto Sans Sinhala", sans-serif; }
 .panel-sign h2 { font-size: 1.15rem; }

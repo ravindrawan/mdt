@@ -59,6 +59,8 @@ try {
         'module' => action_module(),
         'module-save' => action_module_save(),
         'module-excel' => action_module_excel(),
+        'module-gemini' => action_module_gemini(),
+        'gemini-key' => action_gemini_key(),
         'eval-get' => action_eval_get(),
         'eval-save' => action_eval_save(),
         'eval-live' => action_eval_live(),
@@ -931,20 +933,23 @@ function follow_programme_dates(int $id, array $before, array $submitted): void
     $start = plain_date((string) $saved[0]['atp_day1']);
     $file = (string) $saved[0]['atp_fileno'];
     $key = (string) $id;
+    if ($oldStart === '') {
+        return;
+    }
     if ($name !== '') {
-        $stmt = db()->prepare('UPDATE cp_trainingapplications SET tapp_trname = ? WHERE tapp_atpid = ?');
-        $stmt->bind_param('ss', $name, $key);
+        $stmt = db()->prepare('UPDATE cp_trainingapplications SET tapp_trname = ? WHERE tapp_atpid = ? AND LEFT(tapp_trstartdate, 10) = ?');
+        $stmt->bind_param('sss', $name, $key, $oldStart);
         $stmt->execute();
-        $stmt = db()->prepare('UPDATE cp_trainingattendance SET tratt_atpname = ?, tratt_atpfileno = ? WHERE tratt_atpid = ?');
-        $stmt->bind_param('sss', $name, $file, $key);
+        $stmt = db()->prepare('UPDATE cp_trainingattendance SET tratt_atpname = ?, tratt_atpfileno = ? WHERE tratt_atpid = ? AND LEFT(tratt_startdate, 10) = ?');
+        $stmt->bind_param('ssss', $name, $file, $key, $oldStart);
         $stmt->execute();
     }
-    if ($start !== '') {
-        $stmt = db()->prepare('UPDATE cp_trainingapplications SET tapp_trstartdate = ? WHERE tapp_atpid = ?');
-        $stmt->bind_param('ss', $start, $key);
+    if ($start !== '' && $start !== $oldStart) {
+        $stmt = db()->prepare('UPDATE cp_trainingapplications SET tapp_trstartdate = ? WHERE tapp_atpid = ? AND LEFT(tapp_trstartdate, 10) = ?');
+        $stmt->bind_param('sss', $start, $key, $oldStart);
         $stmt->execute();
-        $stmt = db()->prepare('UPDATE cp_trainingattendance SET tratt_startdate = ? WHERE tratt_atpid = ?');
-        $stmt->bind_param('ss', $start, $key);
+        $stmt = db()->prepare('UPDATE cp_trainingattendance SET tratt_startdate = ? WHERE tratt_atpid = ? AND LEFT(tratt_startdate, 10) = ?');
+        $stmt->bind_param('sss', $start, $key, $oldStart);
         $stmt->execute();
     }
 }
@@ -2173,6 +2178,39 @@ function programme_days(array $row, string $prefix): array
     return $days;
 }
 
+function programme_first_day(array $plan): string
+{
+    $days = array_values(array_filter(
+        programme_days($plan, 'atp_day'),
+        static fn (string $day): bool => preg_match('/^(19|20)\d{2}-\d{2}-\d{2}$/', $day) === 1
+    ));
+    sort($days);
+    return $days[0] ?? '';
+}
+
+function programme_last_day(array $plan): string
+{
+    $days = array_values(array_filter(
+        programme_days($plan, 'atp_day'),
+        static fn (string $day): bool => preg_match('/^(19|20)\d{2}-\d{2}-\d{2}$/', $day) === 1
+    ));
+    sort($days);
+    return $days ? $days[count($days) - 1] : '';
+}
+
+function application_round_clause(string $alias, array $plan): array
+{
+    $start = plain_date((string) ($plan['atp_day1'] ?? ''));
+    if ($start === '') {
+        $start = programme_first_day($plan);
+    }
+    if ($start === '') {
+        return ['', '', []];
+    }
+    $sql = " AND LEFT({$alias}.tapp_trstartdate, 10) = ?";
+    return [$sql, 's', [$start]];
+}
+
 function action_programme(): void
 {
     $id = (int) ($_GET['id'] ?? 0);
@@ -2351,7 +2389,7 @@ function action_officer_history(): void
         json_out(['ok' => false, 'error' => 'No officer was found for that ID.'], 404);
     }
     $person = $found[0];
-    $trainings = rows(
+    $attended = rows(
         "SELECT a.tratt_atpid AS atp_id, a.tratt_atpname AS name, a.tratt_startdate AS start_date,
                 p.atp_location AS location
          FROM cp_trainingattendance a
@@ -2362,6 +2400,36 @@ function action_officer_history(): void
         'ss',
         [$nid, YES_SI]
     );
+    $selected = rows(
+        "SELECT a.tapp_atpid AS atp_id,
+                COALESCE(NULLIF(a.tapp_trname, ''), p.atp_trname) AS name,
+                CASE
+                    WHEN a.tapp_trstartdate IS NOT NULL AND a.tapp_trstartdate NOT LIKE '0000%' AND a.tapp_trstartdate NOT LIKE '1111%' THEN a.tapp_trstartdate
+                    WHEN p.atp_day1 IS NOT NULL AND p.atp_day1 NOT LIKE '0000%' AND p.atp_day1 NOT LIKE '1111%' THEN p.atp_day1
+                    ELSE a.tapp_trstartdate
+                END AS start_date,
+                p.atp_location AS location
+         FROM cp_trainingapplications a
+         LEFT JOIN cp_atp p ON p.atp_id = a.tapp_atpid
+         WHERE a.tapp_officerNid = ? AND a.tapp_isselected IN (?, 'Yes', 'yes')
+         ORDER BY start_date DESC
+         LIMIT 1000",
+        'ss',
+        [$nid, YES_SI]
+    );
+    $seen = [];
+    $trainings = [];
+    foreach (array_merge($selected, $attended) as $row) {
+        $id = trim((string) ($row['atp_id'] ?? ''));
+        if ($id === '' || isset($seen[$id])) {
+            continue;
+        }
+        $seen[$id] = true;
+        $trainings[] = $row;
+    }
+    usort($trainings, static function (array $a, array $b): int {
+        return strcmp((string) ($b['start_date'] ?? ''), (string) ($a['start_date'] ?? ''));
+    });
     json_out([
         'ok' => true,
         'officer' => [
@@ -2431,6 +2499,11 @@ function letter_selected_date(array $application): string
         return '';
     }
     return $date;
+}
+
+function application_is_selected(array $application): bool
+{
+    return in_array((string) ($application['tapp_isselected'] ?? ''), [YES_SI, 'Yes', 'yes'], true);
 }
 
 function blacklist_until(string $nid): string
@@ -2730,7 +2803,7 @@ function action_modules(): void
         ];
     }
     $leader = signatory_profile();
-    json_out(['ok' => true, 'items' => $items, 'programmes' => $programmes, 'coordinator' => $leader['display'], 'coordinatorPost' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)', 'gemini' => gemini_account()]);
+    json_out(['ok' => true, 'items' => $items, 'programmes' => $programmes, 'coordinator' => $leader['display'], 'coordinatorPost' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)', 'gemini' => gemini_account(), 'geminiReady' => gemini_key() !== '']);
 }
 
 function action_module(): void
@@ -2915,6 +2988,321 @@ function action_module_excel(): void
     $days = [];
     foreach ($grouped as $no => $sessions) {
         $days[] = ['no' => (int) $no, 'sessions' => $sessions];
+    }
+    json_out(['ok' => true, 'days' => $days]);
+}
+
+function gemini_key(): string
+{
+    $env = getenv('MDTU_GEMINI_KEY');
+    $key = is_string($env) ? trim($env) : '';
+    if ($key === '') {
+        $path = __DIR__ . '/gemini.key';
+        $key = is_file($path) ? trim((string) file_get_contents($path)) : '';
+    }
+    if ($key === '' || strlen($key) > 200 || preg_match('/\s/', $key)) {
+        return '';
+    }
+    return $key;
+}
+
+function action_gemini_key(): void
+{
+    csrf_check();
+    module_staff();
+    $key = trim((string) (body()['key'] ?? ''));
+    if (!preg_match('/^[A-Za-z0-9_-]{20,200}$/', $key)) {
+        json_out(['ok' => false, 'error' => 'Gemini යතුර වැරදියි. Google AI Studio එකෙන් අරගත් යතුර දාන්න.'], 422);
+    }
+    if (file_put_contents(__DIR__ . '/gemini.key', $key) === false) {
+        json_out(['ok' => false, 'error' => 'යතුර සුරකින්න බැරි වුණා.'], 500);
+    }
+    json_out(['ok' => true]);
+}
+
+function gemini_clip(string $value, int $max): string
+{
+    $value = trim($value);
+    if (function_exists('mb_substr')) {
+        return mb_substr($value, 0, $max);
+    }
+    return substr($value, 0, $max);
+}
+
+function gemini_request(string $model, string $key, string $payload): array
+{
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('Gemini එකට සම්බන්ධ වෙන්න බැරි වුණා.');
+    }
+    $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode($model) . ':generateContent';
+    $ch = curl_init($url);
+    $options = [
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-goog-api-key: ' . $key],
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 90,
+    ];
+    $ca = 'C:/xampp/php/extras/ssl/cacert.pem';
+    if (is_file($ca)) {
+        $options[CURLOPT_CAINFO] = $ca;
+    }
+    curl_setopt_array($ch, $options);
+    $raw = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $failed = $raw === false;
+    $curlError = $failed ? (string) curl_error($ch) : '';
+    curl_close($ch);
+    if ($failed) {
+        throw new RuntimeException($curlError !== '' ? 'Gemini එකට සම්බන්ධ වෙන්න බැරි වුණා.' : 'Gemini එකට සම්බන්ධ වෙන්න බැරි වුණා.');
+    }
+    $decoded = json_decode((string) $raw, true);
+    return ['status' => $status, 'body' => is_array($decoded) ? $decoded : []];
+}
+
+function gemini_public_error(string $message, string $key): string
+{
+    if ($key !== '') {
+        $message = str_replace($key, '', $message);
+    }
+    $message = trim($message);
+    if ($message === '' || strlen($message) > 180) {
+        return 'Gemini එකෙන් මොඩියුලය ගන්න බැරි වුණා.';
+    }
+    return $message;
+}
+
+function module_docx_text(string $path): string
+{
+    if (!class_exists('ZipArchive')) {
+        return '';
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        return '';
+    }
+    $xml = $zip->getFromName('word/document.xml');
+    $zip->close();
+    if (!is_string($xml) || $xml === '') {
+        return '';
+    }
+    $xml = str_replace(['</w:p>', '</w:tr>'], "\n", $xml);
+    $text = trim(html_entity_decode(strip_tags($xml), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    return gemini_clip($text, 50000);
+}
+
+function module_gemini_sessions(mixed $rows): array
+{
+    if (!is_array($rows)) {
+        return [];
+    }
+    $sessions = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $pick = static function (array $row, array $keys): string {
+            foreach ($keys as $key) {
+                if (!array_key_exists($key, $row)) {
+                    continue;
+                }
+                $value = $row[$key];
+                if (is_array($value)) {
+                    $value = implode("\n", array_map(static fn ($line): string => trim((string) $line), $value));
+                }
+                $value = trim((string) $value);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+            return '';
+        };
+        $session = [
+            'time' => gemini_clip($pick($row, ['time', 'කාලය']), 80),
+            'session' => gemini_clip($pick($row, ['session', 'සැසිය']), 200),
+            'lecturer' => gemini_clip($pick($row, ['lecturer', 'දේශකයා']), 160),
+            'points' => gemini_clip($pick($row, ['points', 'විෂය', 'topics']), 2000),
+        ];
+        if ($session['time'] === '' && $session['session'] === '' && $session['lecturer'] === '' && $session['points'] === '') {
+            continue;
+        }
+        $sessions[] = $session;
+        if (count($sessions) >= 12) {
+            break;
+        }
+    }
+    return $sessions;
+}
+
+function action_module_gemini(): void
+{
+    csrf_check();
+    module_staff();
+    @set_time_limit(120);
+    $data = body();
+    $topic = gemini_clip((string) ($data['topic'] ?? ''), 400);
+    $dayCount = max(1, min(60, (int) ($data['days'] ?? 1)));
+    $name = gemini_clip((string) ($data['name'] ?? ''), 250);
+    $target = gemini_clip((string) ($data['target'] ?? ''), 250);
+    $place = gemini_clip((string) ($data['place'] ?? ''), 180);
+    $stime = gemini_clip((string) ($data['stime'] ?? ''), 40);
+    $etime = gemini_clip((string) ($data['etime'] ?? ''), 40);
+    $file = $_FILES['file'] ?? null;
+    $hasFile = is_array($file) && isset($file['tmp_name']) && is_uploaded_file((string) $file['tmp_name']);
+    if ($topic === '' && !$hasFile) {
+        json_out(['ok' => false, 'error' => 'මාතෘකාවක් දාන්න, නැත්නම් තියෙන මොඩියුලය තෝරන්න.'], 422);
+    }
+    $key = gemini_key();
+    if ($key === '') {
+        json_out(['ok' => false, 'error' => 'Gemini යතුරක් නැත. Google AI Studio එකෙන් යතුරක් අරගෙන මෙතන සුරකින්න.'], 422);
+    }
+    $lecturerLines = [];
+    $lecturers = json_decode((string) ($data['lecturers'] ?? '[]'), true);
+    if (is_array($lecturers)) {
+        foreach ($lecturers as $person) {
+            if (!is_array($person)) {
+                continue;
+            }
+            $who = trim((string) ($person['name'] ?? ''));
+            if ($who === '') {
+                continue;
+            }
+            $lecturerLines[] = $who . ' | ' . trim((string) ($person['post'] ?? '')) . ' | ' . trim((string) ($person['office'] ?? ''));
+            if (count($lecturerLines) >= 12) {
+                break;
+            }
+        }
+    }
+    $dates = json_decode((string) ($data['dates'] ?? '[]'), true);
+    $dateLines = [];
+    if (is_array($dates)) {
+        foreach ($dates as $date) {
+            $dateLines[] = trim((string) $date);
+            if (count($dateLines) >= $dayCount) {
+                break;
+            }
+        }
+    }
+    $source = '';
+    $parts = [];
+    if ($hasFile) {
+        $size = (int) ($file['size'] ?? 0);
+        if ($size < 1 || $size > 8 * 1024 * 1024) {
+            json_out(['ok' => false, 'error' => 'ගොනුව හිස්ය, නැත්නම් විශාල වැඩිය.'], 422);
+        }
+        $ext = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+        $tmp = (string) $file['tmp_name'];
+        if ($ext === 'pdf') {
+            $bytes = file_get_contents($tmp);
+            if (!is_string($bytes) || $bytes === '') {
+                json_out(['ok' => false, 'error' => 'PDF ගොනුව කියවන්න බැරි වුණා.'], 422);
+            }
+            $parts[] = ['inlineData' => ['mimeType' => 'application/pdf', 'data' => base64_encode($bytes)]];
+        } elseif ($ext === 'docx') {
+            $source = module_docx_text($tmp);
+            if ($source === '') {
+                json_out(['ok' => false, 'error' => 'Word ගොනුවෙන් අන්තර්ගතය ගන්න බැරි වුණා.'], 422);
+            }
+        } elseif ($ext === 'txt') {
+            $raw = file_get_contents($tmp);
+            $source = is_string($raw) ? gemini_clip($raw, 50000) : '';
+            if (trim($source) === '') {
+                json_out(['ok' => false, 'error' => 'ගොනුවෙන් අන්තර්ගතය ගන්න බැරි වුණා.'], 422);
+            }
+        } else {
+            json_out(['ok' => false, 'error' => 'PDF, Word (.docx) හෝ text ගොනුවක් දෙන්න.'], 422);
+        }
+    }
+    $prompt = "You prepare one training module for the Management Development and Training Unit of the North Western Provincial Council.\n"
+        . "Write every session in Sinhala.\n"
+        . "Programme: {$name}\n"
+        . "Target group: {$target}\n"
+        . "Place: {$place}\n"
+        . "Number of days: {$dayCount}\n"
+        . "Dates, one per day: " . implode(', ', $dateLines) . "\n"
+        . "Start time: " . ($stime !== '' ? $stime : 'පෙ.ව. 8.30') . "\n"
+        . "End time: " . ($etime !== '' ? $etime : 'ප.ව. 4.00') . "\n"
+        . "Lecturers (name | post | office): " . ($lecturerLines ? implode('; ', $lecturerLines) : 'none') . "\n"
+        . "Requested topic: " . ($topic !== '' ? $topic : $name) . "\n"
+        . ($source !== '' ? "Existing module text:\n{$source}\n" : '')
+        . "Return JSON only, no markdown, in this shape:\n"
+        . "{\"days\":[{\"no\":1,\"sessions\":[{\"time\":\"පෙ.ව. 8.30 – 10.30\",\"session\":\"\",\"lecturer\":\"\",\"points\":\"\"}]}]}\n"
+        . "Rules: exactly {$dayCount} days numbered from 1. Each day has 4 to 6 sessions inside the start and end times, with a short tea break and a lunch break when the day is long enough. "
+        . "session is the session title. points are the topics and activities, short lines separated by newline characters. "
+        . "If lecturers are given, lecturer must be one of those names. If none are given, leave lecturer empty. "
+        . "Use the requested topic. If an existing module is attached or pasted, keep its real contents and only reshape them into this day-and-session format. Do not invent a different programme.\n";
+    array_unshift($parts, ['text' => $prompt]);
+    $payload = json_encode([
+        'contents' => [['parts' => $parts]],
+        'generationConfig' => [
+            'temperature' => 0.4,
+            'responseMimeType' => 'application/json',
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+    if (!is_string($payload)) {
+        json_out(['ok' => false, 'error' => 'Gemini එකට ඉල්ලීම හදන්න බැරි වුණා.'], 500);
+    }
+    $last = 'Gemini එකෙන් මොඩියුලය ගන්න බැරි වුණා.';
+    $text = '';
+    foreach (['gemini-2.5-flash', 'gemini-2.0-flash'] as $model) {
+        try {
+            $reply = gemini_request($model, $key, $payload);
+        } catch (RuntimeException $error) {
+            json_out(['ok' => false, 'error' => gemini_public_error($error->getMessage(), $key)], 502);
+        }
+        $body = $reply['body'];
+        $text = (string) ($body['candidates'][0]['content']['parts'][0]['text'] ?? '');
+        if ($reply['status'] >= 200 && $reply['status'] < 300 && $text !== '') {
+            $last = '';
+            break;
+        }
+        $message = (string) ($body['error']['message'] ?? '');
+        $missing = $reply['status'] === 404 || str_contains(strtolower($message), 'not found') || str_contains(strtolower($message), 'not supported');
+        if ($missing || ($reply['status'] >= 200 && $reply['status'] < 300)) {
+            $last = $message !== '' ? $message : $last;
+            continue;
+        }
+        json_out(['ok' => false, 'error' => gemini_public_error($message, $key)], 502);
+    }
+    if ($last !== '') {
+        json_out(['ok' => false, 'error' => gemini_public_error($last, $key)], 502);
+    }
+    $clean = trim($text);
+    if (str_starts_with($clean, '```')) {
+        $clean = preg_replace('/^```(?:json)?\s*/i', '', $clean) ?? $clean;
+        $clean = preg_replace('/\s*```$/', '', $clean) ?? $clean;
+    }
+    $parsed = json_decode($clean, true);
+    if (!is_array($parsed)) {
+        $start = strpos($clean, '{');
+        $end = strrpos($clean, '}');
+        if ($start !== false && $end !== false && $end > $start) {
+            $parsed = json_decode(substr($clean, $start, $end - $start + 1), true);
+        }
+    }
+    $rawDays = is_array($parsed) ? ($parsed['days'] ?? $parsed) : [];
+    if (!is_array($rawDays)) {
+        json_out(['ok' => false, 'error' => 'Gemini එකෙන් ආකෘතියට ගැලපෙන මොඩියුලයක් ආවේ නැහැ.'], 422);
+    }
+    $days = [];
+    $index = 0;
+    foreach ($rawDays as $day) {
+        $index++;
+        if (!is_array($day)) {
+            continue;
+        }
+        $no = (int) ($day['no'] ?? $index);
+        if ($no < 1 || $no > $dayCount) {
+            continue;
+        }
+        $sessions = module_gemini_sessions($day['sessions'] ?? []);
+        if (!$sessions) {
+            continue;
+        }
+        $days[] = ['no' => $no, 'sessions' => $sessions];
+    }
+    if (!$days) {
+        json_out(['ok' => false, 'error' => 'Gemini එකෙන් සැසි ලැබුණේ නැහැ.'], 422);
     }
     json_out(['ok' => true, 'days' => $days]);
 }
@@ -3401,14 +3789,16 @@ function notify_letter(string $kind, string $name, string $programme, string $da
 
 function notify_officers(int $atp): array
 {
+    $planRows = rows('SELECT * FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$atp]);
+    [$roundSql, $roundTypes, $roundParams] = $planRows ? application_round_clause('a', $planRows[0]) : ['', '', []];
     return rows(
         "SELECT a.tapp_officerNid, s.stf_Name, s.stf_email, s.stf_mobile
          FROM cp_trainingapplications a
          LEFT JOIN cp_staff s ON s.stf_Nid = a.tapp_officerNid
-         WHERE a.tapp_atpid = ? AND a.tapp_isselected IN (?, 'Yes', 'yes')
+         WHERE a.tapp_atpid = ? AND a.tapp_isselected IN (?, 'Yes', 'yes')" . $roundSql . "
          ORDER BY s.stf_Name",
-        'ss',
-        [$atp, YES_SI]
+        'ss' . $roundTypes,
+        array_merge([(string) $atp, YES_SI], $roundParams)
     );
 }
 
@@ -3798,18 +4188,7 @@ function action_officer_letter(): void
     $nid = trim((string) ($_GET['nid'] ?? ''));
     $atp = trim((string) ($_GET['atp'] ?? ''));
     if ($nid === '' || $atp === '') {
-        json_out(['ok' => false, 'error' => 'The officer and programme are required.'], 422);
-    }
-    $attended = rows(
-        "SELECT tratt_atpname, tratt_startdate FROM cp_trainingattendance
-         WHERE tratt_empnid = ? AND tratt_atpid = ?
-           AND (tratt_isparti IS NULL OR TRIM(tratt_isparti) = '' OR tratt_isparti NOT IN ('නැත', 'No', 'no'))
-         LIMIT 1",
-        'ss',
-        [$nid, $atp]
-    );
-    if (!$attended) {
-        json_out(['ok' => false, 'error' => 'That officer has no attendance record for this programme.'], 404);
+        json_out(['ok' => false, 'error' => 'නිලධාරියාගේ හැඳුනුම්පත සහ පුහුණු වැඩසටහන දෙන්න.'], 422);
     }
     $staff = rows('SELECT stf_Name, stf_desig, stf_office, stf_Nid, stf_sex FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$nid]);
     $planRows = rows('SELECT * FROM cp_atp WHERE atp_id = ? LIMIT 1', 's', [$atp]);
@@ -3819,18 +4198,44 @@ function action_officer_letter(): void
         'ss',
         [$nid, $atp]
     );
-    $application = $applications[0] ?? [
-        'tapp_trname' => $attended[0]['tratt_atpname'],
-        'tapp_isselected' => YES_SI,
-        'tapp_office' => $staff[0]['stf_office'] ?? '',
-    ];
+    $application = $applications[0] ?? null;
+    $planStart = $plan ? plain_date((string) ($plan['atp_day1'] ?? '')) : '';
+    $appStart = is_array($application) ? plain_date((string) ($application['tapp_trstartdate'] ?? '')) : '';
+    $selected = $application && application_is_selected($application) && ($planStart === '' || $appStart === $planStart);
+    $attended = rows(
+        "SELECT tratt_atpname, tratt_startdate FROM cp_trainingattendance
+         WHERE tratt_empnid = ? AND tratt_atpid = ?
+           AND (tratt_isparti IS NULL OR TRIM(tratt_isparti) = '' OR tratt_isparti NOT IN ('නැත', 'No', 'no'))
+           AND (? = '' OR LEFT(tratt_startdate, 10) = ?)
+         LIMIT 1",
+        'ssss',
+        [$nid, $atp, $planStart, $planStart]
+    );
+    if (!$selected && !$attended) {
+        json_out(['ok' => false, 'error' => 'මේ නිලධාරියා මේ පුහුණුවට තෝරාගෙන නැහැ. පුහුණු වැඩසටහන් සඳහා අයදුම් කළ අය තුළ ටික් දාලා ඇතුළත් කරන්න.'], 404);
+    }
+    $user = current_user();
+    if ($user && $user['role'] === 'User') {
+        $office = (string) ($staff[0]['stf_office'] ?? '');
+        $appOffice = is_array($application) ? (string) ($application['tapp_office'] ?? '') : '';
+        if ($office !== $user['office'] && $appOffice !== $user['office']) {
+            json_out(['ok' => false, 'error' => 'මෙම නිලධාරියා වෙනත් කාර්යාලයකයි.'], 403);
+        }
+    }
+    if (!$application) {
+        $application = [
+            'tapp_trname' => $attended[0]['tratt_atpname'] ?? '',
+            'tapp_isselected' => YES_SI,
+            'tapp_office' => $staff[0]['stf_office'] ?? '',
+        ];
+    }
     json_out([
         'ok' => true,
         'letter' => [
             'application' => $application,
-            'officer' => $staff[0] ?? ['stf_Name' => '', 'stf_desig' => '', 'stf_office' => '', 'stf_Nid' => $nid, 'stf_sex' => ''],
+            'officer' => $staff[0] ?? ['stf_Name' => '', 'stf_desig' => '', 'stf_office' => (string) ($application['tapp_office'] ?? ''), 'stf_Nid' => $nid, 'stf_sex' => ''],
             'programme' => $plan,
-            'days' => $plan ? programme_days($plan, 'atp_day') : [substr((string) $attended[0]['tratt_startdate'], 0, 10)],
+            'days' => $plan ? programme_days($plan, 'atp_day') : ($attended ? [substr((string) $attended[0]['tratt_startdate'], 0, 10)] : []),
             'selectedDate' => letter_selected_date($application),
             'unit' => MDTU_NAME,
             'org' => MDTU_ORG,
@@ -7557,14 +7962,19 @@ function action_signsheet(): void
         json_out(['ok' => false, 'error' => 'That programme was not found.'], 404);
     }
     $plan = $planRows[0];
+    $end = programme_last_day($plan);
+    [$roundSql, $roundTypes, $roundParams] = application_round_clause('a', $plan);
+    if ($end !== '' && $end < date('Y-m-d')) {
+        $roundSql .= ' AND 1=0';
+    }
     $sql = "SELECT a.tapp_officerNid, a.tapp_office, a.tapp_accomodation, a.tapp_diet, s.stf_Name, s.stf_desig, s.stf_mobile,
                    t.tratt_name, t.tratt_desig, t.tratt_mobile
             FROM cp_trainingapplications a
             LEFT JOIN cp_staff s ON s.stf_Nid = a.tapp_officerNid
             LEFT JOIN cp_trainingattendance t ON t.tratt_atpid = a.tapp_atpid AND t.tratt_empnid = a.tapp_officerNid
-            WHERE a.tapp_atpid = ? AND a.tapp_isselected = ?";
-    $types = 'ss';
-    $params = [$id, YES_SI];
+            WHERE a.tapp_atpid = ? AND a.tapp_isselected = ?" . $roundSql;
+    $types = 'ss' . $roundTypes;
+    $params = array_merge([$id, YES_SI], $roundParams);
     if ($user['role'] === 'User') {
         $sql .= ' AND a.tapp_office = ?';
         $types .= 's';
@@ -7640,15 +8050,20 @@ function action_panelsign(): void
         json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහන හමු නොවුණි.'], 404);
     }
     $plan = $planRows[0];
+    $end = programme_last_day($plan);
+    [$roundSql, $roundTypes, $roundParams] = application_round_clause('a', $plan);
+    if ($end !== '' && $end < date('Y-m-d')) {
+        $roundSql .= ' AND 1=0';
+    }
     $people = rows(
         "SELECT s.stf_Name, s.stf_desig, t.tratt_name, t.tratt_desig
          FROM cp_trainingapplications a
          LEFT JOIN cp_staff s ON s.stf_Nid = a.tapp_officerNid
          LEFT JOIN cp_trainingattendance t ON t.tratt_atpid = a.tapp_atpid AND t.tratt_empnid = a.tapp_officerNid
-         WHERE a.tapp_atpid = ? AND a.tapp_isselected IN (?, 'Yes', 'yes')
+         WHERE a.tapp_atpid = ? AND a.tapp_isselected IN (?, 'Yes', 'yes')" . $roundSql . "
          ORDER BY s.stf_Name, t.tratt_name",
-        'ss',
-        [$id, YES_SI]
+        'ss' . $roundTypes,
+        array_merge([$id, YES_SI], $roundParams)
     );
     $staff = [];
     foreach ($people as $person) {
@@ -7728,10 +8143,22 @@ function action_selected_programmes(): void
     foreach ($rows as $row) {
         $id = trim((string) ($row['tapp_atpid'] ?? ''));
         if ($id !== '') {
-            $ids[] = $id;
+            $ids[$id] = $id;
         }
     }
-    json_out(['ok' => true, 'ids' => $ids]);
+    $today = date('Y-m-d');
+    $open = [];
+    if ($ids) {
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $plans = rows('SELECT * FROM cp_atp WHERE atp_id IN (' . $marks . ')', str_repeat('s', count($ids)), array_values($ids));
+        foreach ($plans as $plan) {
+            $end = programme_last_day($plan);
+            if ($end !== '' && $end >= $today) {
+                $open[] = (string) $plan['atp_id'];
+            }
+        }
+    }
+    json_out(['ok' => true, 'ids' => $open]);
 }
 
 function action_applicants(): void
@@ -7758,8 +8185,22 @@ function action_applicants(): void
         $types .= 's';
         $params[] = $user['office'];
     }
+    $planRows = rows('SELECT * FROM cp_atp WHERE atp_id = ? LIMIT 1', 's', [$atp]);
+    $plan = $planRows[0] ?? null;
+    if ($plan && (($_GET['selected'] ?? '') === '1')) {
+        $end = programme_last_day($plan);
+        if ($end !== '' && $end < date('Y-m-d')) {
+            json_out(['ok' => true, 'items' => []]);
+        }
+    }
     if (($_GET['selected'] ?? '') === '1') {
         $sql .= " AND a.tapp_isselected IN ('ඔව්', 'Yes', 'yes')";
+    }
+    if ($plan) {
+        [$roundSql, $roundTypes, $roundParams] = application_round_clause('a', $plan);
+        $sql .= $roundSql;
+        $types .= $roundTypes;
+        array_push($params, ...$roundParams);
     }
     $sql .= ' ORDER BY a.tapp_id ASC';
     $items = rows($sql, $types, $params);
@@ -8295,10 +8736,10 @@ function chat_guide(array $user, string $lang, string $topic): string
                     ? ['ஆண்டுத் திட்டத்தில் எல்லா பயிற்சிகளையும் பார்க்கலாம். மாற்ற முடியாது.']
                     : ['වාර්ෂික සැලැස්මෙන් සියලු වැඩසටහන් බලන්න පුළුවන්. වෙනස් කරන්න බැහැ.'])),
         'letter' => $lang === 'en'
-            ? ['Open the nomination letter.', 'Search the officer by national ID and print the letter. Dates come from the programme.']
+            ? ['Tick and include the trainee under people who applied for programmes.', 'Open the call letter, choose that programme, and enter the national ID. The letter opens.', 'On the staff page, enter the same ID and open the call letter for a selected programme.']
             : ($lang === 'ta'
-                ? ['பரிந்துரை கடிதத்தைத் திறக்கவும்.', 'அடையாள எண்ணால் அதிகாரியைத் தேடி அச்சிடவும்.']
-                : ['කැඳවීමේ ලිපිය විවෘත කරන්න.', 'ජාතික හැඳුනුම්පත් අංකය දාලා වර්ෂය තෝරන්න.', 'ඒ වර්ෂයේ සහභාගි වූ සෑම පුහුණුවකටම කැඳවීමේ ලිපිය ගන්න පුළුවන්.']),
+                ? ['விண்ணப்பித்தோர் பட்டியலில் குறியிட்டுச் சேர்க்கவும்.', 'அழைப்புக் கடிதத்தில் பயிற்சியைத் தேர்ந்து அடையாள எண்ணை இடவும். கடிதம் திறக்கும்.', 'பணியாளர் பக்கத்தில் அதே எண்ணை இட்டால் தேர்ந்த பயிற்சிக்கான கடிதம் கிடைக்கும்.']
+                : ['පුහුණු වැඩසටහන් සඳහා අයදුම් කළ අය තුළ පුහුණුලාභියාට ටික් දාලා ඇතුළත් කරන්න.', 'කැඳවීමේ ලිපිය අරින්න. පුහුණුව තෝරලා ජාතික හැඳුනුම්පත් අංකය දාන්න. ලිපිය විවෘත වෙනවා.', 'කාර්යමණ්ඩලයේ ඒ අංකය දැම්මම තෝරාගත් පුහුණුවට කැඳවීමේ ලිපිය ගන්න පුළුවන්.']),
         default => [chat_overview($user, $lang)],
     };
     if ($topic !== 'default' && $user['role'] === 'User' && in_array($topic, ['staff', 'apply'], true)) {
