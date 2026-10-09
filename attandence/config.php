@@ -13,11 +13,17 @@
 //    3. DB_HOST is normally 'localhost' on SLT hosting.
 //    The tables are created automatically the first time the site is opened.
 
-const DB_HOST = 'localhost';
+
+
+
+
+
+
+const DB_HOST = 'mdtunwgo-mdtu-db';
 const DB_PORT = 3306;
-const DB_NAME = 'mdtu_db';
-const DB_USER = 'root';
-const DB_PASS = '';
+const DB_NAME = 'mdtunwgo_mdtu';
+const DB_USER = 'mdtunwgo_dbuser';
+const DB_PASS = 'LsHnaTiuBg2Ih1A&';
 
 const APP_TIMEZONE = 'Asia/Colombo';
 
