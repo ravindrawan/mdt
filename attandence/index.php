@@ -1,4 +1,7 @@
-<?php include 'db.php'; ?>
+<?php
+require_once __DIR__ . '/security.php';
+mdtu_security_headers();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,37 +14,93 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- html2pdf.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- jsPDF + AutoTable (multi-page text PDF registers) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <!-- html2canvas -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <!-- SheetJS (xlsx) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- QR code generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800;900&family=Great+Vibes&family=Montserrat:wght@400;600;700;800&family=Inter:wght@300;400;600;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800;900&family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Great+Vibes&family=Montserrat:wght@400;600;700;800&family=Inter:wght@300;400;600;700;900&family=Noto+Serif+Sinhala:wght@500;700;800&family=Noto+Sans+Tamil:wght@500;700&family=Tinos:ital,wght@0,400;0,700;1,400&display=swap');
 
         .font-cinzel { font-family: 'Cinzel', serif; }
         .font-signature { font-family: 'Great Vibes', cursive; }
         .font-montserrat { font-family: 'Montserrat', sans-serif; }
+        .font-garamond { font-family: 'Cormorant Garamond', Georgia, serif; }
 
-        .cert-card-bg {
-            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 25%, #4338ca 50%, #312e81 75%, #1e1b4b 100%);
-        }
-
-        .cert-inner-body {
-            background: radial-gradient(circle at center, #ffffff 0%, #fdfbf7 70%, #f5eedc 100%);
-        }
-
-        .emboss-stamp {
-            background: radial-gradient(circle, #ffe066 0%, #d4af37 50%, #8a6d1c 100%);
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3), inset 0 0 10px rgba(255, 255, 255, 0.6);
-            border: 3px double #ffffff;
-        }
-
-        .cert-page-a4 {
-            width: 297mm;
-            min-height: 210mm;
-            max-height: 210mm;
+        /* ---------- Certificates (fixed A4 pixel size at 96dpi so PDF export is exact) ---------- */
+        .cert-landscape { width: 1122px; height: 793px; }
+        .cert-portrait  { width: 793px;  height: 1122px; }
+        .cert-sheet {
+            position: relative;
+            overflow: hidden;
             box-sizing: border-box;
+            background: #fffdf6;
+            color: #1e1b4b;
+            font-family: 'Cormorant Garamond', Georgia, serif;
+        }
+        .cert-sheet * { box-sizing: border-box; }
+        .cert-frame-outer { position: absolute; inset: 18px; border: 10px solid #1e1b4b; }
+        .cert-frame-gold  { position: absolute; inset: 32px; border: 3px solid #b8860b; }
+        .cert-frame-inner { position: absolute; inset: 40px; border: 1px solid #d4af37; }
+        .cert-corner { position: absolute; width: 70px; height: 70px; border-color: #b8860b; border-style: solid; }
+        .cert-corner.tl { top: 48px; left: 48px; border-width: 4px 0 0 4px; }
+        .cert-corner.tr { top: 48px; right: 48px; border-width: 4px 4px 0 0; }
+        .cert-corner.bl { bottom: 48px; left: 48px; border-width: 0 0 4px 4px; }
+        .cert-corner.br { bottom: 48px; right: 48px; border-width: 0 4px 4px 0; }
+        .cert-corner::after { content: ''; position: absolute; width: 12px; height: 12px; background: #1e1b4b; transform: rotate(45deg); }
+        .cert-corner.tl::after { top: 8px; left: 8px; }
+        .cert-corner.tr::after { top: 8px; right: 8px; }
+        .cert-corner.bl::after { bottom: 8px; left: 8px; }
+        .cert-corner.br::after { bottom: 8px; right: 8px; }
+        .cert-watermark {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            pointer-events: none; opacity: 0.06;
+        }
+        .cert-watermark img { width: 360px; height: 360px; object-fit: contain; }
+        .cert-watermark span { font-family: 'Cinzel', serif; font-size: 190px; font-weight: 900; color: #1e1b4b; letter-spacing: 12px; }
+        .cert-rule { height: 2px; background: linear-gradient(90deg, transparent, #b8860b, transparent); }
+        .cert-seal {
+            width: 104px; height: 104px; border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #fde68a 0%, #d4af37 45%, #92400e 100%);
+            border: 4px double #fffbeb; box-shadow: 0 3px 8px rgba(0,0,0,0.25);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            font-family: 'Cinzel', serif; color: #451a03; text-align: center; line-height: 1.1;
+        }
+        .cert-qr img, .cert-qr canvas { display: block; width: 100% !important; height: 100% !important; }
+        .cert-sizer { margin: 0 auto; overflow: hidden; overflow: clip; box-shadow: 0 20px 40px -12px rgba(15, 23, 42, 0.45); }
+        .cert-sizer > .cert-sheet { transform-origin: top left; }
+        /* ---------- Attendance certificate on the Chief Secretary's Office letterhead ---------- */
+        .lh-sheet { background: #ffffff; color: #1f2937; font-family: 'Tinos', 'Times New Roman', Times, serif; }
+        .lh-si { font-family: 'Noto Serif Sinhala', 'Iskoola Pota', 'Nirmala UI', serif; }
+        .lh-ta { font-family: 'Noto Sans Tamil', 'Nirmala UI', 'Latha', sans-serif; }
+        .lh-en { font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; }
+        .lh-maroon { color: #8b1a1a; }
+        .lh-rule { height: 2px; background: #8b1a1a; }
+        .lh-brace { display: inline-block; font-family: 'Tinos', 'Times New Roman', serif; font-weight: 400; line-height: 1; color: #8b1a1a; transform: scaleX(0.55); transform-origin: center; margin: 0 -4px; }
+        .lh-ref { display: flex; align-items: center; gap: 2px; }
+        .lh-ref-labels { font-size: 9.5px; line-height: 1.3; color: #8b1a1a; white-space: nowrap; }
+        .lh-ref-labels .lh-si { font-weight: 700; }
+        .lh-ref-value { font-size: 13.5px; font-weight: 700; color: #111827; white-space: nowrap; }
+        .lh-row { display: flex; padding: 6px 0; border-bottom: 1px dotted #cbd5e1; }
+        .lh-row > span:first-child { width: 190px; flex-shrink: 0; font-weight: 700; color: #374151; }
+        .lh-row > span:last-child { font-weight: 700; color: #111827; }
+        .lh-contact { display: flex; align-items: center; gap: 2px; }
+        .lh-contact-labels { font-size: 7.2px; line-height: 1.35; color: #8b1a1a; white-space: nowrap; }
+        .lh-contact-labels .lh-si, .lh-contact-labels .lh-ta { font-weight: 700; }
+        .lh-contact-labels .lh-en-t { font-family: 'Tinos', 'Times New Roman', serif; font-size: 8.6px; }
+        .lh-contact-lines { font-size: 8.2px; line-height: 1.4; color: #4b1d1d; white-space: nowrap; }
+        .lh-contact-lines b { display: inline-block; width: 26px; font-weight: 400; color: #8b1a1a; }
+        .tpl-logo.hidden, .tpl-logo-default.hidden, .tpl-seal.hidden, .tpl-seal-default.hidden, .tpl-signature.hidden, .tpl-signature-default.hidden { display: none !important; }
+
+        /* ---------- Mobile navigation drawer ---------- */
+        @media (max-width: 767px) {
+            #sidebarNav { transform: translateX(-100%); transition: transform 0.25s ease; }
+            #sidebarNav.open { transform: translateX(0); }
         }
 
         .slide-card {
@@ -63,22 +122,24 @@
             th, td { border: 1px solid #666 !important; padding: 6px !important; }
             .page-break { page-break-before: always; margin-top: 2rem; }
             
-            @page {
-                size: A4 landscape;
-                margin: 0;
-            }
-            .cert-print-area {
-                box-shadow: none !important;
-                border: none !important;
-                width: 297mm !important;
-                height: 210mm !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                page-break-inside: avoid;
-            }
+            @page { size: A4 landscape; margin: 10mm; }
         }
         
         .print-only { display: none; }
+        .nav-heading { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; padding: 0 0.5rem 0.25rem; }
+        .tab-btn { display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; font-size: 0.75rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; border-left: 4px solid transparent; transition: background-color 0.15s; }
+        .tab-btn:hover { background-color: #1e1b4b; }
+        .nav-group { padding-top: 0.5rem; margin-top: 0.25rem; border-top: 1px solid #312e81; }
+        .nav-group:first-of-type { border-top: 0; margin-top: 0; }
+        .nav-group > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 0.35rem 0.5rem; border-radius: 0.375rem; user-select: none; }
+        .nav-group > summary::-webkit-details-marker { display: none; }
+        .nav-group > summary::after { content: '▸'; font-size: 12px; transition: transform 0.15s; }
+        .nav-group[open] > summary::after { transform: rotate(90deg); }
+        .nav-group > summary:hover { background-color: #1e1b4b; color: #fff; }
+        .nav-group > .tab-btn { margin-top: 0.15rem; }
+        .home-tile { display: flex; align-items: center; gap: 0.75rem; text-align: left; padding: 0.9rem 1rem; border-radius: 0.85rem; background: #fff; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(15,23,42,.06); transition: transform .12s, box-shadow .12s, border-color .12s; }
+        .home-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(30,27,75,.12); border-color: #a5b4fc; }
+        .home-tile .tile-icon { width: 2.6rem; height: 2.6rem; border-radius: 0.7rem; display: flex; align-items: center; justify-content: center; font-size: 1.35rem; flex-shrink: 0; }
         .tab-btn.active {
             border-left: 4px solid #f59e0b;
             color: #ffffff;
@@ -126,209 +187,274 @@
 </head>
 <body class="bg-slate-100 min-h-screen text-slate-800 font-sans flex flex-col justify-between">
 
-<div class="w-full overflow-x-hidden">
+<!-- Shown when the database / server cannot be reached -->
+<div id="dbStatusBanner" class="hidden bg-rose-700 text-white text-xs font-bold px-4 py-2 text-center no-print"></div>
+
+<div class="w-full">
 <!-- Top Navigation & Header Bar -->
-<header class="bg-indigo-900 text-white shadow-xl no-print border-b-4 border-amber-500 sticky top-0 z-40">
-    <div id="headerNewsAlertBar" class="bg-red-700 text-white px-3 sm:px-4 py-1.5 text-xs font-bold flex flex-col sm:flex-row justify-between items-center gap-1 shadow-inner">
-        <div class="flex items-center gap-2 overflow-hidden w-full sm:w-auto">
+<header class="bg-indigo-900 text-white shadow-xl no-print border-b-4 border-amber-500 md:sticky md:top-0 z-30">
+    <div id="headerNewsAlertBar" class="bg-red-700 text-white px-3 sm:px-4 py-1.5 text-xs font-bold flex items-center justify-between gap-2 shadow-inner">
+        <div class="flex items-center gap-2 overflow-hidden min-w-0">
             <span class="bg-white text-red-700 px-2 py-0.5 rounded text-[10px] font-black uppercase animate-pulse shrink-0">🚨 Alert</span>
-            <span id="headerAlertTickerText" class="truncate">MDTU System Live Support & News Alerts Active. Sample Data Loaded.</span>
+            <span id="headerAlertTickerText" class="truncate">Loading...</span>
         </div>
-        <div class="admin-only hidden flex gap-1 shrink-0">
-            <button onclick="openManageAlertModal()" class="bg-red-900 hover:bg-red-800 text-white text-[10px] px-2 py-0.5 rounded border border-red-500">Manage Alerts</button>
-        </div>
+        <button onclick="openManageAlertModal()" class="admin-only hidden shrink-0 bg-red-900 hover:bg-red-800 text-white text-[10px] px-2 py-0.5 rounded border border-red-500">Manage Alert</button>
     </div>
 
-    <div class="bg-amber-100 text-amber-950 px-3 sm:px-4 py-2 text-xs font-semibold border-t border-amber-300 shadow-inner flex flex-col gap-1">
-        <div class="flex items-center justify-between font-bold">
-            <span class="flex items-center gap-1 text-amber-900">🔔 Active Notifications & Documents:</span>
-            <span class="text-[10px] text-slate-600">Click to view/download</span>
-        </div>
-        <div id="headerYellowAlertListContainer" class="flex flex-wrap gap-2 max-h-20 overflow-y-auto">
-            <span class="text-slate-500 italic text-[11px]">No active notifications/files right now.</span>
-        </div>
+    <div id="headerYellowAlertBar" class="hidden bg-amber-100 text-amber-950 px-3 sm:px-4 py-1.5 text-xs font-semibold border-t border-amber-300 shadow-inner">
+        <div id="headerYellowAlertListContainer" class="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-0.5"></div>
     </div>
 
-    <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div class="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
-            <div class="flex items-center gap-3">
-                <div class="w-12 h-12 flex items-center justify-center shrink-0">
-                    <img id="headerLogoImg" class="max-w-full max-h-full object-contain hidden" alt="MDTU Official Logo" />
-                    <span id="headerDefaultIcon" class="text-3xl">🏛️</span>
+    <div class="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+            <button onclick="toggleMobileSidebar()" class="md:hidden shrink-0 bg-indigo-800 text-amber-300 w-10 h-10 rounded-lg border border-indigo-600 text-xl leading-none" aria-label="Open menu">☰</button>
+            <div class="h-12 sm:h-16 flex items-center justify-center shrink-0">
+                <img id="headerLogoImg" src="assets/nwp-logo.png" width="219" height="256" class="h-full w-auto object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.45)]" alt="North Western Provincial Council Emblem" />
                 </div>
-                <div>
-                    <h1 class="text-base sm:text-xl font-extrabold tracking-wide uppercase text-red-500 drop-shadow">Training Management System</h1>
-                    <h2 class="text-xs sm:text-base font-black tracking-wide uppercase text-slate-200">Management Development and Training Unit</h2>
-                    <p class="text-amber-400 font-bold text-[10px] sm:text-xs tracking-wider">MDTU - NORTH WESTERN PROVINCE (NWP)</p>
+            <div class="min-w-0">
+                <h1 class="text-sm sm:text-xl font-extrabold tracking-wide uppercase text-red-400 leading-tight">Training Management System</h1>
+                <h2 class="text-[10px] sm:text-sm font-black tracking-wide uppercase text-slate-200 leading-tight">Management Development and Training Unit</h2>
+                <p class="text-amber-400 font-bold text-[9px] sm:text-xs tracking-wider">MDTU - NORTH WESTERN PROVINCE (NWP)</p>
                 </div>
-            </div>
-            <!-- Mobile Menu Toggle Button -->
-            <button onclick="toggleMobileSidebar()" class="md:hidden bg-indigo-800 text-amber-300 p-2 rounded-lg border border-indigo-600 text-lg">
-                ☰
-            </button>
         </div>
         
-        <div class="logged-in-only hidden flex flex-wrap items-center gap-2">
-            <!-- Reports Dropdown -->
-            <div class="relative group">
-                <button class="bg-indigo-800 hover:bg-indigo-700 text-amber-300 text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1 border border-indigo-600">
-                    📊 Reports ▾
-                </button>
-                <div class="absolute hidden group-hover:block bg-indigo-950 text-white border border-indigo-700 rounded shadow-xl py-1 w-56 z-50 right-0 sm:left-0">
-                    <a href="#" onclick="switchTab('dashboard')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Executive Dashboard</a>
-                    <a href="#" onclick="switchTab('progress-reports')" class="block px-4 py-2 text-xs hover:bg-indigo-800 text-amber-300 font-bold">📑 Monthly & Annual Progress</a>
-                    <a href="#" onclick="switchTab('training-plan-report')" class="block px-4 py-2 text-xs hover:bg-indigo-800 text-teal-300 font-bold">📋 Annual Training Plan Report</a>
-                    <a href="#" onclick="switchTab('resource-persons-master-report')" class="block px-4 py-2 text-xs hover:bg-indigo-800 text-purple-300 font-bold">👥 Resource Persons Directory</a>
-                    <a href="#" onclick="switchTab('office-report')" class="block px-4 py-2 text-xs hover:bg-indigo-800">Office-wise 12h Status</a>
-                    <a href="#" onclick="switchTab('office-designation-report')" class="block px-4 py-2 text-xs hover:bg-indigo-800">Designation Hours Breakdown</a>
-                    <a href="#" onclick="switchTab('training-namelist-report')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Participant Name List</a>
-                    <a href="#" onclick="switchTab('duty-report')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Duty Hours Report</a>
-                    <a href="#" onclick="switchTab('analytics')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Program Evaluation Analytics</a>
-                    <a href="#" onclick="switchTab('resource-report')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Speaker Performance Rating</a>
-                    <a href="#" onclick="switchTab('pending')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Incomplete Officers List</a>
-                    <a href="#" onclick="switchTab('completed')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Completed Summary</a>
-                </div>
-            </div>
-
-            <!-- Messages Dropdown -->
-            <div class="relative group">
-                <button class="bg-indigo-800 hover:bg-indigo-700 text-emerald-300 text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1 border border-indigo-600">
-                    💬 Support ▾
-                </button>
-                <div class="absolute hidden group-hover:block bg-indigo-950 text-white border border-indigo-700 rounded shadow-xl py-1 w-48 z-50 right-0 sm:left-0">
-                    <a href="#" onclick="switchTab('notifications-tab')" class="block px-4 py-2 text-xs hover:bg-indigo-800">Official Notifications</a>
-                    <a href="#" onclick="switchTab('live-chat-tab')" class="block px-4 py-2 text-xs hover:bg-indigo-800">Live Support Chat</a>
-                </div>
-            </div>
-
-            <!-- Settings & Data Entry Dropdown -->
-            <div class="relative group">
-                <button class="bg-indigo-800 hover:bg-indigo-700 text-slate-200 text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1 border border-indigo-600">
-                    ⚙️ Settings ▾
-                </button>
-                <div class="absolute hidden group-hover:block bg-indigo-950 text-white border border-indigo-700 rounded shadow-xl py-1 w-60 z-50 right-0 sm:left-0">
-                    <a href="#" onclick="switchTab('add-record')" class="block px-4 py-2 text-xs hover:bg-indigo-800">Add Training Record</a>
-                    <a href="#" onclick="switchTab('progress-entry')" class="block px-4 py-2 text-xs hover:bg-indigo-800 text-amber-300 font-bold super-user-only hidden">📈 Progress Data Entry</a>
-                    <a href="#" onclick="switchTab('training-plan-entry')" class="block px-4 py-2 text-xs hover:bg-indigo-800 text-teal-300 font-bold super-user-only hidden">📝 Annual Training Plan Entry</a>
-                    <a href="#" onclick="switchTab('manage-programs')" class="block px-4 py-2 text-xs hover:bg-indigo-800 only-admin-and-super hidden">Manage Programs & Resources</a>
-                    <a href="#" onclick="switchTab('resource-upload')" class="block px-4 py-2 text-xs hover:bg-indigo-800 super-admin-only hidden">👥 Upload Resource Person Master</a>
-                    <a href="#" onclick="switchTab('annual-excel-upload')" class="block px-4 py-2 text-xs hover:bg-indigo-800 super-admin-only hidden">Annual Staff Matrix Excel</a>
-                    <a href="#" onclick="switchTab('template-settings')" class="block px-4 py-2 text-xs hover:bg-indigo-800 super-admin-only hidden">Certificate Permanent Templates</a>
-                    <a href="#" onclick="switchTab('user-management')" class="block px-4 py-2 text-xs hover:bg-indigo-800 super-admin-only hidden">User Account Management</a>
-                </div>
-            </div>
-
-            <!-- Other Dropdown -->
-            <div class="relative group">
-                <button class="bg-indigo-800 hover:bg-indigo-700 text-slate-200 text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1 border border-indigo-600">
-                    📁 Other ▾
-                </button>
-                <div class="absolute hidden group-hover:block bg-indigo-950 text-white border border-indigo-700 rounded shadow-xl py-1 w-52 z-50 right-0 sm:left-0">
-                    <a href="#" onclick="switchTab('certificate')" class="block px-4 py-2 text-xs hover:bg-indigo-800">Generate e-Certificate</a>
-                    <a href="#" onclick="switchTab('confirm-attendance')" class="block px-4 py-2 text-xs hover:bg-indigo-800 admin-only hidden">Verify & Confirm Attendance</a>
-                    <a href="#" onclick="switchTab('archive-tab')" class="super-admin-only hidden block px-4 py-2 text-xs hover:bg-indigo-800">Archive (1 - 100 Years)</a>
-                </div>
-            </div>
-        </div>
-
-        <!-- Header Actions: Login, Translate -->
-        <div class="flex flex-wrap items-center gap-2 sm:gap-3 w-full md:w-auto justify-between md:justify-end">
+        <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
             <button id="authBtn" onclick="toggleAuthModal()" class="bg-amber-500 hover:bg-amber-400 text-indigo-950 text-xs font-black px-3 py-1.5 rounded-lg shadow transition">
                 🔐 Login
             </button>
 
             <div class="bg-indigo-950/90 px-2 py-1 rounded-lg border border-indigo-700/80 flex items-center gap-1 shadow-inner">
-                <span class="text-[10px] font-black text-amber-400 uppercase tracking-wider">🌐 Translate:</span>
+                <span class="text-[10px] font-black text-amber-400 uppercase tracking-wider">🌐<span class="hidden sm:inline"> Translate:</span></span>
                 <div id="google_translate_element"></div>
             </div>
 
-            <div id="liveStatus" class="bg-emerald-950 text-emerald-400 border border-emerald-600 px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Active
+            <div id="liveStatus" class="bg-slate-800 text-slate-300 border border-slate-600 px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-slate-400"></span> Connecting...
             </div>
 
-            <div class="admin-only hidden bg-indigo-950 px-2 py-1 rounded border border-indigo-700 flex items-center gap-1">
+            <div class="logged-in-only hidden bg-indigo-950 px-2 py-1 rounded border border-indigo-700 flex items-center gap-1">
                 <label for="activeYearSelect" class="text-xs font-semibold text-indigo-200">Year:</label>
-                <select id="activeYearSelect" onchange="switchYear()" class="bg-indigo-900 text-white font-bold text-xs px-1 py-0.5 rounded outline-none border border-indigo-500">
-                </select>
+                <select id="activeYearSelect" onchange="switchYear()" class="bg-indigo-900 text-white font-bold text-xs px-1 py-0.5 rounded outline-none border border-indigo-500"></select>
             </div>
         </div>
     </div>
 </header>
 
+<div id="sidebarOverlay" onclick="closeMobileSidebar()" class="hidden fixed inset-0 bg-slate-900/60 z-40 md:hidden no-print"></div>
+
 <div class="flex flex-1 max-w-7xl w-full mx-auto relative">
 
-    <!-- Left Sidebar Navigation (Responsive Drawer on Mobile) -->
-    <aside id="sidebarNav" class="w-64 bg-indigo-950 text-slate-200 min-h-screen p-4 space-y-2 no-print flex-shrink-0 border-r border-indigo-800 hidden md:block absolute md:relative z-30 inset-y-0 left-0 shadow-2xl md:shadow-none transition-all duration-300">
-        <div class="flex justify-between items-center md:hidden mb-2 pb-2 border-b border-indigo-800">
+    <!-- Left Sidebar Navigation (slide-in drawer on mobile) -->
+    <aside id="sidebarNav" class="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] overflow-y-auto md:static md:z-auto md:w-64 md:max-w-none md:overflow-visible md:min-h-screen bg-indigo-950 text-slate-200 p-4 space-y-1 no-print flex-shrink-0 border-r border-indigo-800 shadow-2xl md:shadow-none">
+        <div class="flex justify-between items-center md:hidden mb-3 pb-2 border-b border-indigo-800">
             <span class="text-xs font-bold text-amber-400 uppercase">Navigation Menu</span>
-            <button onclick="toggleMobileSidebar()" class="text-white font-bold text-sm bg-indigo-900 px-2 py-0.5 rounded">✕ Close</button>
+            <button onclick="closeMobileSidebar()" class="text-white font-bold text-sm bg-indigo-900 px-3 py-1 rounded" aria-label="Close menu">✕</button>
         </div>
-        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-2 hidden md:block">Navigation Menu</p>
-        
-        <button onclick="switchTab('add-record'); toggleMobileSidebar();" id="tab-add-record" class="tab-btn active w-full text-left text-xs py-2.5 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2">
-            ➕ Add Training Record
-        </button>
-        <button onclick="switchTab('attendance-cert'); toggleMobileSidebar();" id="tab-attendance-cert" class="tab-btn w-full text-left text-xs py-2.5 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2">
-            📄 Print Attendance Slip
-        </button>
-        <button onclick="switchTab('verification'); toggleMobileSidebar();" id="tab-verification" class="tab-btn w-full text-left text-xs py-2.5 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2">
-            📜 Attendance Verification
-        </button>
-        <button onclick="switchTab('notifications-tab'); toggleMobileSidebar();" id="tab-notifications-tab" class="tab-btn w-full text-left text-xs py-2.5 px-3 rounded-lg hover:bg-indigo-900 transition text-amber-300 flex items-center gap-2">
-            🔔 Notifications & Notes
-        </button>
-        <button onclick="switchTab('live-chat-tab'); toggleMobileSidebar();" id="tab-live-chat-tab" class="tab-btn w-full text-left text-xs py-2.5 px-3 rounded-lg hover:bg-indigo-900 transition text-emerald-300 flex items-center gap-2">
-            💬 Live Support Chat
-        </button>
+        <div id="sidebarUserBadge" class="logged-in-only hidden mb-3 p-2.5 rounded-lg bg-indigo-900 border border-indigo-700 text-[11px]"></div>
 
-        <!-- Reports Accessible to Superuser, Admin & Super Admin -->
-        <div class="logged-in-only hidden pt-3 border-t border-indigo-800 space-y-2">
-            <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-300 px-2">Shared Reports</p>
-            <button onclick="switchTab('progress-reports'); toggleMobileSidebar();" id="tab-progress-reports" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2 text-amber-300">
-                📑 Monthly/Annual Presentations
-            </button>
-            <button onclick="switchTab('training-plan-report'); toggleMobileSidebar();" id="tab-training-plan-report" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2 text-teal-300">
-                📋 Annual Training Plan Report
-            </button>
-            <button onclick="switchTab('resource-persons-master-report'); toggleMobileSidebar();" id="tab-resource-persons-master-report" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2 text-purple-300">
-                👥 Resource Persons Directory
-            </button>
-            <button onclick="switchTab('office-report'); toggleMobileSidebar();" id="tab-office-report" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition">🏢 Office 12h Status</button>
-            <button onclick="switchTab('office-designation-report'); toggleMobileSidebar();" id="tab-office-designation-report" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition">📊 Designation Breakdown</button>
-            <button onclick="switchTab('certificate'); toggleMobileSidebar();" id="tab-certificate" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition">🎓 e-Certificate</button>
+        <div class="logged-in-only hidden mb-2">
+            <button onclick="switchTab('home')" id="tab-home" class="tab-btn !text-sm !font-black text-amber-300 bg-indigo-900/60">🏠 My Dashboard</button>
         </div>
         
-        <!-- Superuser Specific Data Entry Activities -->
-        <div class="super-user-only hidden pt-3 border-t border-indigo-800 space-y-2">
-            <p class="text-[10px] font-bold uppercase tracking-wider text-amber-400 px-2">Superuser Data Entry</p>
-            <button onclick="switchTab('progress-entry'); toggleMobileSidebar();" id="tab-progress-entry" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2 text-amber-200">
-                📈 Monthly Progress Entry
-            </button>
-            <button onclick="switchTab('training-plan-entry'); toggleMobileSidebar();" id="tab-training-plan-entry" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2 text-teal-200">
-                📝 Annual Training Plan Entry
-            </button>
-        </div>
+        <details class="nav-group" data-tile-color="sky" open>
+            <summary class="nav-heading">Officers</summary>
+            <button onclick="switchTab('add-record')" id="tab-add-record" class="tab-btn active">➕ Add Training Record</button>
+            <button onclick="switchTab('attendance-cert')" id="tab-attendance-cert" class="tab-btn">📄 Attendance Certificate</button>
+            <button onclick="switchTab('certificate')" id="tab-certificate" class="tab-btn">🎓 e-Certificate (Completion)</button>
+            <button onclick="switchTab('verification')" id="tab-verification" class="tab-btn">📜 Training History</button>
+            <button onclick="switchTab('notifications-tab')" id="tab-notifications-tab" class="tab-btn text-amber-300">🔔 Notifications & Notes</button>
+            <button onclick="switchTab('live-chat-tab')" id="tab-live-chat-tab" class="tab-btn text-emerald-300">💬 Live Support Chat</button>
+        </details>
 
-        <!-- Superadmin Specific System Functions -->
-        <div class="super-admin-only hidden pt-3 border-t border-indigo-800 space-y-2">
-            <p class="text-[10px] font-bold uppercase tracking-wider text-rose-400 px-2">Super Admin Control</p>
-            <button onclick="switchTab('resource-upload'); toggleMobileSidebar();" id="tab-resource-upload" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2">
-                👥 Upload Resource Master
-            </button>
-            <button onclick="switchTab('annual-excel-upload'); toggleMobileSidebar();" id="tab-annual-excel-upload" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2">
-                📁 Annual Staff Matrix
-            </button>
-            <button onclick="switchTab('template-settings'); toggleMobileSidebar();" id="tab-template-settings" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition flex items-center gap-2">
-                🔒 Permanent Templates
-            </button>
-            <button onclick="switchTab('archive-tab'); toggleMobileSidebar();" id="tab-archive-tab" class="tab-btn w-full text-left text-xs py-2 px-3 rounded-lg hover:bg-indigo-900 transition text-indigo-300 flex items-center gap-2">
-                🏛️ Data Archive (1-100 Yrs)
-            </button>
-        </div>
+        <details class="nav-group admin-only hidden" data-tile-color="rose">
+            <summary class="nav-heading text-rose-300">Administration</summary>
+            <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn">📊 Executive Dashboard</button>
+            <button onclick="switchTab('confirm-attendance')" id="tab-confirm-attendance" class="tab-btn">✅ Verify & Confirm Attendance</button>
+            <button onclick="switchTab('cert-register')" id="tab-cert-register" class="tab-btn text-amber-200">🧾 Issued Certificates Register</button>
+            <button onclick="switchTab('manage-programs')" id="tab-manage-programs" class="tab-btn">⚙️ Programs & Venues</button>
+            <button onclick="switchTab('training-namelist-report')" id="tab-training-namelist-report" class="tab-btn">📑 Participant Name List</button>
+            <button onclick="switchTab('analytics')" id="tab-analytics" class="tab-btn">📈 Evaluation Analytics</button>
+            <button onclick="switchTab('resource-report')" id="tab-resource-report" class="tab-btn">🎓 Lecturer Performance</button>
+            <button onclick="switchTab('duty-report')" id="tab-duty-report" class="tab-btn">📋 Duty Hours Report</button>
+            <button onclick="switchTab('pending')" id="tab-pending" class="tab-btn">⚠️ Incomplete Officers</button>
+            <button onclick="switchTab('completed')" id="tab-completed" class="tab-btn">🟢 Completed Officers</button>
+            <button onclick="switchTab('progress-reports')" id="tab-progress-reports" class="tab-btn text-amber-300">📑 Monthly Progress (All Months)</button>
+        </details>
+
+        <details class="nav-group super-user-only hidden" data-tile-color="amber">
+            <summary class="nav-heading text-amber-400">Superuser Data Entry</summary>
+            <button onclick="switchTab('progress-entry')" id="tab-progress-entry" class="tab-btn text-amber-200">📈 Monthly Progress Entry</button>
+            <button onclick="switchTab('training-plan-entry')" id="tab-training-plan-entry" class="tab-btn text-teal-200">📝 Annual Training Plan Entry</button>
+        </details>
+
+        <details class="nav-group logged-in-only hidden" data-tile-color="indigo">
+            <summary class="nav-heading text-indigo-300">Shared Reports</summary>
+            <button onclick="switchTab('training-plan-report')" id="tab-training-plan-report" class="tab-btn text-teal-300">📋 Annual Training Plan Report</button>
+            <button onclick="switchTab('resource-persons-master-report')" id="tab-resource-persons-master-report" class="tab-btn text-purple-300">👥 Resource Persons Directory</button>
+            <button onclick="switchTab('office-report')" id="tab-office-report" class="tab-btn">🏢 Office 12h Status</button>
+            <button onclick="switchTab('office-designation-report')" id="tab-office-designation-report" class="tab-btn">📊 Designation Breakdown</button>
+        </details>
+
+        <details class="nav-group super-admin-only hidden" data-tile-color="violet">
+            <summary class="nav-heading text-rose-400">Super Admin Control</summary>
+            <button onclick="switchTab('template-settings')" id="tab-template-settings" class="tab-btn">🔒 Certificate Templates</button>
+            <button onclick="switchTab('user-management')" id="tab-user-management" class="tab-btn">👑 User Accounts</button>
+            <button onclick="switchTab('audit-log')" id="tab-audit-log" class="tab-btn text-emerald-300">🛡️ Audit Log & Security</button>
+            <button onclick="switchTab('resource-upload')" id="tab-resource-upload" class="tab-btn">👥 Upload Resource Master</button>
+            <button onclick="switchTab('annual-excel-upload')" id="tab-annual-excel-upload" class="tab-btn">📁 Annual Staff Matrix</button>
+            <button onclick="switchTab('archive-tab')" id="tab-archive-tab" class="tab-btn text-indigo-300">🏛️ Database Backup</button>
+        </details>
     </aside>
 
     <!-- Main Content Area -->
     <main class="flex-1 p-3 sm:p-6 space-y-6 overflow-x-hidden w-full max-w-full">
+
+        <!-- Back-to-dashboard bar (logged-in users, every page except the dashboard) -->
+        <div id="breadcrumbBar" class="hidden no-print flex items-center gap-2 text-xs -mb-2">
+            <button onclick="switchTab('home')" class="bg-indigo-900 hover:bg-indigo-800 text-amber-300 font-bold px-3 py-1.5 rounded-lg shadow shrink-0">🏠 Dashboard</button>
+            <span class="text-slate-400">›</span>
+            <span id="breadcrumbTitle" class="font-bold text-indigo-950 truncate"></span>
+        </div>
+
+        <!-- HOME DASHBOARD (all logged-in roles) -->
+        <div id="view-home" class="tab-view hidden logged-in-only w-full space-y-5 no-print">
+            <div class="rounded-2xl bg-gradient-to-r from-indigo-950 via-indigo-900 to-indigo-800 text-white p-5 sm:p-6 shadow-lg flex flex-wrap items-center justify-between gap-4 relative overflow-hidden">
+                <img src="assets/nwp-logo.png" alt="" class="absolute right-6 top-1/2 -translate-y-1/2 h-36 opacity-10 pointer-events-none">
+                <div class="relative">
+                    <p id="homeGreeting" class="text-amber-400 text-[11px] font-black uppercase tracking-widest">Welcome</p>
+                    <h2 id="homeUserName" class="text-xl sm:text-2xl font-extrabold"></h2>
+                    <p id="homeRoleText" class="text-xs text-indigo-200 mt-1"></p>
+                </div>
+                <div class="flex flex-wrap gap-2 relative">
+                    <button onclick="openChangePasswordModal(false)" class="bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold px-3 py-2 rounded-lg">🔑 Change Password</button>
+                    <button onclick="handleLogout()" class="bg-amber-500 hover:bg-amber-400 text-indigo-950 text-xs font-black px-3 py-2 rounded-lg">🔓 Logout</button>
+                </div>
+            </div>
+            <div id="homeStats" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+            <div id="homeTiles" class="space-y-5"></div>
+            <p class="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-xl p-3">🛡️ For security you are logged out automatically after 30 minutes without activity. Every change made in the system is written to a permanent, tamper-evident audit log.</p>
+        </div>
+
+        <!-- ISSUED CERTIFICATES REGISTER (admin / super admin) -->
+        <div id="view-cert-register" class="tab-view hidden admin-only w-full space-y-4">
+            <div class="bg-white p-4 sm:p-6 rounded-xl shadow-md border border-amber-200 space-y-4 no-print">
+                <div class="border-b pb-3">
+                    <h2 class="text-lg sm:text-xl font-bold text-indigo-900 flex items-center gap-2"><span>🧾</span> Issued Certificates Register</h2>
+                    <p class="text-xs text-slate-500 mt-1">Every attendance certificate and e-certificate that is downloaded or printed is recorded here automatically. Download the list as a PDF for files and audits.</p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div class="lg:col-span-2">
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Program</label>
+                        <select id="regProgram" class="w-full p-2 text-xs border rounded bg-white"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Certificate</label>
+                        <select id="regType" class="w-full p-2 text-xs border rounded bg-white">
+                            <option value="attendance">Certificate of Attendance</option>
+                            <option value="completion">e-Certificate (Completion)</option>
+                            <option value="any">Both types</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">List</label>
+                        <select id="regScope" class="w-full p-2 text-xs border rounded bg-white">
+                            <option value="issued">Issued certificates only</option>
+                            <option value="confirmed">All confirmed participants</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Issued from</label>
+                            <input type="date" id="regFrom" class="w-full p-2 text-xs border rounded bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">to</label>
+                            <input type="date" id="regTo" class="w-full p-2 text-xs border rounded bg-white">
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="loadCertRegister()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-4 py-2 rounded-lg shadow">🔍 Show List</button>
+                    <button onclick="certRegisterPDF('save')" class="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-lg shadow">📥 Download PDF</button>
+                    <button onclick="certRegisterPDF('print')" class="bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs px-4 py-2 rounded-lg shadow">🖨️ Print</button>
+                    <button onclick="certRegisterExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-lg shadow">📊 Excel</button>
+                </div>
+            </div>
+            <div id="regSummary" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+            <div class="bg-white rounded-xl shadow-md border border-slate-200 overflow-x-auto">
+                <table class="w-full text-left text-xs border-collapse min-w-[980px]">
+                    <thead>
+                        <tr class="bg-indigo-900 text-white font-bold">
+                            <th class="p-2">#</th>
+                            <th class="p-2">Certificate No</th>
+                            <th class="p-2">Name</th>
+                            <th class="p-2">NIC</th>
+                            <th class="p-2">Designation / Office</th>
+                            <th class="p-2">Program</th>
+                            <th class="p-2">Program Dates</th>
+                            <th class="p-2 text-center">Hours</th>
+                            <th class="p-2">First Issued</th>
+                            <th class="p-2 text-center">Times</th>
+                        </tr>
+                    </thead>
+                    <tbody id="regTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- AUDIT LOG (super admin) -->
+        <div id="view-audit-log" class="tab-view hidden super-admin-only w-full space-y-4">
+            <div class="bg-white p-4 sm:p-6 rounded-xl shadow-md border border-emerald-200 space-y-4">
+                <div class="border-b pb-3 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold text-indigo-900 flex items-center gap-2"><span>🛡️</span> Audit Log & Security</h2>
+                        <p class="text-xs text-slate-500 mt-1 max-w-2xl">A permanent record of logins, failed logins, every change and deletion (with the full deleted data), certificate issues and backups. Entries cannot be edited or deleted, and each entry is sealed to the previous one so any tampering is detected.</p>
+                    </div>
+                    <button onclick="verifyAuditLog()" class="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs px-4 py-2 rounded-lg shadow shrink-0">✔️ Verify Integrity</button>
+                </div>
+                <div id="auditIntegrity" class="hidden text-xs font-bold rounded-lg p-3"></div>
+                <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">From</label>
+                        <input type="date" id="auditFrom" class="w-full p-2 text-xs border rounded bg-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">To</label>
+                        <input type="date" id="auditTo" class="w-full p-2 text-xs border rounded bg-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">User</label>
+                        <select id="auditUser" class="w-full p-2 text-xs border rounded bg-white"><option value="">All users</option></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Search</label>
+                        <input type="text" id="auditSearch" placeholder="e.g. delete, login, NIC" class="w-full p-2 text-xs border rounded bg-white">
+                    </div>
+                    <div class="flex items-end gap-2">
+                        <button onclick="loadAuditLog()" class="flex-1 bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-3 py-2 rounded-lg shadow">🔍 Show</button>
+                        <button onclick="auditLogPDF()" class="bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs px-3 py-2 rounded-lg shadow" title="Download PDF">📥 PDF</button>
+                        <button onclick="auditLogExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-2 rounded-lg shadow" title="Download Excel">📊</button>
+                    </div>
+                </div>
+                <p id="auditCount" class="text-[11px] text-slate-500"></p>
+                <div class="overflow-x-auto border rounded-lg">
+                    <table class="w-full text-left text-xs border-collapse min-w-[900px]">
+                        <thead>
+                            <tr class="bg-slate-800 text-white font-bold">
+                                <th class="p-2">#</th>
+                                <th class="p-2">Date & Time</th>
+                                <th class="p-2">User</th>
+                                <th class="p-2">Action</th>
+                                <th class="p-2">Record</th>
+                                <th class="p-2">Details</th>
+                                <th class="p-2">IP Address</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
         <!-- 1. ADD RECORD TAB -->
         <div id="view-add-record" class="tab-view max-w-3xl mx-auto no-print w-full">
@@ -337,6 +463,7 @@
                     <h2 class="text-lg sm:text-xl font-bold text-indigo-900 flex items-center gap-2">
                         <span>➕</span> Add New Training Record & Evaluation
                     </h2>
+                    <p class="text-xs text-slate-500 mt-1">Submit after attending a program. MDTU confirms your attendance, then your certificates can be downloaded.</p>
                 </div>
                 
                 <form id="addTrainingForm" onsubmit="handleSingleSubmit(event)" class="space-y-6">
@@ -346,13 +473,12 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-xs font-semibold text-slate-700 mb-1">NIC / Officer ID * (Smart Auto-Detection)</label>
-                                <input type="text" id="nicInput" required oninput="handleNicSmartInput(this.value)" placeholder="e.g. 833161750V or 198331601750" class="w-full p-2.5 text-sm border rounded-lg outline-none uppercase font-mono bg-white focus:ring-2 focus:ring-indigo-500">
+                                <input type="text" id="nicInput" required inputmode="text" autocomplete="off" oninput="handleNicSmartInput(this.value)" placeholder="e.g. 833161750V or 198331601750" class="w-full p-2.5 text-sm border rounded-lg outline-none uppercase font-mono bg-white focus:ring-2 focus:ring-indigo-500">
                                 <span id="nicFormatNotice" class="text-[10px] font-bold text-indigo-600 mt-1 block"></span>
                             </div>
-
                             <div>
                                 <label class="block text-xs font-semibold text-slate-700 mb-1">Officer Name * (Auto-filled / Editable)</label>
-                                <input type="text" id="nameInput" required list="officerNameDatalist" placeholder="Officer Name" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
+                                <input type="text" id="nameInput" required list="officerNameDatalist" autocomplete="off" onchange="onOfficerNameChosen()" placeholder="Officer Name" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
                                 <datalist id="officerNameDatalist"></datalist>
                             </div>
                         </div>
@@ -368,12 +494,10 @@
                                     <option value="Office Assistant">
                                 </datalist>
                             </div>
-
                             <div>
                                 <label class="block text-xs font-semibold text-slate-700 mb-1">Office / Department * (Auto-filled / Select)</label>
                                 <input type="text" id="officeInput" list="officeDatalist" required placeholder="Type or select Office" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
                                 <datalist id="officeDatalist">
-                                    <option value="All Account, With out User">
                                     <option value="District Secretariat, Kurunegala">
                                 </datalist>
                             </div>
@@ -383,19 +507,24 @@
                     <div class="bg-slate-50 p-3 sm:p-4 rounded-lg border border-slate-200 space-y-4">
                         <h3 class="text-xs font-bold text-indigo-900 uppercase tracking-wider">2. Program Details</h3>
                         <div>
-                            <label class="block text-xs font-semibold text-slate-600 mb-1">Training Program Name * (Type or Select)</label>
-                            <input type="text" id="trainingNameSelect" list="programDatalist" required onchange="onProgramSelected()" oninput="onProgramSelected()" placeholder="Type to search & select program..." class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
-                            <datalist id="programDatalist"></datalist>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">Training Program *</label>
+                            <select id="trainingNameSelect" required onchange="onProgramSelected()" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
+                                <option value="">-- Select the program you attended --</option>
+                            </select>
                         </div>
 
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Date (First Day) *</label>
-                                <input type="date" id="dateInput" required class="w-full p-2.5 text-sm border rounded-lg outline-none bg-slate-100" readonly>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div class="sm:col-span-3">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Venue / Location</label>
+                                <input type="text" id="venueInput" readonly placeholder="Filled automatically from the program" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-slate-100 font-semibold text-indigo-950">
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Program Dates</label>
+                                <input type="text" id="dateInput" readonly placeholder="Filled automatically" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-slate-100 font-mono">
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-slate-600 mb-1">Hours *</label>
-                                <input type="number" id="hoursInput" min="1" max="200" required placeholder="e.g. 6" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-slate-100" readonly>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Hours</label>
+                                <input type="text" id="hoursInput" readonly placeholder="-" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-slate-100 font-bold">
                             </div>
                         </div>
                     </div>
@@ -436,7 +565,7 @@
                         </div>
                     </div>
 
-                    <button type="submit" id="saveBtn" class="w-full bg-indigo-900 hover:bg-indigo-800 text-white font-bold py-3.5 rounded-lg shadow-md transition text-sm">
+                    <button type="submit" id="saveBtn" class="w-full bg-indigo-900 hover:bg-indigo-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-lg shadow-md transition text-sm">
                         Save Training Record & Evaluation
                     </button>
                 </form>
@@ -461,11 +590,11 @@
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Office / Department</label>
-                            <input type="text" id="progUserOffice" readonly class="w-full p-2.5 text-xs border rounded bg-slate-100 font-bold text-indigo-950">
+                            <input type="text" id="progUserOffice" required list="officeDatalist" onchange="autoCalculateOfficeStaffProgress(); populateAutoMdtuPrograms(this.value)" placeholder="Auto-filled / type office" class="w-full p-2.5 text-xs border rounded bg-white font-bold text-indigo-950">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Designation</label>
-                            <input type="text" id="progUserDesignation" readonly class="w-full p-2.5 text-xs border rounded bg-slate-100 font-bold text-slate-800">
+                            <input type="text" id="progUserDesignation" list="designationDatalist" placeholder="Auto-filled / type" class="w-full p-2.5 text-xs border rounded bg-white font-bold text-slate-800">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Reporting Month *</label>
@@ -545,52 +674,52 @@
         </div>
 
         <!-- PROGRESS PRESENTATION SLIDES & REPORTS TAB -->
-        <div id="view-progress-reports" class="tab-view hidden max-w-5xl mx-auto space-y-6 w-full">
+        <div id="view-progress-reports" class="tab-view hidden space-y-6 admin-only w-full">
             <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
                 <div class="border-b-2 border-indigo-900 pb-4 text-center">
                     <h3 class="text-xs font-black text-amber-600 uppercase tracking-widest">Management Development and Training Unit - NWP</h3>
-                    <h2 class="text-base sm:text-xl font-black text-indigo-950 uppercase mt-0.5">Monthly & Annual Progress Presentation Center</h2>
-                    <p class="text-xs text-slate-500">Accessible to Superuser, Admin, and Super Admin</p>
+                    <h2 class="text-base sm:text-xl font-black text-indigo-950 uppercase mt-0.5">Monthly Progress — All Months</h2>
+                    <p class="text-xs text-slate-500">Admin and Super Admin only. January to December in one table, ready for PDF.</p>
                 </div>
 
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 no-print">
-                    <p class="text-xs text-slate-600 font-medium">Download formal slides as presentation-ready PDF or raw data as Excel.</p>
+                    <p class="text-xs text-slate-600 font-medium">Every month is listed for each office. Months with no submission stay in the table.</p>
                     <div class="flex gap-2 flex-wrap">
-                        <button onclick="downloadPresentationPDF()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📄 Download Presentation PDF</button>
-                        <button onclick="exportProgressReportToExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📊 Export Excel</button>
+                        <button onclick="downloadPresentationPDF()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📄 Download PDF</button>
+                        <button onclick="exportTableToExcel('progressMonthTable', 'Monthly_Progress_All_Months')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📊 Export Excel</button>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-3 sm:p-4 rounded-lg border no-print">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Filter Presentation Mode:</label>
-                        <select id="presViewType" onchange="renderProgressPresentations()" class="w-full p-2 text-xs border rounded bg-white font-bold">
-                            <option value="annual">Annual Consolidated Presentation (12 Months)</option>
-                            <option value="monthly">Monthly Specific Presentation</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Filter Office:</label>
-                        <select id="presOfficeSelect" onchange="renderProgressPresentations()" class="w-full p-2 text-xs border rounded bg-white">
-                            <option value="all">All Offices</option>
-                        </select>
-                    </div>
-                    <div id="presMonthWrapper" class="hidden">
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Select Month:</label>
-                        <select id="presMonthSelect" onchange="renderProgressPresentations()" class="w-full p-2 text-xs border rounded bg-white font-bold">
-                            <option value="all">All Months</option>
-                            <option value="January">January</option><option value="February">February</option>
-                            <option value="March">March</option><option value="April">April</option>
-                            <option value="May">May</option><option value="June">June</option>
-                            <option value="July">July</option><option value="August">August</option>
-                            <option value="September">September</option><option value="October">October</option>
-                            <option value="November">November</option><option value="December">December</option>
-                        </select>
-                    </div>
+                <div class="bg-slate-50 p-3 sm:p-4 rounded-lg border no-print max-w-md">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Office</label>
+                    <select id="presOfficeSelect" onchange="renderProgressPresentations()" class="w-full p-2 text-xs border rounded bg-white">
+                        <option value="all">All Offices</option>
+                    </select>
                 </div>
 
-                <!-- Presentation Slide Container -->
-                <div id="presentationSlidesArea" class="space-y-8 flex flex-col items-center w-full overflow-x-auto">
+                <div class="overflow-x-auto">
+                <div id="presentationPdfContainer" class="space-y-3">
+                    <div class="text-center border-b pb-3">
+                        <h3 class="text-xs font-black text-amber-600 uppercase">Management Development and Training Unit - NWP</h3>
+                        <h4 class="text-base font-black text-indigo-950 uppercase">Monthly Progress Report — All Months</h4>
+                        <p id="presReportSubtitle" class="text-xs font-semibold text-slate-500 mt-1"></p>
+                    </div>
+                    <div>
+                        <table id="progressMonthTable" class="w-full text-left text-xs border-collapse border border-slate-300 min-w-[900px]">
+                            <thead>
+                                <tr class="bg-indigo-900 text-white font-bold">
+                                    <th class="p-2 border border-indigo-800">Office</th>
+                                    <th class="p-2 border border-indigo-800">Month</th>
+                                    <th class="p-2 border border-indigo-800">Special Remarks</th>
+                                    <th class="p-2 border border-indigo-800">Productivity</th>
+                                    <th class="p-2 border border-indigo-800">In-house Trainings</th>
+                                    <th class="p-2 border border-indigo-800 text-center">Submitted</th>
+                                </tr>
+                            </thead>
+                            <tbody id="progressMonthTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
                 </div>
             </div>
         </div>
@@ -613,11 +742,11 @@
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Office Name</label>
-                            <input type="text" id="tpOffice" readonly class="w-full p-2.5 text-xs border rounded bg-slate-100 font-bold text-teal-950">
+                            <input type="text" id="tpOffice" required list="officeDatalist" placeholder="Auto-filled / type office" class="w-full p-2.5 text-xs border rounded bg-white font-bold text-teal-950">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Designation</label>
-                            <input type="text" id="tpDesignation" readonly class="w-full p-2.5 text-xs border rounded bg-slate-100 font-bold text-slate-800">
+                            <input type="text" id="tpDesignation" list="designationDatalist" placeholder="Auto-filled / type" class="w-full p-2.5 text-xs border rounded bg-white font-bold text-slate-800">
                         </div>
                     </div>
 
@@ -746,37 +875,52 @@
             </div>
         </div>
 
-        <!-- SUPERADMIN DATA ARCHIVE TAB -->
+        <!-- SUPERADMIN DATABASE BACKUP TAB -->
         <div id="view-archive-tab" class="tab-view hidden space-y-6 max-w-4xl mx-auto super-admin-only w-full">
-            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-indigo-200">
-                <div class="border-b pb-4 mb-4 flex justify-between items-center bg-indigo-50 p-4 rounded-lg flex-wrap gap-2">
-                    <div>
+            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-indigo-200 space-y-6">
+                <div class="bg-indigo-50 p-4 rounded-lg">
                         <h2 class="text-lg sm:text-xl font-bold text-indigo-950 flex items-center gap-2">
-                            <span>🏛️</span> Data Archive Management System
+                        <span>🏛️</span> Database Backup & Archive
                         </h2>
-                        <p class="text-xs text-indigo-700 mt-1">Backup & Archive historical records from 1 to 100 Years into permanent structured storage.</p>
-                    </div>
+                    <p class="text-xs text-indigo-700 mt-1">Download a complete copy of every table in the MySQL database (all years). Keep backups in a safe place.</p>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                    <div class="bg-slate-50 p-4 rounded-lg border">
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Select Archive Period:</label>
-                        <select id="archiveYearRange" class="w-full p-2 text-xs border rounded bg-white font-bold">
-                            <option value="1-100">Years 1 - 100 Complete Storage Archive Schema</option>
-                            <option value="1-25">Years 1 - 25 Archive</option>
-                            <option value="25-50">Years 25 - 50 Archive</option>
-                            <option value="50-100">Years 50 - 100 Archive</option>
-                        </select>
-                    </div>
-                    <div class="bg-slate-50 p-4 rounded-lg border flex flex-col justify-end">
-                        <button onclick="executeArchiveBackup()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold px-4 py-2 text-xs rounded shadow">
-                            📦 Compress & Export Data Archive
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button onclick="downloadBackup('xlsx')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-3 text-xs rounded-lg shadow">
+                        📊 Download Full Backup (Excel)
+                    </button>
+                    <button onclick="downloadBackup('json')" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold px-4 py-3 text-xs rounded-lg shadow">
+                        💾 Download Full Backup (JSON)
                         </button>
-                    </div>
                 </div>
 
                 <div id="archiveLogArea" class="bg-slate-900 text-emerald-400 p-4 rounded-lg font-mono text-xs h-48 overflow-y-auto space-y-1">
-                    <p>[SYSTEM ARCHIVE LOG] Storage schema operational. Ready to archive records.</p>
+                    <p>[SYSTEM] Ready. Backups are generated directly from the live database.</p>
+                </div>
+
+                <div class="border border-indigo-200 rounded-xl p-4 space-y-3">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-indigo-950">🗄️ Automatic Server Backups</h3>
+                            <p class="text-[11px] text-slate-600 mt-1 max-w-xl">A full copy of the database (including the audit log) is saved on the server automatically every day.
+                                Daily copies are kept for <span id="backupKeepDays">40</span> days and the first copy of every month is kept permanently.
+                                For long-term safety, also download a copy every month and keep it on an external disk or in another office.</p>
+                        </div>
+                        <button onclick="createServerBackup()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-4 py-2 rounded-lg shadow shrink-0">➕ Back Up Now</button>
+                    </div>
+                    <div class="overflow-x-auto max-h-80 overflow-y-auto border rounded-lg">
+                        <table class="w-full text-left text-xs border-collapse min-w-[420px]">
+                            <thead class="sticky top-0">
+                                <tr class="bg-indigo-900 text-white font-bold">
+                                    <th class="p-2">Backup Date</th>
+                                    <th class="p-2">File</th>
+                                    <th class="p-2 text-right">Size</th>
+                                    <th class="p-2 text-center">Download</th>
+                                </tr>
+                            </thead>
+                            <tbody id="serverBackupsBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -859,7 +1003,7 @@
 
         <!-- LIVE CHAT SUPPORT TAB -->
         <div id="view-live-chat-tab" class="tab-view hidden space-y-6 max-w-4xl mx-auto no-print w-full">
-            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-emerald-300 flex flex-col h-[650px]">
+            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-emerald-300 flex flex-col h-[78vh] sm:h-[650px]">
                 <div class="border-b pb-4 mb-4 flex justify-between items-center bg-emerald-50 p-3 rounded-lg flex-wrap gap-2">
                     <div>
                         <h2 class="text-base sm:text-lg font-bold text-emerald-900 flex items-center gap-2">
@@ -907,14 +1051,15 @@
         </div>
 
         <!-- MANAGE PROGRAMS TAB -->
-        <div id="view-manage-programs" class="tab-view hidden space-y-6 max-w-4xl mx-auto only-admin-and-super w-full">
+        <div id="view-manage-programs" class="tab-view hidden space-y-6 max-w-5xl mx-auto only-admin-and-super w-full">
             <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
                 <div class="border-b pb-4">
-                    <h2 class="text-lg sm:text-xl font-bold text-indigo-900">⚙️ Program & Resource Person Setup</h2>
-                    <p class="text-xs text-slate-500">Configure official training programs, schedules, and assigning faculty.</p>
+                    <h2 id="progFormTitle" class="text-lg sm:text-xl font-bold text-indigo-900">⚙️ Program, Venue & Resource Person Setup</h2>
+                    <p class="text-xs text-slate-500">The venue and dates entered here are printed on attendance slips, certificates and the QR verification page.</p>
                 </div>
 
-                <form onsubmit="handleSaveProgramConfig(event)" class="space-y-4">
+                <form id="programConfigForm" onsubmit="handleSaveProgramConfig(event)" class="space-y-4">
+                    <input type="hidden" id="progIdConfig" value="">
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Program Name *</label>
@@ -922,23 +1067,37 @@
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Venue / Location *</label>
-                            <input type="text" id="progVenueConfig" required placeholder="e.g. MDTU Auditorium, Kurunegala" class="w-full p-2.5 text-xs border rounded outline-none">
+                            <input type="text" id="progVenueConfig" required list="venueDatalist" placeholder="e.g. MDTU Auditorium, Kurunegala" class="w-full p-2.5 text-xs border rounded outline-none">
+                            <datalist id="venueDatalist"></datalist>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label for="progFileNoConfig" class="block text-xs font-bold text-slate-700 mb-1">File No (My No): <span class="font-normal text-slate-500">printed as "My No" on the attendance certificate letterhead</span></label>
+                            <div class="flex rounded border overflow-hidden focus-within:ring-2 focus-within:ring-indigo-300 bg-white">
+                                <span class="px-3 py-2.5 text-xs font-mono font-bold bg-indigo-900 text-amber-300 select-none shrink-0">NWP/CS/T/2/</span>
+                                <input type="text" id="progFileNoConfig" maxlength="80" placeholder="type the rest e.g. 1/5/2026" class="flex-1 min-w-0 p-2.5 text-xs font-mono outline-none uppercase">
+                            </div>
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Program Dates * (Comma separated)</label>
-                        <input type="text" id="progDatesConfig" required placeholder="2026-10-01, 2026-10-02" onchange="calculateProgramHours()" class="w-full p-2.5 text-xs border rounded outline-none font-mono">
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Program Dates * (pick a date and press Add, or type comma separated)</label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <div class="flex gap-2">
+                                <input type="date" id="progDatePicker" class="flex-1 p-2.5 text-xs border rounded outline-none">
+                                <button type="button" onclick="addProgramDate()" class="bg-indigo-900 text-white text-xs font-bold px-3 rounded shrink-0">+ Add</button>
+                            </div>
+                            <input type="text" id="progDatesConfig" required placeholder="2026-10-01, 2026-10-02" oninput="calculateProgramHours()" class="flex-1 p-2.5 text-xs border rounded outline-none font-mono">
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 mb-1">First Day (Auto calculated)</label>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">First Day (Auto)</label>
                             <input type="date" id="progFirstDateConfig" readonly class="w-full p-2.5 text-xs border rounded bg-slate-100 font-bold text-indigo-950">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 mb-1">Calculated Hours (6 hrs/day)</label>
-                            <input type="number" id="progHoursConfig" readonly class="w-full p-2.5 text-xs border rounded bg-slate-100 font-bold text-amber-700">
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Total Hours (6 hrs/day, editable)</label>
+                            <input type="number" id="progHoursConfig" min="1" max="500" class="w-full p-2.5 text-xs border rounded bg-white font-bold text-amber-700">
                         </div>
                     </div>
 
@@ -948,19 +1107,25 @@
                             <button type="button" onclick="addResourcePersonConfigRow()" class="bg-indigo-900 text-white text-xs font-bold px-3 py-1 rounded">+ Add Lecturer</button>
                         </div>
                         <div id="progResourcePersonsContainer" class="space-y-2"></div>
+                        <datalist id="resourcePersonDatalist"></datalist>
                     </div>
 
-                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow text-xs uppercase tracking-wider">
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <button type="submit" id="progSaveBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow text-xs uppercase tracking-wider">
                         💾 Save Program Configuration
                     </button>
+                        <button type="button" id="progCancelEditBtn" onclick="resetProgramForm()" class="hidden bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 px-6 rounded-lg text-xs uppercase">
+                            Cancel Edit
+                        </button>
+                    </div>
                 </form>
 
                 <div class="pt-6 border-t">
                     <h3 class="text-sm font-bold text-indigo-950 mb-3">Configured Training Programs</h3>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left text-xs border-collapse border min-w-[600px]">
+                        <table class="w-full text-left text-xs border-collapse border min-w-[760px]">
                             <thead>
-                                <tr class="bg-indigo-900 text-white"><th class="p-2">Program</th><th class="p-2">Venue</th><th class="p-2">Dates</th><th class="p-2 text-center">Hours</th><th class="p-2">Resource Persons</th></tr>
+                                <tr class="bg-indigo-900 text-white"><th class="p-2">Program</th><th class="p-2">Venue</th><th class="p-2">Dates</th><th class="p-2 text-center">Hours</th><th class="p-2">Resource Persons</th><th class="p-2 text-center">Registered</th><th class="p-2 text-center">Actions</th></tr>
                             </thead>
                             <tbody id="configuredProgramsTableBody"></tbody>
                         </table>
@@ -988,7 +1153,8 @@
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Password *</label>
-                            <input type="text" id="newPassword" required placeholder="Password" class="w-full p-2 text-xs border rounded outline-none bg-white font-mono">
+                            <input type="text" id="newPassword" required minlength="8" autocomplete="off" placeholder="Min 8 chars, letters + numbers" class="w-full p-2 text-xs border rounded outline-none bg-white font-mono">
+                            <p class="text-[10px] text-slate-500 mt-1">The user must change it at the first login.</p>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">System Role *</label>
@@ -1007,12 +1173,14 @@
                 <div class="space-y-3 pt-2">
                     <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider">📋 Registered User Accounts</h3>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[500px]">
+                        <table class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[680px]">
                             <thead>
                                 <tr class="bg-indigo-900 text-white font-bold">
                                     <th class="p-2.5">Username</th>
                                     <th class="p-2.5">System Role</th>
                                     <th class="p-2.5">Password</th>
+                                    <th class="p-2.5">Last Login</th>
+                                    <th class="p-2.5">Created</th>
                                     <th class="p-2.5 text-center">Actions</th>
                                 </tr>
                             </thead>
@@ -1053,82 +1221,172 @@
             </div>
         </div>
 
-        <!-- ATTENDANCE CERTIFICATE SLIP TAB -->
-        <div id="view-attendance-cert" class="tab-view max-w-4xl mx-auto space-y-6 hidden w-full">
-            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 no-print">
-                <div class="border-b pb-4 mb-6">
+        <!-- ATTENDANCE CERTIFICATE TAB -->
+        <div id="view-attendance-cert" class="tab-view hidden max-w-5xl mx-auto space-y-6 w-full">
+            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 no-print space-y-4">
+                <div class="border-b pb-4">
                     <h2 class="text-lg sm:text-xl font-bold text-indigo-900 flex items-center gap-2">
-                        <span>📄</span> Generate & Print Attendance Slip
+                        <span>📄</span> Certificate of Attendance
                     </h2>
-                    <p class="text-xs text-slate-500 mt-1">Search by National Identity Card (NIC) to verify participation and print an official attendance confirmation slip.</p>
+                    <p class="text-xs text-slate-500 mt-1">Enter your NIC and choose the program. The official attendance certificate includes the venue, dates, hours and a QR code anyone can scan to verify it.</p>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-1">National Identity Card (NIC) *</label>
-                        <input type="text" id="attNicInput" placeholder="Enter NIC..." class="w-full p-2.5 text-xs border rounded font-mono uppercase">
+                        <div class="flex gap-2">
+                            <input type="text" id="attNicInput" placeholder="Enter NIC..." onkeydown="if(event.key==='Enter'){searchAttendanceRecords()}" class="w-full p-2.5 text-xs border rounded font-mono uppercase">
+                            <button onclick="searchAttendanceRecords()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold px-4 rounded text-xs shrink-0">🔍</button>
                     </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Training Program Name *</label>
-                        <select id="attProgSelect" class="w-full p-2.5 text-xs border rounded bg-white">
-                            <option value="">-- Select Program --</option>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Training Program *</label>
+                        <select id="attProgSelect" onchange="generateAttendanceCertSlip()" disabled class="w-full p-2.5 text-xs border rounded bg-white disabled:bg-slate-100">
+                            <option value="">-- Search your NIC first --</option>
                         </select>
                     </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Start Date (First Day) *</label>
-                        <input type="date" id="attDateInput" class="w-full p-2.5 text-xs border rounded">
+                </div>
+
+                <div id="attStatusNotice" class="hidden p-3 rounded-lg border text-xs font-bold"></div>
+
+                <div class="flex flex-col sm:flex-row gap-2 sm:justify-end">
+                    <button id="attDownloadBtn" onclick="downloadAttendancePDF()" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs px-5 py-3 rounded-lg shadow">📥 Download PDF</button>
+                    <button id="attPrintBtn" onclick="printAttendanceCert()" disabled class="bg-indigo-900 hover:bg-indigo-800 disabled:opacity-50 text-white font-bold text-xs px-5 py-3 rounded-lg shadow">🖨️ Print</button>
                     </div>
                 </div>
 
-                <button onclick="generateAttendanceCertSlip()" class="w-full bg-indigo-900 hover:bg-indigo-800 text-white font-bold py-3 rounded-lg shadow text-xs uppercase tracking-wider">
-                    🔍 Retrieve Official Attendance Slip
-                </button>
+            <div id="attendanceSlipContainer" class="hidden w-full pb-4">
+                <div class="cert-sizer">
+                    <?php
+                    // Letterhead footer contact details. Empty values are not printed.
+                    $lhContacts = [
+                        ['si' => 'ප්‍රධාන ලේකම් කාර්යාලය', 'ta' => 'பிரதம செயலாளர் அலுவலகம்', 'en' => "Chief Secretary's Office",
+                         'lines' => ['Tel' => '037-2231769-72', 'Fax' => '037-2222234', 'Email' => '', 'Web' => 'www.cs.nw.gov.lk']],
+                        ['si' => 'කාර්යාලය', 'ta' => 'அலுவலகம்', 'en' => 'Office',
+                         'lines' => ['Tel' => '037-2222018', 'Fax' => '037-2223655', 'Email' => '', 'Web' => 'www.mdtu.nw.gov.lk']],
+                        ['si' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)', 'ta' => 'பிரதிப் பிரதம செயலாளர் (பயிற்சி)', 'en' => 'Deputy Chief Secretary (Training)',
+                         'lines' => ['Tel' => '037-2222108', 'Email' => '']],
+                    ];
+                    ?>
+                    <div id="attendanceCertSheet" class="cert-sheet cert-portrait lh-sheet" style="border:1px solid #e5e7eb;">
+                        <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; opacity:0.05;">
+                            <img src="assets/nwp-logo.png" alt="" style="width:400px; height:auto;">
             </div>
+                        <div style="position:absolute; inset:28px 34px 20px 34px; display:flex; flex-direction:column;">
+                            <!-- Letterhead -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                                <img class="tpl-emblem" src="assets/sl-emblem.png" alt="Emblem of Sri Lanka" style="height:96px; width:auto; max-width:110px; object-fit:contain;">
+                                <div style="flex:1; text-align:center; line-height:1.15;">
+                                    <p class="lh-si lh-maroon" style="font-size:27px; font-weight:800;">ප්‍රධාන ලේකම් කාර්යාලය - වයඹ පළාත</p>
+                                    <p class="lh-ta lh-maroon" style="font-size:15px; font-weight:700; margin-top:3px;">பிரதம செயலாளர் அலுவலகம் - வடமேல் மாகாணம்</p>
+                                    <p class="lh-en lh-maroon" style="font-size:22px; font-weight:700; margin-top:4px;">Chief Secretary’s Office – North Western Province</p>
+                                </div>
+                                <img src="assets/nwp-logo.png" alt="North Western Provincial Council Emblem" style="height:96px; width:auto;">
+                            </div>
+                            <p class="lh-maroon" style="text-align:center; font-size:9.5px; font-weight:700; margin-top:12px; white-space:nowrap;">
+                                <span class="lh-si">පළාත් සභා කාර්යාල සංකීර්ණය, කුරුණෑගල</span>
+                                &nbsp;·&nbsp; <span class="lh-ta">மாகாண சபை அலுவலகத் தொகுதி, குருநாகல்</span>
+                                &nbsp;·&nbsp; <span class="lh-en">Provincial Council Office Complex, Kurunegala</span>
+                            </p>
+                            <p style="text-align:center; font-size:10.5px; color:#111827; margin-top:6px; white-space:nowrap;">
+                                <span class="lh-si" style="font-weight:700;">කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය</span>
+                                &nbsp;·&nbsp; <span class="lh-ta" style="font-weight:500;">முகாமை அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு</span>
+                                &nbsp;·&nbsp; <span class="lh-en">Management Development &amp; Training Unit</span>
+                            </p>
+                            <div class="lh-rule" style="margin-top:10px;"></div>
 
-            <div id="attendanceSlipContainer" class="hidden bg-white p-4 sm:p-8 rounded-xl shadow-2xl border border-slate-300 max-w-3xl mx-auto font-sans text-slate-900 w-full overflow-x-auto">
-                <div class="flex flex-col items-center border-b-2 border-indigo-900 pb-4 mb-6">
-                    <div class="w-16 h-16 mb-2 flex items-center justify-center">
-                        <img id="attSlipLogoImg" class="max-w-full max-h-full object-contain hidden" alt="MDTU Official Logo" />
-                        <div id="attSlipDefaultLogo" class="w-14 h-14 rounded-full bg-indigo-900 text-amber-400 flex items-center justify-center font-black text-xs text-center border-2 border-amber-400">
-                            MDTU<br>LOGO
+                            <!-- My No / Your No / Date -->
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 18px 0;">
+                                <div class="lh-ref">
+                                    <div class="lh-ref-labels"><div class="lh-si">මගේ අංකය</div><div class="lh-ta">எனது இலக்கம்</div><div>My No</div></div>
+                                    <span class="lh-brace" style="font-size:44px;">}</span>
+                                    <span id="attSlipFileNo" class="lh-ref-value"></span>
+                        </div>
+                                <div class="lh-ref">
+                                    <div class="lh-ref-labels"><div class="lh-si">ඔබේ අංකය</div><div class="lh-ta">உமது இலக்கம்</div><div>Your No</div></div>
+                                    <span class="lh-brace" style="font-size:44px;">}</span>
+                                    <span class="lh-ref-value" style="min-width:90px;"></span>
+                    </div>
+                                <div class="lh-ref">
+                                    <div class="lh-ref-labels"><div class="lh-si">දිනය</div><div class="lh-ta">திகதி</div><div>Date</div></div>
+                                    <span class="lh-brace" style="font-size:44px;">}</span>
+                                    <span id="attSlipIssueDate" class="lh-ref-value"></span>
+                    </div>
+                </div>
+
+                            <!-- Certificate body -->
+                            <div style="padding:0 30px; margin-top:26px;">
+                                <div style="text-align:center;">
+                                    <p class="lh-si lh-maroon" style="font-size:15px; font-weight:700;">පැමිණීමේ සහතිකය</p>
+                                    <h2 style="font-size:25px; font-weight:700; letter-spacing:3px; color:#1e1b4b; text-transform:uppercase; margin-top:2px;">Certificate of Attendance</h2>
+                                    <div style="width:220px; height:3px; margin:6px auto 0; border-top:1px solid #8b1a1a; border-bottom:1px solid #8b1a1a;"></div>
+                                </div>
+
+                                <div style="font-size:15px; margin-top:22px;">
+                                    <div class="lh-row"><span>Officer Name</span><span id="attSlipName" style="color:#1e1b4b; text-transform:uppercase;"></span></div>
+                                    <div class="lh-row"><span>Designation</span><span id="attSlipDesignation"></span></div>
+                                    <div class="lh-row"><span>Office / Department</span><span id="attSlipOffice"></span></div>
+                                    <div class="lh-row"><span>National ID Number</span><span id="attSlipNic" style="font-family:'Courier New', monospace; letter-spacing:1px;"></span></div>
+                    </div>
+
+                                <div style="background:#fbf7f2; border:1px solid #e7d3c1; border-left:4px solid #8b1a1a; padding:12px 18px; margin:20px 0 18px; font-size:15px; line-height:1.75;">
+                                    <p><strong>Training Program:</strong> <span id="attSlipProg" style="font-weight:700; color:#1e1b4b;"></span></p>
+                                    <p><strong>Venue:</strong> <span id="attSlipVenue" style="font-weight:700;"></span></p>
+                                    <p><strong>Conducted Dates:</strong> <span id="attSlipDates" style="font-weight:700; color:#7c2d12;"></span></p>
+                                    <p id="attSlipAbsentSection" class="hidden" style="color:#be123c; font-weight:700;"><strong>Recorded Absent Dates:</strong> <span id="attSlipAbsentDates"></span></p>
+                                    <p><strong>Total Completed Duration:</strong> <span id="attSlipHours" style="font-weight:700; color:#047857;"></span> Hours</p>
+                    </div>
+
+                                <p style="font-size:15px; line-height:1.7; text-align:justify;">
+                                    This is to certify that the above-named officer has successfully participated in the above program organized by the Management Development and Training Unit, Chief Secretary’s Office, North Western Province.
+                    </p>
+                                <p style="font-size:13px; font-weight:700; color:#065f46; margin-top:12px;">✓ Participation officially confirmed and verified by the Deputy Chief Secretary (Training).</p>
+                </div>
+
+                            <!-- Signature -->
+                            <div style="margin-top:auto; padding:0 30px 14px; display:flex; align-items:flex-end; justify-content:space-between; gap:20px;">
+                                <div style="display:flex; align-items:flex-end; gap:12px;">
+                                    <div id="attSlipQr" class="cert-qr" style="width:92px; height:92px; flex-shrink:0;"></div>
+                                    <div style="font-size:11px; color:#4b5563; line-height:1.5;">
+                                        <p style="font-weight:700; letter-spacing:1px; color:#8b1a1a;">CERTIFICATE NO.</p>
+                                        <p id="attSlipSerial" style="font-family:'Courier New', monospace; font-size:12.5px; font-weight:700; color:#1e1b4b;"></p>
+                                        <p style="margin-top:2px;">Scan the QR code to verify online.</p>
+                </div>
+            </div>
+                                <div style="width:290px; text-align:center;">
+                                    <div style="height:108px; display:flex; align-items:flex-end; justify-content:center;">
+                                        <img class="tpl-signature" src="assets/peththawadu-signature.png" style="max-height:104px; max-width:260px; object-fit:contain;" alt="Signature of Deputy Chief Secretary">
+                                        <span class="tpl-signature-default tpl-sig-name-script hidden" style="font-family:'Great Vibes',cursive; font-size:32px; color:#1e1b4b;"></span>
+                                    </div>
+                                    <div style="border-top:1px dotted #111827; margin:4px 0 5px;"></div>
+                                    <p class="tpl-sig-name" style="font-size:14px; font-weight:700; color:#111827;"></p>
+                                    <p class="tpl-sig-title" style="font-size:13px; color:#374151;"></p>
+                                    <p style="font-size:13px; color:#374151;">North Western Province</p>
+                                </div>
+                            </div>
+                            <p id="attSlipVerifyUrl" style="font-size:9.5px; color:#6b7280; text-align:center; padding-bottom:6px;"></p>
+
+                            <!-- Letterhead footer -->
+                            <div class="lh-rule" style="height:1.5px;"></div>
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; padding-top:7px;">
+                                <?php foreach ($lhContacts as $c): ?>
+                                    <div class="lh-contact">
+                                        <div class="lh-contact-labels">
+                                            <div class="lh-si"><?= htmlspecialchars($c['si']) ?></div>
+                                            <div class="lh-ta"><?= htmlspecialchars($c['ta']) ?></div>
+                                            <div class="lh-en-t"><?= htmlspecialchars($c['en']) ?></div>
+                                        </div>
+                                        <span class="lh-brace" style="font-size:40px;">}</span>
+                                        <div class="lh-contact-lines">
+                                            <?php foreach ($c['lines'] as $label => $value): if ($value === '') continue; ?>
+                                                <div><b><?= $label ?></b>: <?= htmlspecialchars($value) ?></div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
                         </div>
                     </div>
-                    <div class="text-center">
-                        <h3 class="text-xs sm:text-sm font-bold text-indigo-950 uppercase">Management Development and Training Unit - North Western Province</h3>
-                        <h2 class="text-base sm:text-xl font-black text-indigo-900 mt-1 uppercase">Certificate of Attendance Confirmation</h2>
-                        <p class="text-xs font-bold text-amber-700">MDTU Provincial Centre, Kurunegala</p>
-                    </div>
-                </div>
-
-                <div class="space-y-4 text-xs leading-relaxed">
-                    <p><strong>Officer Name:</strong> <span id="attSlipName" class="font-bold underline text-indigo-950"></span></p>
-                    <p><strong>Designation:</strong> <span id="attSlipDesignation" class="font-bold text-slate-800"></span></p>
-                    <p><strong>Office / Department:</strong> <span id="attSlipOffice" class="font-bold text-slate-800"></span></p>
-                    <p><strong>National ID Number:</strong> <span id="attSlipNic" class="font-mono font-bold text-indigo-900"></span></p>
-                    
-                    <div class="bg-slate-50 p-3 rounded border my-3">
-                        <p><strong>Training Program:</strong> <span id="attSlipProg" class="font-bold text-indigo-950"></span></p>
-                        <p><strong>Venue:</strong> <span id="attSlipVenue" class="font-bold text-slate-800"></span></p>
-                        <p><strong>Conducted Dates:</strong> <span id="attSlipDates" class="font-bold text-amber-800"></span></p>
-                        <p id="attSlipAbsentSection" class="hidden text-rose-600 font-bold"><strong>Recorded Absent Dates:</strong> <span id="attSlipAbsentDates"></span></p>
-                        <p><strong>Total Completed Duration:</strong> <span id="attSlipHours" class="font-bold text-emerald-700"></span> Hours</p>
-                    </div>
-
-                    <p class="text-justify pt-2">
-                        This is to certify that the above-named officer has successfully participated in the above program organized by the Management Development and Training Unit (NWP).
-                    </p>
-
-                    <div id="attAdminConfirmedNotice" class="hidden bg-emerald-50 text-emerald-900 p-2 rounded border border-emerald-300 font-bold text-center my-2">
-                        ✓ Participation officially confirmed and verified by the Deputy Chief Secretary (Training).
-                    </div>
-
-                    <p class="text-xs text-slate-700 pt-4 font-semibold text-center border-t border-slate-200 mt-4">
-                        This document is system generated and official attendance can be verified through https://mdtu.nw.gov.lk/attendance.
-                    </p>
-                </div>
-
-                <div class="mt-8 no-print flex justify-end gap-3">
-                    <button onclick="window.print()" class="bg-indigo-900 text-white text-xs font-bold px-4 py-2 rounded shadow">🖨️ Print Slip</button>
                 </div>
             </div>
         </div>
@@ -1136,35 +1394,50 @@
         <!-- CONFIRM ATTENDANCE TAB -->
         <div id="view-confirm-attendance" class="tab-view hidden space-y-6 max-w-6xl mx-auto admin-only w-full">
             <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 space-y-4">
-                <div class="border-b pb-4 mb-4">
+                <div class="border-b pb-4">
                     <h2 class="text-lg sm:text-xl font-bold text-indigo-900">✅ Confirm Officers Training Attendance & Mark Absent Days</h2>
-                    <p class="text-xs text-slate-500">Filter by Program Name and Date. Check boxes to confirm presence, or record absent dates.</p>
+                    <p class="text-xs text-slate-500">Certificates can only be downloaded after attendance is confirmed here. Changes are saved to the database immediately.</p>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3 sm:p-4 rounded-lg border">
                     <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">1. Program Name *</label>
-                        <select id="adminConfirmProgramSelect" onchange="filterAdminConfirmAttendance()" class="w-full p-2.5 text-xs border rounded bg-white font-bold outline-none">
-                            <option value="">-- Select Program --</option>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Program</label>
+                        <select id="adminConfirmProgramSelect" onchange="renderConfirmAttendanceTable()" class="w-full p-2.5 text-xs border rounded bg-white font-bold outline-none">
+                            <option value="">-- All Programs --</option>
                         </select>
                     </div>
                     <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">2. First Date *</label>
-                        <input type="date" id="adminConfirmFirstDate" onchange="filterAdminConfirmAttendance()" class="w-full p-2.5 text-xs border rounded bg-white outline-none">
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Status</label>
+                        <select id="adminConfirmStatusSelect" onchange="renderConfirmAttendanceTable()" class="w-full p-2.5 text-xs border rounded bg-white outline-none">
+                            <option value="pending">Pending confirmation</option>
+                            <option value="confirmed">Confirmed</option>
+                            <option value="">All</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Search NIC / Name</label>
+                        <input type="text" id="adminConfirmSearch" oninput="renderConfirmAttendanceTable()" placeholder="Type to filter..." class="w-full p-2.5 text-xs border rounded bg-white outline-none">
                     </div>
                 </div>
 
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                    <span id="confirmAttendanceCount" class="text-xs font-bold text-slate-600"></span>
+                    <button onclick="confirmAllShown()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded shadow">✓ Confirm All Shown</button>
+                </div>
+
                 <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[700px]">
+                    <table class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[860px]">
                         <thead>
                             <tr class="bg-indigo-900 text-white font-bold">
                                 <th class="p-3 text-center">Confirm (✓)</th>
                                 <th class="p-3">NIC</th>
                                 <th class="p-3">Officer Name</th>
                                 <th class="p-3">Office</th>
-                                <th class="p-3">Program Name</th>
+                                <th class="p-3">Program / Venue</th>
                                 <th class="p-3 text-center">First Date</th>
-                                <th class="p-3 text-center min-w-[220px]">Recorded Absent Dates</th>
+                                <th class="p-3 text-center min-w-[200px]">Absent Dates</th>
+                                <th class="p-3 text-center">Hours</th>
+                                <th class="p-3 text-center">Delete</th>
                             </tr>
                         </thead>
                         <tbody id="confirmAttendanceTableBody"></tbody>
@@ -1174,22 +1447,20 @@
         </div>
 
         <!-- VERIFICATION TAB -->
-        <div id="view-verification" class="tab-view max-w-4xl mx-auto space-y-6 hidden w-full">
+        <div id="view-verification" class="tab-view max-w-5xl mx-auto space-y-6 hidden w-full">
             <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200">
                 <div class="border-b pb-4 mb-6 flex justify-between items-center flex-wrap gap-2">
                     <div>
                         <h2 class="text-lg sm:text-xl font-bold text-indigo-900 flex items-center gap-2">
                             <span>📜</span> Officer Training History Verification
                         </h2>
-                        <p class="text-xs text-slate-500 mt-1">Enter National Identity Card number to view training transcript.</p>
+                        <p class="text-xs text-slate-500 mt-1">Enter a National Identity Card number to view the full training transcript (all years).</p>
                     </div>
-                    <div class="flex gap-2">
                         <button onclick="exportTableToExcel('vHistoryTable', 'Officer_Verification')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-2 rounded shadow">📊 Export Excel</button>
-                    </div>
                 </div>
 
                 <div class="flex flex-col sm:flex-row gap-3 mb-6">
-                    <input type="text" id="verifyNicInput" placeholder="Enter Officer NIC Number..." class="flex-1 p-3 text-sm border-2 rounded-lg outline-none focus:border-indigo-600 font-mono font-bold uppercase">
+                    <input type="text" id="verifyNicInput" placeholder="Enter Officer NIC Number..." onkeydown="if(event.key==='Enter'){searchOfficerRecords()}" class="flex-1 p-3 text-sm border-2 rounded-lg outline-none focus:border-indigo-600 font-mono font-bold uppercase">
                     <button onclick="searchOfficerRecords()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold px-6 py-3 rounded-lg shadow transition text-xs uppercase tracking-wider">
                         🔍 Search Training History
                     </button>
@@ -1202,21 +1473,23 @@
                             <p id="vOfficerDetails" class="text-xs text-slate-600 mt-0.5"></p>
                         </div>
                         <div class="text-left sm:text-right">
-                            <span class="text-xs text-slate-500 block">Total Completed Hours:</span>
+                            <span class="text-xs text-slate-500 block">Confirmed Hours (this year / all years):</span>
                             <span id="vTotalHours" class="text-xl sm:text-2xl font-black text-indigo-900"></span>
                         </div>
                     </div>
 
                     <div class="overflow-x-auto">
-                        <table id="vHistoryTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[600px]">
+                        <table id="vHistoryTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[760px]">
                             <thead>
                                 <tr class="bg-indigo-900 text-white font-bold">
                                     <th class="p-3">#</th>
                                     <th class="p-3">Program Name</th>
-                                    <th class="p-3">Attended Date</th>
+                                    <th class="p-3">Venue</th>
+                                    <th class="p-3">Date(s)</th>
                                     <th class="p-3">Absent Dates</th>
-                                    <th class="p-3">Lecturer</th>
                                     <th class="p-3 text-center">Hours</th>
+                                    <th class="p-3 text-center">Status</th>
+                                    <th class="p-3">Certificate Code</th>
                                 </tr>
                             </thead>
                             <tbody id="vHistoryTableBody"></tbody>
@@ -1233,21 +1506,16 @@
 
         <!-- CERTIFICATE TAB -->
         <div id="view-certificate" class="tab-view hidden space-y-6 max-w-7xl mx-auto font-montserrat w-full">
-            <div class="bg-slate-800 text-white p-4 sm:p-6 rounded-2xl shadow-2xl border border-indigo-500/30 no-print space-y-6">
+            <div class="bg-slate-800 text-white p-4 sm:p-6 rounded-2xl shadow-2xl border border-indigo-500/30 no-print space-y-5">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-4 gap-4">
                     <div>
-                        <h1 class="text-xl sm:text-2xl font-extrabold text-amber-400 flex items-center gap-2">
-                            🎨 Advanced Colourful e-Certificate Generator
-                        </h1>
-                        <p class="text-xs text-slate-300 mt-1">Official authenticated certificates with embedded QR codes and digital signatures.</p>
+                        <h1 class="text-lg sm:text-2xl font-extrabold text-amber-400 flex items-center gap-2">🎓 e-Certificate of Completion</h1>
+                        <p class="text-xs text-slate-300 mt-1">Official certificate with a QR code that links to the online verification page.</p>
                     </div>
-                    <div class="flex gap-3 flex-wrap">
-                        <button onclick="downloadCertPDF()" id="certDownloadBtn" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs px-5 py-3 rounded-xl shadow-lg transition flex items-center gap-2">
-                            📥 Download PDF Certificate
-                        </button>
-                        <button onclick="downloadCertJPEG()" id="certImageBtn" disabled class="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs px-5 py-3 rounded-xl shadow-lg transition flex items-center gap-2">
-                            🖼️ Save Image (JPEG)
-                        </button>
+                    <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
+                        <button onclick="downloadCertPDF()" id="certDownloadBtn" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs px-3 sm:px-5 py-3 rounded-xl shadow-lg transition">📥 PDF</button>
+                        <button onclick="downloadCertJPEG()" id="certImageBtn" disabled class="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs px-3 sm:px-5 py-3 rounded-xl shadow-lg transition">🖼️ JPEG</button>
+                        <button onclick="printCompletionCert()" id="certPrintBtn" disabled class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs px-3 sm:px-5 py-3 rounded-xl shadow-lg transition">🖨️ Print</button>
                     </div>
                 </div>
 
@@ -1255,11 +1523,10 @@
                     <div>
                         <label class="block text-xs font-bold text-amber-400 mb-1">1. Search Officer NIC *</label>
                         <div class="flex gap-2">
-                            <input type="text" id="certNicSearch" placeholder="e.g. 198512345678" class="w-full p-2.5 bg-slate-800 text-xs font-mono font-bold uppercase border border-slate-700 text-white rounded-lg outline-none">
+                            <input type="text" id="certNicSearch" placeholder="e.g. 198512345678" onkeydown="if(event.key==='Enter'){searchOfficerForCert()}" class="w-full p-2.5 bg-slate-800 text-xs font-mono font-bold uppercase border border-slate-700 text-white rounded-lg outline-none">
                             <button onclick="searchOfficerForCert()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-4 py-2 text-xs rounded-lg shadow transition">🔍</button>
                         </div>
                     </div>
-
                     <div class="sm:col-span-2">
                         <label class="block text-xs font-bold text-amber-400 mb-1">2. Select Attended Training Program *</label>
                         <select id="certProgramSelect" onchange="generateSelectedCertificate()" disabled class="w-full p-2.5 bg-slate-800 text-xs font-semibold border border-slate-700 rounded-lg outline-none text-white">
@@ -1267,87 +1534,66 @@
                         </select>
                     </div>
                 </div>
+                <div id="certStatusNotice" class="hidden p-3 rounded-lg border text-xs font-bold"></div>
             </div>
 
-            <div class="overflow-x-auto flex justify-center p-2 w-full">
-                <div id="certificateContainer" class="cert-print-area cert-page-a4 cert-card-bg relative rounded-2xl shadow-2xl flex flex-col justify-between overflow-hidden select-none p-6 box-border shrink-0">
-                    <div class="absolute inset-3 border-4 border-amber-400/80 rounded-xl pointer-events-none"></div>
-                    <div class="absolute inset-5 border-2 border-amber-200/50 rounded-lg pointer-events-none"></div>
+            <div id="certificatePreviewArea" class="hidden w-full pb-4">
+                <div class="cert-sizer">
+                    <div id="certificateContainer" class="cert-sheet cert-landscape">
+                        <div class="cert-frame-outer"></div>
+                        <div class="cert-frame-gold"></div>
+                        <div class="cert-frame-inner"></div>
+                        <div class="cert-corner tl"></div><div class="cert-corner tr"></div><div class="cert-corner bl"></div><div class="cert-corner br"></div>
+                        <div class="cert-watermark"><img class="tpl-logo tpl-watermark hidden" alt=""><span class="tpl-logo-default">MDTU</span></div>
 
-                    <div class="cert-inner-body w-full h-full rounded-lg p-6 relative flex flex-col justify-between border-2 border-amber-300/60 shadow-inner box-border">
-                        <div class="flex items-center justify-between border-b-2 border-amber-400/40 pb-3">
-                            <div class="w-20 h-20 flex items-center justify-center">
-                                <img id="certLogo" class="max-w-full max-h-full object-contain hidden" />
-                                <div id="defaultLogo" class="w-16 h-16 rounded-full bg-indigo-900 text-amber-400 flex items-center justify-center font-black text-xs text-center border-2 border-amber-400">
-                                    MDTU<br>LOGO
-                                </div>
-                            </div>
+                        <div style="position:absolute; inset:66px 92px 62px 92px; display:flex; flex-direction:column; align-items:center; text-align:center;">
+                            <img class="tpl-emblem" src="assets/sl-emblem.png" alt="Emblem of Sri Lanka" style="position:absolute; top:4px; left:22px; height:104px; width:auto; max-width:120px; object-fit:contain;">
+                            <img src="assets/nwp-logo.png" alt="North Western Provincial Council Emblem" style="position:absolute; top:4px; right:22px; height:104px; width:auto;">
+                            <p style="font-family:'Cinzel',serif; font-size:11px; letter-spacing:5px; color:#92400e; font-weight:700; margin-top:32px;">NORTH WESTERN PROVINCE · SRI LANKA</p>
+                            <h3 style="font-family:'Cinzel',serif; font-size:20px; font-weight:800; color:#1e1b4b; letter-spacing:2px; margin-top:2px;">MANAGEMENT DEVELOPMENT AND TRAINING UNIT</h3>
 
-                            <div class="text-center flex-1 px-4">
-                                <h3 class="text-[10px] sm:text-xs font-black text-amber-700 tracking-widest uppercase">MANAGEMENT DEVELOPMENT AND TRAINING UNIT</h3>
-                                <h1 class="text-base sm:text-xl font-black text-indigo-950 uppercase tracking-wide">NORTH WESTERN PROVINCE, SRI LANKA</h1>
-                                <p class="text-[9px] sm:text-[10px] text-slate-600 font-bold tracking-wider mt-0.5">PROVINCIAL TRAINING CENTRE E-CERTIFICATE</p>
-                            </div>
+                            <h1 style="font-family:'Cinzel',serif; font-size:52px; font-weight:900; color:#1e1b4b; letter-spacing:12px; line-height:1; margin-top:20px;">CERTIFICATE</h1>
+                            <p style="font-family:'Cinzel',serif; font-size:17px; font-weight:700; color:#b8860b; letter-spacing:8px; margin-top:6px;">OF COMPLETION</p>
+                            <div class="cert-rule" style="width:420px; margin-top:10px;"></div>
 
-                            <div class="w-20 h-20 flex items-center justify-center">
-                                <img id="certSeal" class="max-w-full max-h-full object-contain hidden" />
-                                <div id="defaultSeal" class="emboss-stamp w-16 h-16 rounded-full flex flex-col items-center justify-center text-slate-900 font-black text-[9px] text-center uppercase transform rotate-6">
-                                    ⭐<br>OFFICIAL<br>SEAL
-                                </div>
-                            </div>
-                        </div>
+                            <p style="font-size:21px; font-style:italic; color:#334155; margin-top:auto;">This is to certify that</p>
+                            <h2 id="viewStudentName" style="font-family:'Great Vibes',cursive; font-size:56px; line-height:1.15; color:#1e1b4b; white-space:nowrap; max-width:900px; overflow:hidden;"></h2>
+                            <div style="width:480px; height:1px; background:#b8860b;"></div>
+                            <p id="viewStudentDetails" style="font-size:18px; font-weight:600; color:#334155; margin-top:6px; max-width:900px;"></p>
 
-                        <div class="text-center my-2">
-                            <h2 class="text-xl sm:text-3xl font-black font-cinzel text-indigo-950 tracking-widest uppercase drop-shadow">CERTIFICATE OF COMPLETION</h2>
-                            <div class="w-48 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-1"></div>
-                            <p class="text-[10px] sm:text-[11px] font-bold text-amber-700 tracking-widest uppercase mt-1">THIS IS PROUDLY PRESENTED TO</p>
-                        </div>
-
-                        <div class="text-center space-y-2">
-                            <div class="border-b-2 border-amber-500/40 pb-1 max-w-xl mx-auto">
-                                <h3 id="viewStudentName" class="text-xl sm:text-2xl font-black font-cinzel text-indigo-950 tracking-wide">A.B. PERERA</h3>
-                            </div>
-
-                            <p id="viewStudentDetails" class="text-xs font-bold text-slate-600">Management Assistant - Department of Education</p>
-
-                            <p class="text-xs text-slate-700 leading-relaxed max-w-2xl mx-auto pt-1">
-                                for successfully participating and completing the official capacity development training program on
+                            <p style="font-size:19px; font-style:italic; color:#334155; margin-top:8px;">has successfully completed the training programme</p>
+                            <h4 id="viewCourseTitle" style="font-family:'Cinzel',serif; font-size:24px; font-weight:800; color:#1e1b4b; line-height:1.25; margin-top:4px; max-width:900px;"></h4>
+                            <p style="font-size:17px; color:#334155; margin-top:6px; max-width:900px; line-height:1.4;">
+                                held at <strong id="viewCourseVenue" style="color:#1e1b4b;"></strong> on <strong id="viewCourseDate" style="color:#1e1b4b;"></strong>,
+                                comprising <strong id="viewCourseHours" style="color:#047857;"></strong> of training.
                             </p>
 
-                            <div class="bg-indigo-950 text-amber-300 py-2 px-6 rounded-xl max-w-2xl mx-auto shadow-md border border-amber-400/50">
-                                <h4 id="viewCourseTitle" class="text-sm sm:text-lg font-extrabold uppercase tracking-wide">ADVANCED OFFICE MANAGEMENT & CAPACITY BUILDING</h4>
-                            </div>
-
-                            <p class="text-xs font-bold text-slate-600">
-                                Conducted on <span id="viewCourseDate" class="text-indigo-950 font-black">2026-09-22</span> with a total duration of 
-                                <span id="viewCourseHours" class="bg-amber-100 text-indigo-950 px-2 py-0.5 rounded border border-amber-300 font-extrabold">12 Hours</span>.
-                            </p>
-                        </div>
-
-                        <div class="flex justify-between items-end pt-3 border-t-2 border-amber-400/40 flex-wrap gap-4">
-                            <div class="flex items-center gap-3">
-                                <div id="certQrCode" class="bg-white p-1 rounded-lg border border-slate-300 shadow min-w-[60px] min-h-[60px]"></div>
-                                <div class="text-left">
-                                    <p class="text-[9px] font-bold text-slate-500">VERIFICATION CODE:</p>
-                                    <p id="certSerialNo" class="text-[10px] font-mono font-black text-indigo-950">MDTU-2026-NWP-9823</p>
-                                    <p class="text-[8px] text-emerald-600 font-bold">✓ Official Authenticated Record</p>
-                                </div>
-                            </div>
-
-                            <div class="text-center flex flex-col items-center">
-                                <div class="h-12 flex items-center justify-center">
-                                    <img id="certSignature" class="max-h-12 object-contain hidden" />
-                                    <span id="defaultSignature" class="font-signature text-xl sm:text-2xl text-indigo-950 font-bold transform -rotate-3 select-none">
-                                        S.M. Peththawadu
-                                    </span>
-                                </div>
-                                <div class="w-48 h-0.5 bg-indigo-950/60 my-1"></div>
-                                <h5 id="viewMadamName" class="text-xs font-black text-indigo-950">Ms. S.M. Peththawadu</h5>
-                                <p id="viewMadamTitle" class="text-[10px] font-bold text-slate-600">Deputy Chief Secretary (Training)</p>
-                                <p class="text-[9px] font-extrabold text-amber-700">North Western Province</p>
+                            <div style="margin-top:auto; width:100%; display:flex; align-items:flex-end; justify-content:space-between;">
+                                <div style="width:240px; display:flex; align-items:flex-end; gap:10px; text-align:left;">
+                                    <div id="certQrCode" class="cert-qr" style="width:92px; height:92px; padding:4px; background:#fff; border:1px solid #cbd5e1; flex-shrink:0;"></div>
+                                    <div style="font-family:'Montserrat',sans-serif;">
+                                        <p style="font-size:8.5px; font-weight:700; color:#64748b; letter-spacing:1px;">CERTIFICATE NO.</p>
+                                        <p id="certSerialNo" style="font-family:monospace; font-size:11px; font-weight:800; color:#1e1b4b;"></p>
+                                        <p style="font-size:8.5px; font-weight:700; color:#047857; margin-top:3px;">✓ Scan QR to verify online</p>
                             </div>
                         </div>
-
+                                <div style="display:flex; flex-direction:column; align-items:center;">
+                                    <img class="tpl-seal hidden" style="width:96px; height:96px; object-fit:contain;" alt="Seal">
+                                    <div class="tpl-seal-default cert-seal" style="width:96px; height:96px;"><span style="font-size:16px;">★</span><span style="font-size:10px; font-weight:800;">MDTU</span><span style="font-size:7.5px; font-weight:700;">OFFICIAL SEAL</span><span style="font-size:7.5px;">N.W.P.</span></div>
+                                    <p style="font-family:'Montserrat',sans-serif; font-size:9.5px; color:#475569; margin-top:6px;">Date of Issue: <strong id="certIssueDate" style="color:#1e1b4b;"></strong></p>
+                                </div>
+                                <div style="width:240px; text-align:center;">
+                                    <div style="height:92px; display:flex; align-items:flex-end; justify-content:center;">
+                                        <img class="tpl-signature" src="assets/peththawadu-signature.png" style="max-height:88px; max-width:220px; object-fit:contain;" alt="Signature of Deputy Chief Secretary">
+                                        <span class="tpl-signature-default tpl-sig-name-script hidden" style="font-family:'Great Vibes',cursive; font-size:28px; color:#1e1b4b;"></span>
+                            </div>
+                                    <div style="height:1px; background:#1e1b4b; margin:4px 0 5px;"></div>
+                                    <p class="tpl-sig-name" style="font-family:'Montserrat',sans-serif; font-size:11.5px; font-weight:800; color:#1e1b4b;"></p>
+                                    <p class="tpl-sig-title" style="font-family:'Montserrat',sans-serif; font-size:10px; font-weight:600; color:#475569;"></p>
+                                    <p style="font-family:'Montserrat',sans-serif; font-size:9.5px; font-weight:700; color:#92400e;">North Western Province</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1357,37 +1603,64 @@
         <div id="view-template-settings" class="tab-view hidden space-y-6 max-w-3xl mx-auto super-admin-only w-full">
             <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
                 <div class="border-b pb-4">
-                    <h2 class="text-lg sm:text-xl font-bold text-indigo-900">🔒 Permanent Certificate Template Assets</h2>
-                    <p class="text-xs text-slate-500">Changes stay saved permanently. Only authorized Super Admin can update.</p>
+                    <h2 class="text-lg sm:text-xl font-bold text-indigo-900">🔒 Certificate Template & Organisation Settings</h2>
+                    <p class="text-xs text-slate-500">Saved in the database and used on every certificate, attendance slip and the verification page.</p>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="space-y-2">
-                        <label class="block text-xs font-bold text-slate-700">Official Logo PNG</label>
-                        <input type="file" accept="image/png, image/jpeg" onchange="uploadTemplateAsset('logo', event)" class="w-full p-2 text-xs border rounded">
-                        <div id="previewLogoContainer" class="h-16 flex items-center"></div>
+                    <div class="space-y-2 bg-amber-50 p-3 rounded-lg border border-amber-300">
+                        <label class="block text-xs font-bold text-slate-700">State Emblem of Sri Lanka (PNG/JPG)</label>
+                        <input type="file" accept="image/png, image/jpeg" onchange="uploadTemplateAsset('stateEmblem', event)" class="w-full text-xs">
+                        <div class="h-20 flex items-center justify-center bg-white rounded border"><img class="tpl-emblem max-h-16 object-contain" src="assets/sl-emblem.png" alt="State Emblem"></div>
+                        <p class="text-[10px] text-slate-500">Printed at the top of the e-Certificate and the attendance certificate. A transparent PNG looks best.</p>
+                        <button onclick="removeTemplateAsset('stateEmblem', 'uploaded state emblem')" class="text-[10px] font-bold text-rose-600 hover:underline">Use default emblem</button>
                     </div>
-                    <div class="space-y-2">
-                        <label class="block text-xs font-bold text-slate-700">Digital Signature PNG</label>
-                        <input type="file" accept="image/png, image/jpeg" onchange="uploadTemplateAsset('signature', event)" class="w-full p-2 text-xs border rounded">
-                        <div id="previewSigContainer" class="h-16 flex items-center"></div>
+                    <div class="space-y-2 bg-slate-50 p-3 rounded-lg border">
+                        <label class="block text-xs font-bold text-slate-700">Official Logo (PNG/JPG)</label>
+                        <input type="file" accept="image/png, image/jpeg" onchange="uploadTemplateAsset('logo', event)" class="w-full text-xs">
+                        <div class="h-20 flex items-center justify-center bg-white rounded border"><img class="tpl-logo hidden max-h-16 object-contain" alt=""><span class="tpl-logo-default text-[10px] text-slate-400">No logo</span></div>
+                        <button onclick="removeTemplateAsset('logo')" class="text-[10px] font-bold text-rose-600 hover:underline">Remove</button>
                     </div>
-                    <div class="space-y-2">
-                        <label class="block text-xs font-bold text-slate-700">Custom Embossed Seal PNG</label>
-                        <input type="file" accept="image/png, image/jpeg" onchange="uploadTemplateAsset('seal', event)" class="w-full p-2 text-xs border rounded">
-                        <div id="previewSealContainer" class="h-16 flex items-center"></div>
+                    <div class="space-y-2 bg-slate-50 p-3 rounded-lg border">
+                        <label class="block text-xs font-bold text-slate-700">Digital Signature (transparent PNG)</label>
+                        <input type="file" accept="image/png, image/jpeg" onchange="uploadTemplateAsset('signature', event)" class="w-full text-xs">
+                        <div class="h-20 flex items-center justify-center bg-white rounded border"><img class="tpl-signature max-h-16 object-contain" src="assets/peththawadu-signature.png" alt="Signature"><span class="tpl-signature-default hidden text-[10px] text-slate-400">No signature</span></div>
+                        <button onclick="removeTemplateAsset('signature')" class="text-[10px] font-bold text-rose-600 hover:underline">Remove</button>
                     </div>
-                    <div class="space-y-2">
-                        <label class="block text-xs font-bold text-slate-700">Signatory Details</label>
-                        <input type="text" id="settingMadamName" placeholder="Signatory Name" oninput="saveMadamDetails()" class="w-full p-2 text-xs border rounded mb-1">
-                        <input type="text" id="settingMadamTitle" placeholder="Official Title" oninput="saveMadamDetails()" class="w-full p-2 text-xs border rounded">
+                    <div class="space-y-2 bg-slate-50 p-3 rounded-lg border">
+                        <label class="block text-xs font-bold text-slate-700">Official Seal (PNG)</label>
+                        <input type="file" accept="image/png, image/jpeg" onchange="uploadTemplateAsset('seal', event)" class="w-full text-xs">
+                        <div class="h-20 flex items-center justify-center bg-white rounded border"><img class="tpl-seal hidden max-h-16 object-contain" alt=""><span class="tpl-seal-default text-[10px] text-slate-400">Default gold seal</span></div>
+                        <button onclick="removeTemplateAsset('seal')" class="text-[10px] font-bold text-rose-600 hover:underline">Remove</button>
                     </div>
                 </div>
 
-                <div class="pt-4 border-t flex justify-between items-center">
-                    <span class="text-xs text-rose-600 font-bold">⚠️ Reset Saved Assets</span>
-                    <button onclick="resetTemplateSettings()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-4 py-2 rounded shadow">Reset Assets</button>
+                <form onsubmit="saveTemplateDetails(event)" class="space-y-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Signatory Name</label>
+                            <input type="text" id="settingMadamName" placeholder="e.g. Ms. S.M. Peththawadu" class="w-full p-2.5 text-xs border rounded">
                 </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Signatory Official Title</label>
+                            <input type="text" id="settingMadamTitle" placeholder="e.g. Deputy Chief Secretary (Training)" class="w-full p-2.5 text-xs border rounded">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Organisation Address</label>
+                            <input type="text" id="settingOrgAddress" placeholder="Chief Secretariat, Kurunegala" class="w-full p-2.5 text-xs border rounded">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Office Phone</label>
+                            <input type="text" id="settingOrgPhone" placeholder="037 2222018" class="w-full p-2.5 text-xs border rounded">
+                        </div>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-300 p-3 rounded-lg space-y-1">
+                        <label class="block text-xs font-bold text-amber-950">Public Website Address for QR Codes</label>
+                        <input type="url" id="settingPublicBaseUrl" placeholder="e.g. https://mdtu.nw.gov.lk/attendance" class="w-full p-2.5 text-xs border rounded bg-white font-mono">
+                        <p class="text-[10px] text-amber-800">QR codes open <span class="font-mono">verify.php</span> at this address. Leave empty to use the address in your browser right now (<span id="settingCurrentBaseUrl" class="font-mono"></span>). Phones cannot open "localhost", so set your real website or LAN address here.</p>
+                    </div>
+                    <button type="submit" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-5 py-2.5 rounded-lg shadow">💾 Save Template Details</button>
+                </form>
             </div>
         </div>
 
@@ -1421,6 +1694,45 @@
                         <h3 id="statCompletionRate" class="text-xl sm:text-2xl font-black text-amber-600 mt-1">0%</h3>
                     </div>
                     <div class="p-3 bg-amber-50 text-amber-700 rounded-lg text-xl">📈</div>
+                </div>
+            </div>
+
+            <div class="bg-white p-4 sm:p-6 rounded-xl shadow-md border border-slate-200 space-y-4">
+                <div class="flex justify-between items-center flex-wrap gap-2 no-print">
+                    <div>
+                        <h2 class="text-base sm:text-lg font-bold text-slate-900">📑 Monthly Progress — All Months</h2>
+                        <p class="text-xs text-slate-500">January to December for every office. Visible to Admin and Super Admin only.</p>
+                    </div>
+                    <div class="flex gap-2 flex-wrap items-center">
+                        <select id="dashProgressOffice" onchange="renderDashboardProgress()" class="p-2 text-xs border rounded bg-white">
+                            <option value="all">All Offices</option>
+                        </select>
+                        <button onclick="downloadOfficialReportPDF('dashboardProgressPdf', 'Monthly_Progress_All_Months')" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow">📄 Download PDF</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                <div id="dashboardProgressPdf" class="space-y-3">
+                    <div class="text-center border-b pb-3">
+                        <h3 class="text-xs font-black text-amber-600 uppercase">Management Development and Training Unit - NWP</h3>
+                        <h4 class="text-sm font-black text-indigo-950 uppercase">Monthly Progress Report — All Months</h4>
+                        <p id="dashProgressSubtitle" class="text-xs font-semibold text-slate-500 mt-1"></p>
+                    </div>
+                    <div>
+                        <table id="dashboardProgressTable" class="w-full text-left text-xs border-collapse border border-slate-300 min-w-[900px]">
+                            <thead>
+                                <tr class="bg-indigo-900 text-white font-bold">
+                                    <th class="p-2 border border-indigo-800">Office</th>
+                                    <th class="p-2 border border-indigo-800">Month</th>
+                                    <th class="p-2 border border-indigo-800">Special Remarks</th>
+                                    <th class="p-2 border border-indigo-800">Productivity</th>
+                                    <th class="p-2 border border-indigo-800">In-house Trainings</th>
+                                    <th class="p-2 border border-indigo-800 text-center">Submitted</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashboardProgressBody"></tbody>
+                        </table>
+                    </div>
+                </div>
                 </div>
             </div>
 
@@ -1670,26 +1982,41 @@
                 <div class="border-b-2 border-indigo-900 pb-4 mb-6 text-center">
                     <h3 class="text-xs font-black text-amber-600 uppercase">Management Development and Training Unit - NWP</h3>
                     <h2 class="text-base sm:text-xl font-black text-indigo-950 uppercase tracking-wide">
-                        Speaker Performance & Evaluation Report
+                        Lecturer Performance &amp; Evaluation Report
                     </h2>
+                    <p class="text-[11px] text-slate-500 mt-1">Participant ratings of lecturers / resource persons (1 = Poor … 5 = Excellent)</p>
                 </div>
 
-                <div class="flex justify-between items-center mb-6 no-print flex-wrap gap-2">
-                    <span class="text-xs font-bold text-slate-500">Resource person overall performance and participant scores:</span>
-                    <div class="flex gap-2">
-                        <button onclick="exportTableToExcel('resourceReportTable', 'Resource_Persons_Report')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow">📊 Excel</button>
-                        <button onclick="downloadOfficialReportPDF('resourcePdfContainer', 'Resource_Persons_Report')" class="bg-indigo-900 hover:bg-indigo-800 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow">📄 PDF</button>
+                <div class="flex flex-wrap items-end gap-3 mb-4 no-print">
+                    <label class="flex-1 min-w-[220px]">
+                        <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Program</span>
+                        <select id="resourceProgramSelect" onchange="renderResourceReport()" class="w-full p-2 text-xs border rounded-lg bg-white"></select>
+                    </label>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="lecturerReportPDF('save')" class="bg-indigo-900 hover:bg-indigo-800 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow">📄 Download PDF</button>
+                        <button onclick="lecturerReportPDF('print')" class="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow">🖨️ Print</button>
+                        <button onclick="lecturerReportExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow">📊 Excel</button>
                     </div>
                 </div>
 
-                <div id="resourcePdfContainer" class="space-y-6 overflow-x-auto">
-                    <table id="resourceReportTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[500px]">
+                <div id="resourceSummary" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4"></div>
+
+                <div class="overflow-x-auto">
+                    <table id="resourceReportTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[900px]">
                         <thead>
                             <tr class="bg-indigo-900 text-white font-bold">
-                                <th class="p-3">Resource Person</th>
-                                <th class="p-3 text-center">Programs Conducted</th>
-                                <th class="p-3 text-center">Average Score</th>
-                                <th class="p-3 text-center">Percentage</th>
+                                <th class="p-2.5 text-center">No</th>
+                                <th class="p-2.5">Lecturer / Resource Person</th>
+                                <th class="p-2.5">Programs Conducted</th>
+                                <th class="p-2.5 text-center">Evaluations</th>
+                                <th class="p-2.5 text-center">5★</th>
+                                <th class="p-2.5 text-center">4★</th>
+                                <th class="p-2.5 text-center">3★</th>
+                                <th class="p-2.5 text-center">2★</th>
+                                <th class="p-2.5 text-center">1★</th>
+                                <th class="p-2.5 text-center">Average</th>
+                                <th class="p-2.5 text-center">Percentage</th>
+                                <th class="p-2.5 text-center">Grade</th>
                             </tr>
                         </thead>
                         <tbody id="resourceReportTableBody"></tbody>
@@ -1734,63 +2061,86 @@
 </div>
 </div>
 
-<!-- COMPACT SUBTLE FOOTER -->
-<footer class="bg-slate-900 text-slate-400 py-2.5 px-4 border-t border-slate-800 text-[11px] no-print mt-auto">
-    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-1.5 font-medium text-center sm:text-left">
-        <div class="tracking-wide text-slate-300">
-            <span class="font-bold text-amber-400">System admin</span> - Anurasiri wickramanayake, <a href="mailto:Anurasiri123@gmail.com" class="hover:text-amber-300 underline font-mono">Anurasiri123@gmail.com</a> (email), <span class="font-mono text-emerald-400">0774940944</span> (WhatsApp), <span class="font-mono text-slate-300">0373333018</span> (office)
+<!-- FOOTER -->
+<footer class="bg-slate-950 text-slate-400 border-t-2 border-amber-500 no-print mt-auto pb-20 md:pb-0">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col sm:flex-row justify-between items-center gap-1 text-[11px] text-center sm:text-left border-b border-slate-800">
+        <span class="font-semibold text-slate-300 tracking-wide">Management Development and Training Unit &middot; North Western Province</span>
+        <span class="text-slate-500">&copy; 2026 MDTU NWP. All Rights Reserved.</span>
         </div>
-        <div class="text-[10px] text-slate-500">
-            &copy; 2026 MDTU NWP. All Rights Reserved.
-        </div>
+    <div class="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap lg:flex-nowrap items-center justify-center gap-x-3 gap-y-1.5 text-[11px] whitespace-nowrap">
+        <span class="text-slate-400">System Admin &amp; Web Developer</span>
+        <span class="font-bold text-amber-400 tracking-wide">M A Wickramanayake</span>
+        <span class="hidden sm:inline text-slate-700">|</span>
+        <a href="mailto:Anurasiri123@gmail.com" class="inline-flex items-center gap-1.5 text-slate-300 hover:text-amber-300 transition" title="Email">
+            <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+            Anurasiri123@gmail.com
+        </a>
+        <span class="hidden sm:inline text-slate-700">|</span>
+        <a href="https://wa.me/94774940944" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-slate-300 hover:text-emerald-300 transition" title="WhatsApp">
+            <svg class="w-3.5 h-3.5 text-emerald-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6a2.7 2.7 0 0 0 1.8-1.2 2.2 2.2 0 0 0 .1-1.2c0-.1-.2-.2-.5-.3Z"/></svg>
+            077 494 0944 <span class="text-slate-500">(WhatsApp)</span>
+        </a>
+        <span class="hidden sm:inline text-slate-700">|</span>
+        <a href="tel:+94373333018" class="inline-flex items-center gap-1.5 text-slate-300 hover:text-sky-300 transition" title="Office">
+            <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg>
+            037 333 3018 <span class="text-slate-500">(Office)</span>
+        </a>
     </div>
 </footer>
 
-<!-- FLOATING POPUP PANELS ON TOP RIGHT -->
-<div class="fixed top-20 right-4 z-50 flex flex-col gap-3 no-print items-end">
+<!-- FLOATING POPUP PANELS (bottom right) -->
+<div class="fixed bottom-4 right-3 sm:right-4 z-40 flex flex-col gap-3 no-print items-end">
     <!-- Active Inbox Floating Popup Panel -->
-    <div id="inboxFloatingPanel" class="bg-white rounded-xl shadow-2xl border-2 border-amber-500 w-72 sm:w-96 overflow-hidden hidden">
+    <div id="inboxFloatingPanel" class="bg-white rounded-xl shadow-2xl border-2 border-amber-500 w-[calc(100vw-1.5rem)] max-w-sm overflow-hidden hidden">
         <div class="bg-amber-700 text-white p-2.5 flex justify-between items-center cursor-pointer" onclick="toggleFloatingInbox()">
             <span class="text-xs font-bold flex items-center gap-1.5">📥 Active Inbox Notifications</span>
             <button class="text-xs font-bold hover:text-amber-200">✖</button>
         </div>
-        <div id="inboxPopupBody" class="p-3 max-h-80 overflow-y-auto text-xs bg-slate-50 space-y-2">
-        </div>
-        <div class="p-2 bg-amber-50 border-t flex justify-between items-center">
-            <span class="text-[10px] text-slate-500">Edit/Delete enabled</span>
+        <div id="inboxPopupBody" class="p-3 max-h-[50vh] overflow-y-auto text-xs bg-slate-50 space-y-2"></div>
+        <div class="p-2 bg-amber-50 border-t flex justify-end items-center">
             <button onclick="switchTab('notifications-tab'); toggleFloatingInbox();" class="text-[11px] font-bold text-indigo-900 hover:underline">Full Inbox Tab ➔</button>
         </div>
     </div>
 
     <!-- Live Chat Floating Popup Panel -->
-    <div id="chatFloatingPanel" class="bg-white rounded-xl shadow-2xl border-2 border-emerald-500 w-72 sm:w-88 overflow-hidden hidden">
+    <div id="chatFloatingPanel" class="bg-white rounded-xl shadow-2xl border-2 border-emerald-500 w-[calc(100vw-1.5rem)] max-w-sm overflow-hidden hidden">
         <div class="bg-emerald-900 text-white p-2.5 flex justify-between items-center cursor-pointer" onclick="toggleFloatingChat()">
             <span class="text-xs font-bold flex items-center gap-1.5">💬 Live Support Chat</span>
             <button class="text-xs font-bold hover:text-amber-300">✖</button>
         </div>
-        <div id="chatPopupBody" class="p-3 h-64 overflow-y-auto text-xs bg-slate-50 space-y-2">
-        </div>
+        <div id="chatPopupBody" class="p-3 h-[45vh] max-h-72 overflow-y-auto text-xs bg-slate-50 space-y-2"></div>
         <form onsubmit="handleSendLiveChatMessage(event)" class="p-2 bg-white border-t flex flex-col gap-1.5">
-            <select id="chatRecipientSelectFloating" class="p-1 text-[11px] border rounded bg-white font-bold text-indigo-900 outline-none">
+            <select id="chatRecipientSelectFloating" class="p-1.5 text-[11px] border rounded bg-white font-bold text-indigo-900 outline-none">
                 <option value="all">📢 Broadcast (All)</option>
                 <option value="admin">🔒 Admin Only (Private)</option>
             </select>
             <div class="flex gap-1">
-                <input type="text" id="chatInputFloating" required placeholder="Type chat..." class="flex-1 p-1.5 text-xs border rounded outline-none">
+                <input type="text" id="chatInputFloating" required maxlength="1000" placeholder="Type chat..." class="flex-1 p-2 text-xs border rounded outline-none">
                 <button type="submit" class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded text-xs">Send</button>
             </div>
         </form>
     </div>
 
-    <!-- Dual Floating Buttons -->
-    <div class="flex flex-col gap-2 items-end">
-        <button onclick="toggleFloatingInbox()" title="Active Inbox Notifications" class="bg-amber-600 hover:bg-amber-500 text-white p-3 rounded-full shadow-xl border-2 border-white flex items-center justify-center text-sm font-bold relative">
+    <!-- Floating Buttons -->
+    <div class="flex gap-2 items-end">
+        <button onclick="toggleFloatingInbox()" title="Active Inbox Notifications" class="bg-amber-600 hover:bg-amber-500 text-white w-12 h-12 rounded-full shadow-xl border-2 border-white flex items-center justify-center text-base font-bold relative">
             📥
-            <span id="floatingInboxBadge" class="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">0</span>
+            <span id="floatingInboxBadge" class="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black min-w-[1rem] h-4 px-1 rounded-full flex items-center justify-center">0</span>
         </button>
-        <button onclick="toggleFloatingChat()" title="Live Chat Support" class="bg-emerald-600 hover:bg-emerald-500 text-white p-3 rounded-full shadow-xl border-2 border-white flex items-center justify-center text-sm font-bold">
+        <button onclick="toggleFloatingChat()" title="Live Chat Support" class="bg-emerald-600 hover:bg-emerald-500 text-white w-12 h-12 rounded-full shadow-xl border-2 border-white flex items-center justify-center text-base font-bold">
             💬
         </button>
+    </div>
+</div>
+
+<!-- Toast messages -->
+<div id="toastContainer" class="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 w-[calc(100vw-1.5rem)] max-w-md no-print pointer-events-none"></div>
+
+<!-- Busy overlay for PDF generation -->
+<div id="busyOverlay" class="hidden fixed inset-0 z-[70] bg-slate-900/50 flex items-center justify-center no-print">
+    <div class="bg-white rounded-xl shadow-2xl px-6 py-4 text-sm font-bold text-indigo-950 flex items-center gap-3">
+        <span class="w-5 h-5 border-4 border-indigo-200 border-t-indigo-900 rounded-full animate-spin"></span>
+        <span id="busyOverlayText">Please wait...</span>
     </div>
 </div>
 
@@ -1799,10 +2149,28 @@
     <div class="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full mx-4">
         <h3 class="text-lg font-bold text-indigo-950 mb-4 text-center">User Authentication</h3>
         <form onsubmit="handleLogin(event)" class="space-y-4">
-            <input type="text" id="loginUsername" placeholder="Username" required class="w-full p-2.5 text-xs border rounded">
-            <input type="password" id="loginPassword" placeholder="Password" required class="w-full p-2.5 text-xs border rounded">
+            <input type="text" id="loginUsername" placeholder="Username" required autocomplete="username" class="w-full p-2.5 text-xs border rounded">
+            <input type="password" id="loginPassword" placeholder="Password" required autocomplete="current-password" class="w-full p-2.5 text-xs border rounded">
             <button type="submit" class="w-full bg-indigo-900 text-white font-bold py-2.5 rounded text-xs">Sign In</button>
             <button type="button" onclick="toggleAuthModal()" class="w-full bg-slate-200 text-slate-700 font-bold py-2 rounded text-xs mt-1">Cancel</button>
+        </form>
+    </div>
+</div>
+
+<!-- CHANGE PASSWORD MODAL (forced after first login with a default or reset password) -->
+<div id="changePasswordModal" class="fixed inset-0 bg-slate-900/70 z-[55] flex items-center justify-center hidden p-4">
+    <div class="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full mx-4">
+        <h3 class="text-lg font-bold text-indigo-950 mb-1 text-center">🔑 Change Password</h3>
+        <p id="changePasswordReason" class="hidden text-xs text-rose-700 font-semibold text-center mb-3">For security you must choose your own new password before using the system.</p>
+        <form onsubmit="handleChangePassword(event)" class="space-y-3 mt-3">
+            <input type="text" autocomplete="username" id="cpUsername" class="hidden" tabindex="-1" aria-hidden="true">
+            <input type="password" id="cpCurrent" placeholder="Current password" required autocomplete="current-password" class="w-full p-2.5 text-xs border rounded">
+            <input type="password" id="cpNew" placeholder="New password" required minlength="8" autocomplete="new-password" class="w-full p-2.5 text-xs border rounded">
+            <input type="password" id="cpConfirm" placeholder="Type the new password again" required minlength="8" autocomplete="new-password" class="w-full p-2.5 text-xs border rounded">
+            <p class="text-[11px] text-slate-500">At least 8 characters, with both letters and numbers. Do not share your password.</p>
+            <button type="submit" class="w-full bg-indigo-900 text-white font-bold py-2.5 rounded text-xs">Save New Password</button>
+            <button type="button" id="cpCancelBtn" onclick="closeChangePasswordModal()" class="w-full bg-slate-200 text-slate-700 font-bold py-2 rounded text-xs">Cancel</button>
+            <button type="button" id="cpLogoutBtn" onclick="handleLogout()" class="hidden w-full bg-slate-200 text-slate-700 font-bold py-2 rounded text-xs">Logout</button>
         </form>
     </div>
 </div>
@@ -1831,1871 +2199,6 @@
 </script>
 <script type="text/javascript" src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 
-<script>
-    const CURRENT_YEAR = new Date().getFullYear();
-    let selectedYear = CURRENT_YEAR;
-    let authRole = 'none';
-    let currentUser = null;
-    let globalDatabase = {};
-    let programConfigs = [];
-    let annualStaffMatrix = [];
-    let systemUsers = [];
-    let notificationsList = [];
-    let liveChatMessages = [];
-    let progressSubmissions = [];
-    let trainingPlansList = [];
-    let masterResourcePersons = [];
-    let currentNewAlertText = "🚨 MDTU System Live Support & News Alerts Active. Sample Data Loaded.";
-
-    const STORAGE_KEYS = { 
-        LOGO: 'cert_perm_logo', 
-        SIG: 'cert_perm_signature', 
-        SEAL: 'cert_perm_seal', 
-        MADAM_NAME: 'cert_perm_madam_name', 
-        MADAM_TITLE: 'cert_perm_madam_title', 
-        PROGS: 'mdtu_program_configs', 
-        STAFF_MATRIX: 'mdtu_staff_matrix',
-        USERS: 'mdtu_system_users',
-        NOTIFS: 'mdtu_notifications_list',
-        CHAT: 'mdtu_live_chat_messages',
-        OFFICERS: 'mdtu_officers_directory',
-        ALERT: 'mdtu_new_alert_ticker',
-        PROGRESS_REPORTS: 'mdtu_progress_submissions',
-        TRAINING_PLANS: 'mdtu_training_plans_list',
-        MASTER_RESOURCES: 'mdtu_master_resource_persons'
-    };
-
-    let officersDirectory = {};
-
-    window.onload = function() {
-        document.getElementById('dateInput').valueAsDate = new Date();
-        loadSystemUsers();
-        loadProgramConfigs();
-        loadAnnualStaffMatrix();
-        loadNotifications();
-        loadLiveChatMessages();
-        loadOfficersDirectory();
-        loadNewsAlert();
-        loadProgressSubmissionsFromAPI();
-        loadTrainingPlans();
-        loadMasterResourcePersons();
-        fetchLiveData();
-        loadSavedTemplate();
-        updateAuthUI();
-        updateChatRecipientOptions();
-        updateNotificationRecipientOptions();
-        updateOfficeDropdowns();
-    };
-
-    function toggleMobileSidebar() {
-        const sidebar = document.getElementById('sidebarNav');
-        if (sidebar) {
-            sidebar.classList.toggle('hidden');
-        }
-    }
-
-    function convertNicFormat(nicStr) {
-        let clean = nicStr.trim().toUpperCase();
-        if (/^\d{9}[VX]$/.test(clean)) {
-            let year = "19" + clean.substring(0, 2);
-            let days = clean.substring(2, 5);
-            let serial = clean.substring(5, 9);
-            return year + days + "0" + serial;
-        }
-        return clean;
-    }
-
-    function handleNicSmartInput(val) {
-        let converted = convertNicFormat(val);
-        let notice = document.getElementById('nicFormatNotice');
-        if (notice) {
-            if (converted !== val.trim().toUpperCase() && converted.length === 12) {
-                notice.innerText = `Converted Smart NIC: ${converted}`;
-            } else {
-                notice.innerText = `NIC: ${converted}`;
-            }
-        }
-
-        let existing = officersDirectory[converted] || officersDirectory[val.trim().toUpperCase()];
-        if (existing) {
-            document.getElementById('nameInput').value = existing.name || '';
-            document.getElementById('designationInput').value = existing.designation || '';
-            document.getElementById('officeInput').value = existing.office || '';
-        }
-    }
-
-    function loadOfficersDirectory() {
-        const saved = localStorage.getItem(STORAGE_KEYS.OFFICERS);
-        if (saved) {
-            try { officersDirectory = JSON.parse(saved); } catch(e) { officersDirectory = {}; }
-        } else {
-            officersDirectory = {
-                "198512345678": { name: "A.B. Perera", designation: "Management Assistant", office: "District Secretariat, Kurunegala" },
-                "199012345678": { name: "C.D. Silva", designation: "Development Officer", office: "District Secretariat, Kurunegala" },
-                "198898765432": { name: "K.L. Fernando", designation: "Executive Officer", office: "District Secretariat, Kurunegala" }
-            };
-            saveOfficersDirectory();
-        }
-    }
-
-    function saveOfficersDirectory() {
-        localStorage.setItem(STORAGE_KEYS.OFFICERS, JSON.stringify(officersDirectory));
-    }
-
-    function handleSuperuserIdLookup(val) {
-        let conv = convertNicFormat(val);
-        let found = officersDirectory[conv] || officersDirectory[val.trim().toUpperCase()];
-        if (found) {
-            document.getElementById('progUserOffice').value = found.office || '';
-            document.getElementById('progUserDesignation').value = found.designation || '';
-            autoCalculateOfficeStaffProgress();
-            populateAutoMdtuPrograms(found.office);
-        }
-    }
-
-    function populateAutoMdtuPrograms(officeName) {
-        let listContainer = document.getElementById('progAutoProgramsList');
-        if (!listContainer) return;
-        const records = globalDatabase[selectedYear] || [];
-        let officeRecords = records.filter(r => r.office === officeName);
-        let uniqueProgs = [...new Set(officeRecords.map(r => `${r.trainingName} (${r.date}) - ${r.hours} Hours`))];
-
-        if (uniqueProgs.length > 0) {
-            listContainer.innerHTML = uniqueProgs.map(p => `<div>✅ ${p}</div>`).join('');
-        } else {
-            listContainer.innerHTML = `<span class="text-slate-400">No official MDTU trainings recorded yet for this office this year.</span>`;
-        }
-    }
-
-    function autoCalculateOfficeStaffProgress() {
-        let office = document.getElementById('progUserOffice').value;
-        let tbody = document.getElementById('progMatrixTableBody');
-        if (!office || !tbody) return;
-
-        let staffEntry = annualStaffMatrix.find(m => m.office === office);
-        const records = globalDatabase[selectedYear] || [];
-        let officeRecords = records.filter(r => r.office === office);
-
-        let desigs = ["Management Assistant", "Development Officer", "Executive Officer", "Office Assistant"];
-        if (staffEntry) {
-            desigs = Object.keys(staffEntry).filter(k => k !== 'office' && k !== 'Office Name');
-        }
-
-        tbody.innerHTML = desigs.map(d => {
-            let total = (staffEntry && staffEntry[d]) ? parseInt(staffEntry[d]) : officeRecords.filter(r => r.designation === d).length;
-            let dRecs = officeRecords.filter(r => r.designation === d);
-            let c12 = dRecs.filter(r => r.hours >= 12).length;
-            let c6 = dRecs.filter(r => r.hours >= 6 && r.hours < 12).length;
-            let cNone = Math.max(0, total - (c12 + c6));
-
-            return `
-                <tr class="border-b">
-                    <td class="p-2 font-bold text-slate-800">${d}</td>
-                    <td class="p-2 text-center font-bold">${total}</td>
-                    <td class="p-2 text-center text-emerald-700 font-bold">${c12}</td>
-                    <td class="p-2 text-center text-amber-700 font-bold">${c6}</td>
-                    <td class="p-2 text-center text-rose-700 font-bold">${cNone}</td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    function addOtherTrainingRow() {
-        let container = document.getElementById('otherTrainingsContainer');
-        let div = document.createElement('div');
-        div.className = 'flex gap-2 flex-wrap sm:flex-nowrap';
-        div.innerHTML = `
-            <input type="text" placeholder="Internal Training Topic" class="flex-1 p-2 text-xs border rounded outline-none other-train-topic min-w-[140px]">
-            <input type="number" placeholder="Hours" min="1" max="50" class="w-20 p-2 text-xs border rounded outline-none other-train-hours">
-            <input type="date" class="p-2 text-xs border rounded outline-none other-train-date">
-            <button type="button" onclick="this.parentElement.remove()" class="bg-rose-600 text-white px-3 py-1 rounded text-xs font-bold">X</button>
-        `;
-        container.appendChild(div);
-    }
-
-    function handleSaveSuperuserProgress(e) {
-        e.preventDefault();
-        const userId = convertNicFormat(document.getElementById('progUserId').value);
-        const office = document.getElementById('progUserOffice').value;
-        const designation = document.getElementById('progUserDesignation').value;
-        const month = document.getElementById('progMonth').value;
-        const specialRemarks = document.getElementById('progSpecialRemarks').value.trim();
-        const productivityTasks = document.getElementById('progProductivityTasks').value.trim();
-        const fileInput = document.getElementById('progAttachmentPdf');
-
-        let otherTrainings = [];
-        let rows = document.querySelectorAll('#otherTrainingsContainer > div');
-        rows.forEach(r => {
-            let topic = r.querySelector('.other-train-topic').value.trim();
-            let hours = r.querySelector('.other-train-hours').value.trim();
-            let date = r.querySelector('.other-train-date').value;
-            if (topic) otherTrainings.push({ topic, hours, date });
-        });
-
-        const executeSave = (pdfData) => {
-            const newSubmission = {
-                year: selectedYear,
-                userId,
-                office,
-                designation,
-                month,
-                specialRemarks,
-                productivityTasks,
-                otherTrainings,
-                pdfAttachment: pdfData,
-                submittedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
-            };
-
-            fetch('api.php?action=save_progress', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newSubmission)
-            })
-            .then(res => res.json())
-            .then(data => {
-                alert('Progress report & presentation data submitted successfully to DB!');
-                loadProgressSubmissionsFromAPI();
-                switchTab('progress-reports');
-            })
-            .catch(err => {
-                console.error('Progress save error:', err);
-                progressSubmissions.push(newSubmission);
-                saveProgressSubmissionsLocally();
-                alert('Progress report saved locally!');
-                switchTab('progress-reports');
-            });
-        };
-
-        if (fileInput && fileInput.files && fileInput.files[0]) {
-            const reader = new FileReader();
-            reader.onload = (evt) => executeSave(evt.target.result);
-            reader.readAsDataURL(fileInput.files[0]);
-        } else {
-            executeSave(null);
-        }
-    }
-
-    function loadProgressSubmissionsFromAPI() {
-        fetch('api.php?action=get_progress&year=' + selectedYear)
-            .then(res => res.json())
-            .then(data => {
-                if (data && data.length > 0) {
-                    progressSubmissions = data;
-                } else {
-                    const saved = localStorage.getItem(STORAGE_KEYS.PROGRESS_REPORTS);
-                    progressSubmissions = saved ? JSON.parse(saved) : [];
-                }
-                updateOfficeDropdowns();
-                renderProgressPresentations();
-            })
-            .catch(err => {
-                console.error('API get_progress error:', err);
-                const saved = localStorage.getItem(STORAGE_KEYS.PROGRESS_REPORTS);
-                progressSubmissions = saved ? JSON.parse(saved) : [];
-                updateOfficeDropdowns();
-                renderProgressPresentations();
-            });
-    }
-
-    function saveProgressSubmissionsLocally() {
-        localStorage.setItem(STORAGE_KEYS.PROGRESS_REPORTS, JSON.stringify(progressSubmissions));
-        updateOfficeDropdowns();
-        renderProgressPresentations();
-    }
-
-    function renderProgressPresentations() {
-        const area = document.getElementById('presentationSlidesArea');
-        if (!area) return;
-
-        const viewType = document.getElementById('presViewType').value;
-        const selOffice = document.getElementById('presOfficeSelect').value;
-        const selMonth = document.getElementById('presMonthSelect').value;
-
-        const monthWrap = document.getElementById('presMonthWrapper');
-        if (viewType === 'monthly') monthWrap.classList.remove('hidden');
-        else monthWrap.classList.add('hidden');
-
-        let filtered = progressSubmissions.filter(p => parseInt(p.year) === parseInt(selectedYear));
-        if (selOffice && selOffice !== 'all') filtered = filtered.filter(p => p.office === selOffice);
-        if (viewType === 'monthly' && selMonth !== 'all') filtered = filtered.filter(p => p.month === selMonth);
-
-        if (filtered.length === 0) {
-            area.innerHTML = `<div class="p-8 text-center text-slate-400 font-bold">No progress submissions found for selected filters. Please submit progress records first.</div>`;
-            return;
-        }
-
-        let offices = (selOffice && selOffice !== 'all') ? [selOffice] : [...new Set(filtered.map(p => p.office))];
-        let slidesHtml = '';
-
-        offices.forEach(off => {
-            let offSubs = filtered.filter(p => p.office === off);
-            slidesHtml += `
-                <div class="slide-card p-6 sm:p-10 rounded-2xl shadow-2xl flex flex-col justify-between border-4 border-amber-500/50 my-4">
-                    <div class="flex justify-between items-center border-b border-indigo-700/60 pb-4 flex-wrap gap-2">
-                        <div class="flex items-center gap-3">
-                            <span class="text-3xl">🏛️</span>
-                            <div>
-                                <h3 class="text-[10px] sm:text-xs font-black text-amber-400 uppercase tracking-widest">Management Development and Training Unit - NWP</h3>
-                                <h4 class="text-base sm:text-lg font-bold text-white">Provincial Training Progress Presentation</h4>
-                            </div>
-                        </div>
-                        <span class="text-xs font-bold bg-amber-500 text-indigo-950 px-3 py-1 rounded-full uppercase">${viewType.toUpperCase()} PROGRESS</span>
-                    </div>
-
-                    <div class="my-auto py-8 text-center space-y-4">
-                        <h2 class="text-2xl sm:text-4xl font-black text-amber-300 font-cinzel tracking-wider uppercase">${off}</h2>
-                        <div class="w-32 h-1 bg-amber-400 mx-auto"></div>
-                        <p class="text-xs sm:text-base text-slate-200 font-medium">Capacity Development, Training Hours & Productivity Report (${viewType === 'monthly' ? (selMonth === 'all' ? 'All Months' : selMonth) : 'Annual'})</p>
-                        <p class="text-[10px] sm:text-xs text-slate-400 font-mono">Submissions Recorded: ${offSubs.length} | Academic Year: ${selectedYear}</p>
-                    </div>
-
-                    <div class="flex justify-between items-center text-[10px] sm:text-xs text-slate-400 border-t border-indigo-700/60 pt-3 flex-wrap gap-2">
-                        <span>Management Development & Training Unit (NWP)</span>
-                        <span>Slide 1 (Overview)</span>
-                    </div>
-                </div>
-            `;
-
-            offSubs.forEach((sub, sIdx) => {
-                slidesHtml += `
-                    <div class="slide-card p-6 sm:p-10 rounded-2xl shadow-2xl flex flex-col justify-between border-4 border-teal-500/50 my-4">
-                        <div class="flex justify-between items-center border-b border-indigo-700/60 pb-3 flex-wrap gap-2">
-                            <h3 class="text-base sm:text-lg font-extrabold text-teal-300 uppercase">⭐ Progress Details: ${sub.month}</h3>
-                            <span class="text-xs font-mono text-slate-400">Office: ${sub.office}</span>
-                        </div>
-
-                        <div class="my-auto py-4 space-y-4">
-                            <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-700 space-y-1">
-                                <h4 class="text-xs font-bold text-amber-400 uppercase">📌 Special Office Remarks:</h4>
-                                <p class="text-xs text-slate-200 leading-relaxed">${sub.specialRemarks || 'None'}</p>
-                            </div>
-
-                            <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-700 space-y-1">
-                                <h4 class="text-xs font-bold text-teal-400 uppercase">🚀 Productivity Initiatives:</h4>
-                                <p class="text-xs text-slate-200 leading-relaxed">${sub.productivityTasks || 'None'}</p>
-                            </div>
-                        </div>
-
-                        <div class="flex justify-between items-center text-[10px] sm:text-xs text-slate-400 border-t border-indigo-700/60 pt-3 flex-wrap gap-2">
-                            <span>User ID: ${sub.userId}</span>
-                            <span>Slide ${sIdx + 2}</span>
-                        </div>
-                    </div>
-                `;
-            });
-        });
-
-        area.innerHTML = slidesHtml;
-    }
-
-    function downloadPresentationPDF() {
-        const area = document.getElementById('presentationSlidesArea');
-        html2pdf().from(area).set({
-            margin: 5,
-            filename: `MDTU_Progress_Presentation_${selectedYear}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-        }).save();
-    }
-
-    function exportProgressReportToExcel() {
-        let ws_data = [
-            ["Office", "User ID", "Month", "Special Remarks", "Productivity Tasks", "Submitted At"]
-        ];
-        progressSubmissions.forEach(p => {
-            ws_data.push([p.office, p.userId, p.month, p.specialRemarks, p.productivityTasks, p.submittedAt]);
-        });
-        let wb = XLSX.utils.book_new();
-        let ws = XLSX.utils.aoa_to_sheet(ws_data);
-        XLSX.utils.book_append_sheet(wb, ws, "Progress Submissions");
-        XLSX.writeFile(wb, `Progress_Submissions_${selectedYear}.xlsx`);
-    }
-
-    function handleTpUserLookup(val) {
-        let conv = convertNicFormat(val);
-        let found = officersDirectory[conv] || officersDirectory[val.trim().toUpperCase()];
-        if (found) {
-            document.getElementById('tpOffice').value = found.office || '';
-            document.getElementById('tpDesignation').value = found.designation || '';
-        }
-    }
-
-    function handleSaveTrainingPlan(e) {
-        e.preventDefault();
-        const userId = convertNicFormat(document.getElementById('tpUserId').value);
-        const office = document.getElementById('tpOffice').value;
-        const designation = document.getElementById('tpDesignation').value;
-        const reqGeneral = document.getElementById('tpRequiredGeneral').value.trim();
-        const specialized = document.getElementById('tpSpecialized').value.trim();
-        const departmental = document.getElementById('tpDepartmental').value.trim();
-        const obt = document.getElementById('tpObt').value.trim();
-
-        trainingPlansList.push({ id: Date.now(), year: selectedYear, userId, office, designation, reqGeneral, specialized, departmental, obt });
-        saveTrainingPlans();
-        alert('Annual training plan entered successfully!');
-        e.target.reset();
-        renderTrainingPlanTable();
-    }
-
-    function loadTrainingPlans() {
-        const saved = localStorage.getItem(STORAGE_KEYS.TRAINING_PLANS);
-        if (saved) {
-            try { trainingPlansList = JSON.parse(saved); } catch(e) { trainingPlansList = []; }
-        } else {
-            trainingPlansList = [];
-            saveTrainingPlans();
-        }
-        renderTrainingPlanTable();
-    }
-
-    function saveTrainingPlans() {
-        localStorage.setItem(STORAGE_KEYS.TRAINING_PLANS, JSON.stringify(trainingPlansList));
-    }
-
-    function renderTrainingPlanTable() {
-        const tbody = document.getElementById('trainingPlanTableBody');
-        if (!tbody) return;
-        tbody.innerHTML = trainingPlansList.map(t => `
-            <tr class="border-b hover:bg-slate-50">
-                <td class="p-3 font-bold text-teal-950">${t.office}</td>
-                <td class="p-3 font-semibold text-slate-700">${t.userId} (${t.designation})</td>
-                <td class="p-3">${t.reqGeneral}</td>
-                <td class="p-3">${t.specialized || '-'}</td>
-                <td class="p-3">${t.departmental || '-'}</td>
-                <td class="p-3 text-teal-700 font-semibold">${t.obt || '-'}</td>
-            </tr>
-        `).join('');
-    }
-
-    function handleMergePrevPlanExcel() {
-        const fileInput = document.getElementById('prevPlanExcelUpload');
-        if (!fileInput.files || fileInput.files.length === 0) {
-            alert('Please select previous plan Excel file.');
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const json = XLSX.utils.sheet_to_json(worksheet);
-
-            if (json && json.length > 0) {
-                json.forEach(row => {
-                    trainingPlansList.push({
-                        id: Date.now() + Math.random(),
-                        year: selectedYear,
-                        userId: row['User ID'] || 'Imported Plan',
-                        office: row['Office Name'] || row['Office'] || 'Unknown Office',
-                        designation: row['Designation'] || 'General',
-                        reqGeneral: row['Required General'] || row['Training Name'] || '',
-                        specialized: row['Specialized'] || '',
-                        departmental: row['Departmental'] || '',
-                        obt: row['OBT'] || ''
-                    });
-                });
-                saveTrainingPlans();
-                renderTrainingPlanTable();
-                alert('Previous plan Excel merged successfully!');
-            }
-        };
-        reader.readAsArrayBuffer(fileInput.files[0]);
-    }
-
-    function exportTrainingPlanToExcel() {
-        let ws_data = [
-            ["Office Name", "Superuser / ID", "Designation", "Required General", "Specialized", "Departmental", "OBT"]
-        ];
-        trainingPlansList.forEach(t => {
-            ws_data.push([t.office, t.userId, t.designation, t.reqGeneral, t.specialized, t.departmental, t.obt]);
-        });
-        let wb = XLSX.utils.book_new();
-        let ws = XLSX.utils.aoa_to_sheet(ws_data);
-        XLSX.utils.book_append_sheet(wb, ws, "Annual Training Plan");
-        XLSX.writeFile(wb, `Annual_Training_Plan_${selectedYear}.xlsx`);
-    }
-
-    function uploadResourcePersonsExcel() {
-        const fileInput = document.getElementById('resourcePersonsExcelInput');
-        if (!fileInput.files || fileInput.files.length === 0) {
-            alert('Please choose an Excel file.');
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const json = XLSX.utils.sheet_to_json(worksheet);
-
-            if (json && json.length > 0) {
-                masterResourcePersons = json.map(r => ({
-                    name: r['Resource Person Name'] || r['Name'] || Object.values(r)[0],
-                    field: r['Field'] || r['Specialization'] || 'General',
-                    institution: r['Institution'] || r['Designation & Institution'] || '',
-                    contact: r['Contact No'] || r['Phone'] || '',
-                    email: r['Email'] || ''
-                }));
-                saveMasterResourcePersons();
-                renderMasterResourcePersonsTable();
-                alert('Resource persons directory loaded successfully!');
-            }
-        };
-        reader.readAsArrayBuffer(fileInput.files[0]);
-    }
-
-    function loadMasterResourcePersons() {
-        const saved = localStorage.getItem(STORAGE_KEYS.MASTER_RESOURCES);
-        if (saved) {
-            try { masterResourcePersons = JSON.parse(saved); } catch(e) { masterResourcePersons = []; }
-        } else {
-            masterResourcePersons = [
-                { name: "Prof. K.A. Perera", field: "Public Administration & Governance", institution: "Wayamba University of Sri Lanka", contact: "0712345678", email: "kaperera@wyb.ac.lk" }
-            ];
-            saveMasterResourcePersons();
-        }
-        renderMasterResourcePersonsTable();
-    }
-
-    function saveMasterResourcePersons() {
-        localStorage.setItem(STORAGE_KEYS.MASTER_RESOURCES, JSON.stringify(masterResourcePersons));
-        renderMasterResourcePersonsTable();
-    }
-
-    function renderMasterResourcePersonsTable() {
-        const tbodyShared = document.getElementById('resourceSharedTableBody');
-        if (!tbodyShared) return;
-        tbodyShared.innerHTML = masterResourcePersons.map(r => `
-            <tr class="border-b hover:bg-slate-50">
-                <td class="p-2.5 font-bold text-purple-950">${r.name}</td>
-                <td class="p-2.5">${r.field}</td>
-                <td class="p-2.5">${r.institution}</td>
-                <td class="p-2.5 font-mono">${r.contact}</td>
-                <td class="p-2.5 font-mono text-indigo-700">${r.email}</td>
-            </tr>
-        `).join('');
-    }
-
-    function toggleFloatingChat() {
-        const panel = document.getElementById('chatFloatingPanel');
-        if (panel) panel.classList.toggle('hidden');
-    }
-
-    function toggleFloatingInbox() {
-        const panel = document.getElementById('inboxFloatingPanel');
-        if (panel) {
-            panel.classList.toggle('hidden');
-            if (!panel.classList.contains('hidden')) {
-                renderNotifications();
-            }
-        }
-    }
-
-    function loadNewsAlert() {
-        const saved = localStorage.getItem(STORAGE_KEYS.ALERT);
-        if (saved) currentNewAlertText = saved;
-        updateNewsAlertUI();
-    }
-
-    function updateNewsAlertUI() {
-        const headerBar = document.getElementById('headerAlertTickerText');
-        const chatBar = document.getElementById('chatTickerAlertContent');
-        if (headerBar) headerBar.innerText = currentNewAlertText;
-        if (chatBar) chatBar.innerText = currentNewAlertText;
-    }
-
-    function openNewAlertModal() {
-        if (authRole !== 'admin' && authRole !== 'super') {
-            alert('Unauthorized! Only Admin and Super Admin can manage Alerts.');
-            return;
-        }
-        document.getElementById('modalAlertTextInput').value = currentNewAlertText;
-        document.getElementById('alertManageModal').classList.remove('hidden');
-    }
-
-    function openManageAlertModal() {
-        openNewAlertModal();
-    }
-
-    function closeManageAlertModal() {
-        document.getElementById('alertManageModal').classList.add('hidden');
-    }
-
-    function saveNewAlert(e) {
-        e.preventDefault();
-        const text = document.getElementById('modalAlertTextInput').value.trim();
-        if (!text) return;
-        currentNewAlertText = text;
-        localStorage.setItem(STORAGE_KEYS.ALERT, currentNewAlertText);
-        updateNewsAlertUI();
-        closeManageAlertModal();
-        alert('🚨 Alert successfully updated!');
-    }
-
-    function editCurrentAlert() {
-        openNewAlertModal();
-    }
-
-    function deleteCurrentAlert() {
-        if (authRole !== 'admin' && authRole !== 'super') {
-            alert('Unauthorized!');
-            return;
-        }
-        if (confirm('Are you sure you want to reset this Alert?')) {
-            currentNewAlertText = "🚨 MDTU System Live Support Active.";
-            localStorage.setItem(STORAGE_KEYS.ALERT, currentNewAlertText);
-            updateNewsAlertUI();
-            alert('Alert reset successfully.');
-        }
-    }
-
-    function convertTextLinksToHyperlinks(text) {
-        if (!text) return '';
-        const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-        return text.replace(urlRegex, function(url) {
-            return `<a href="${url}" target="_blank" class="text-blue-600 underline font-semibold break-all hover:text-blue-800">${url}</a>`;
-        });
-    }
-
-    function loadLiveChatMessages() {
-        const saved = localStorage.getItem(STORAGE_KEYS.CHAT);
-        if (saved) {
-            try { liveChatMessages = JSON.parse(saved); } catch(e) { liveChatMessages = []; }
-        } else {
-            liveChatMessages = [
-                { id: 1, sender: 'System', senderRole: 'admin', recipient: 'all', text: 'Welcome to MDTU Live Chat Support.', time: '10:00 AM' }
-            ];
-            saveLiveChatMessages();
-        }
-        renderLiveChatMessages();
-    }
-
-    function saveLiveChatMessages() {
-        localStorage.setItem(STORAGE_KEYS.CHAT, JSON.stringify(liveChatMessages));
-        renderLiveChatMessages();
-    }
-
-    function updateChatRecipientOptions() {
-        const sel1 = document.getElementById('chatRecipientSelect');
-        const group1 = document.getElementById('chatUserListGroup');
-        if (!sel1) return;
-        let optionsHtml = systemUsers.map(u => `<option value="${u.username}">${u.username} (${u.role.toUpperCase()})</option>`).join('');
-        if (group1) group1.innerHTML = optionsHtml;
-    }
-
-    function updateNotificationRecipientOptions() {
-        const sel = document.getElementById('notifTargetUser');
-        if (!sel) return;
-        let optionsHtml = `<option value="all">📢 All Users & Superusers (Broadcast)</option>` + 
-            systemUsers.map(u => `<option value="${u.username}">${u.username} (${u.role.toUpperCase()})</option>`).join('');
-        sel.innerHTML = optionsHtml;
-    }
-
-    function handleSendLiveChatMessage(e) {
-        e.preventDefault();
-        const inputMain = document.getElementById('chatInputText');
-        const inputFloat = document.getElementById('chatInputFloating');
-        const selMain = document.getElementById('chatRecipientSelect');
-        const selFloat = document.getElementById('chatRecipientSelectFloating');
-
-        const text = (inputMain && inputMain.value) || (inputFloat && inputFloat.value);
-        const recipient = (selMain && selMain.value) || (selFloat && selFloat.value) || 'all';
-
-        if (!text) return;
-
-        const senderName = currentUser ? currentUser.username : (authRole !== 'none' ? authRole : 'Guest User');
-        const newMsg = {
-            id: Date.now(),
-            sender: senderName,
-            senderRole: authRole,
-            recipient: recipient,
-            text: text,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-
-        liveChatMessages.push(newMsg);
-        saveLiveChatMessages();
-
-        if (inputMain) inputMain.value = '';
-        if (inputFloat) inputFloat.value = '';
-    }
-
-    function renderLiveChatMessages() {
-        const box = document.getElementById('chatMessagesBox');
-        const pop = document.getElementById('chatPopupBody');
-        if (!box) return;
-
-        let currentActiveUser = currentUser ? currentUser.username : (authRole !== 'none' ? authRole : 'Guest User');
-
-        let visibleMsgs = liveChatMessages.filter(m => {
-            if (m.recipient === 'all') return true;
-            if (m.recipient === 'admin' && (authRole === 'admin' || authRole === 'super')) return true;
-            if (m.sender === currentActiveUser || m.recipient === currentActiveUser) return true;
-            if (authRole === 'super') return true;
-            return false;
-        });
-
-        let html = visibleMsgs.map(m => {
-            let isPrivate = m.recipient !== 'all';
-            let formattedText = convertTextLinksToHyperlinks(m.text);
-            return `
-                <div class="p-2.5 rounded-lg border ${isPrivate ? 'bg-amber-50/90 border-amber-300' : 'bg-white border-slate-200'} shadow-sm space-y-1">
-                    <div class="flex justify-between items-center text-[10px] font-bold text-slate-500">
-                        <span>👤 ${m.sender} to <strong>${m.recipient}</strong> ${isPrivate ? '<span class="text-rose-600">(🔒 Private)</span>' : ''}</span>
-                        <span class="font-mono">${m.time}</span>
-                    </div>
-                    <p class="text-xs text-slate-900">${formattedText}</p>
-                    <div class="flex justify-end gap-2 pt-1">
-                        <button onclick="replyToChat('${m.sender}')" class="text-[10px] font-bold text-indigo-700 hover:underline">Reply ↩</button>
-                        ${(authRole === 'super' || authRole === 'admin' || m.sender === currentActiveUser) ? `<button onclick="deleteChatMessage(${m.id})" class="text-[10px] font-bold text-rose-600 hover:underline">Delete 🗑️</button>` : ''}
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        box.innerHTML = html;
-        box.scrollTop = box.scrollHeight;
-        if (pop) {
-            pop.innerHTML = html;
-            pop.scrollTop = pop.scrollHeight;
-        }
-    }
-
-    function replyToChat(senderName) {
-        const sel1 = document.getElementById('chatRecipientSelect');
-        if (sel1) {
-            sel1.value = senderName;
-            document.getElementById('chatInputText').focus();
-        }
-        switchTab('live-chat-tab');
-    }
-
-    function deleteChatMessage(id) {
-        if (confirm('Delete this message?')) {
-            liveChatMessages = liveChatMessages.filter(m => m.id !== id);
-            saveLiveChatMessages();
-        }
-    }
-
-    function executeArchiveBackup() {
-        const range = document.getElementById('archiveYearRange').value;
-        const log = document.getElementById('archiveLogArea');
-        if (log) {
-            log.innerHTML += `<p>[${new Date().toLocaleTimeString()}] Archiving data for range (${range})... Backup Completed Successfully.</p>`;
-            log.scrollTop = log.scrollHeight;
-        }
-        alert(`Data for Archive Period (${range}) has been successfully compressed and stored.`);
-    }
-
-    function loadNotifications() {
-        const saved = localStorage.getItem(STORAGE_KEYS.NOTIFS);
-        if (saved) {
-            try { notificationsList = JSON.parse(saved); } catch(e) { notificationsList = []; }
-        } else {
-            notificationsList = [];
-            saveNotifications();
-        }
-        renderNotifications();
-    }
-
-    function saveNotifications() {
-        localStorage.setItem(STORAGE_KEYS.NOTIFS, JSON.stringify(notificationsList));
-        renderNotifications();
-        renderHeaderYellowAlertList();
-    }
-
-    function handleSendNotification(e) {
-        e.preventDefault();
-        const target = document.getElementById('notifTargetUser').value;
-        const title = document.getElementById('notifTitle').value.trim();
-        const message = document.getElementById('notifMessage').value.trim();
-        const fileInput = document.getElementById('notifPdfFile');
-
-        if (!title || !message) return;
-
-        let pdfData = null;
-        if (fileInput && fileInput.files && fileInput.files[0]) {
-            const reader = new FileReader();
-            reader.onload = function(evt) {
-                pdfData = evt.target.result;
-                pushNotification(target, title, message, pdfData);
-            };
-            reader.readAsDataURL(fileInput.files[0]);
-        } else {
-            pushNotification(target, title, message, null);
-        }
-    }
-
-    function pushNotification(target, title, message, pdfData) {
-        let senderUser = currentUser ? currentUser.username : (authRole !== 'none' ? authRole : 'admin');
-        const newNotif = {
-            id: Date.now(),
-            target,
-            title,
-            message,
-            sender: senderUser,
-            date: new Date().toISOString().split('T')[0],
-            pdfData
-        };
-        notificationsList.unshift(newNotif);
-        saveNotifications();
-        alert('Notification successfully sent!');
-        document.getElementById('notifTitle').value = '';
-        document.getElementById('notifMessage').value = '';
-        if (document.getElementById('notifPdfFile')) document.getElementById('notifPdfFile').value = '';
-    }
-
-    function deleteNotification(id) {
-        let found = notificationsList.find(n => n.id === id);
-        if (!found) return;
-        let currentActiveUser = currentUser ? currentUser.username : authRole;
-
-        let canDelete = (authRole === 'admin' || authRole === 'super' || found.sender === currentActiveUser);
-        if (!canDelete) {
-            alert('Unauthorized to delete this message!');
-            return;
-        }
-
-        if (confirm('Delete this notification message?')) {
-            notificationsList = notificationsList.filter(n => n.id !== id);
-            saveNotifications();
-            alert('Message deleted successfully.');
-        }
-    }
-
-    function editNotification(id) {
-        let found = notificationsList.find(n => n.id === id);
-        if (!found) return;
-        let currentActiveUser = currentUser ? currentUser.username : authRole;
-
-        let canEdit = (authRole === 'admin' || authRole === 'super' || found.sender === currentActiveUser);
-        if (!canEdit) {
-            alert('Unauthorized to edit this message!');
-            return;
-        }
-
-        let newTitle = prompt('Edit Title:', found.title);
-        let newMsg = prompt('Edit Message:', found.message);
-        if (newTitle !== null && newMsg !== null) {
-            found.title = newTitle.trim();
-            found.message = newMsg.trim();
-            saveNotifications();
-            alert('Message updated successfully.');
-        }
-    }
-
-    function renderNotifications() {
-        const container = document.getElementById('notificationsContainer');
-        const popupBody = document.getElementById('inboxPopupBody');
-        const badge = document.getElementById('floatingInboxBadge');
-
-        let currentActiveUser = currentUser ? currentUser.username : (authRole !== 'none' ? authRole : 'Guest User');
-
-        let visibleNotifs = notificationsList.filter(n => {
-            if (n.target === 'all') return true;
-            if (n.target === currentActiveUser) return true;
-            if (n.sender === currentActiveUser) return true;
-            if (authRole === 'admin' || authRole === 'super') return true;
-            return false;
-        });
-
-        if (badge) badge.innerText = visibleNotifs.length;
-
-        if (!visibleNotifs || visibleNotifs.length === 0) {
-            let emptyMsg = '<p class="text-xs text-slate-400 text-center py-4">No notifications in active inbox.</p>';
-            if (container) container.innerHTML = emptyMsg;
-            if (popupBody) popupBody.innerHTML = emptyMsg;
-            return;
-        }
-
-        let html = visibleNotifs.map(n => {
-            let isUserInquiry = n.title && n.title.startsWith('User Inquiry');
-            let cardBgClass = isUserInquiry ? 'bg-cyan-100/90 border-cyan-500' : 'bg-amber-50/70 border-amber-400';
-            let badgeColor = isUserInquiry ? 'bg-cyan-800' : 'bg-amber-600';
-            let canModify = (authRole === 'admin' || authRole === 'super' || n.sender === currentActiveUser);
-
-            return `
-            <div class="${cardBgClass} p-3 sm:p-4 rounded-xl border shadow-sm space-y-2 relative">
-                <div class="flex justify-between items-center text-[10px]">
-                    <span class="${badgeColor} text-white font-black px-2 py-0.5 rounded-full uppercase">Target: ${n.target.toUpperCase()}</span>
-                    <span class="font-mono text-slate-500">${n.date}</span>
-                </div>
-                <div class="flex justify-between items-start pt-0.5">
-                    <h4 class="text-xs sm:text-sm font-bold text-slate-900">🔔 ${n.title}</h4>
-                    <div class="flex gap-1 shrink-0 ml-2">
-                        ${canModify ? `<button onclick="editNotification(${n.id})" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] px-2 py-0.5 rounded">Edit</button>` : ''}
-                        ${canModify ? `<button onclick="deleteNotification(${n.id})" class="bg-rose-600 hover:bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded">Delete 🗑️</button>` : ''}
-                    </div>
-                </div>
-                <p class="text-xs text-slate-800 whitespace-pre-line leading-relaxed">${convertTextLinksToHyperlinks(n.message)}</p>
-                ${n.pdfData ? `<div class="pt-1"><a href="${n.pdfData}" download="${n.title.replace(/\s+/g, '_')}.pdf" class="inline-flex items-center gap-1.5 bg-indigo-900 text-white text-[10px] font-bold px-2.5 py-1 rounded shadow hover:bg-indigo-800">📥 Attached Document</a></div>` : ''}
-            </div>
-            `;
-        }).join('');
-
-        if (container) container.innerHTML = html;
-        if (popupBody) popupBody.innerHTML = html;
-    }
-
-    function renderHeaderYellowAlertList() {
-        const container = document.getElementById('headerYellowAlertListContainer');
-        if (!container) return;
-
-        let currentActiveUser = currentUser ? currentUser.username : (authRole !== 'none' ? authRole : 'Guest User');
-        let visibleNotifs = notificationsList.filter(n => {
-            if (n.target === 'all') return true;
-            if (n.target === currentActiveUser) return true;
-            if (authRole === 'admin' || authRole === 'super') return true;
-            return false;
-        });
-
-        if (!visibleNotifs || visibleNotifs.length === 0) {
-            container.innerHTML = '<span class="text-slate-500 italic text-[11px]">No active notifications/files right now.</span>';
-            return;
-        }
-
-        container.innerHTML = visibleNotifs.map(n => `
-            <div class="bg-white px-2.5 py-1 rounded border border-amber-300 shadow-sm flex items-center gap-2">
-                <span class="font-bold text-amber-900">📌 ${n.title}</span>
-                ${n.pdfData ? `<a href="${n.pdfData}" download="${n.title}.pdf" class="bg-indigo-900 text-white text-[10px] px-2 py-0.5 rounded font-bold hover:bg-indigo-800">📥 Download PDF</a>` : '<span class="text-[10px] text-slate-500">Notice</span>'}
-            </div>
-        `).join('');
-    }
-
-    function handleUserSendMessage(e) {
-        e.preventDefault();
-        const idNo = document.getElementById('userMsgIdNo').value.trim();
-        const phone = document.getElementById('userMsgPhone').value.trim();
-        const msg = document.getElementById('userMsgText').value.trim();
-
-        if (!idNo || !phone || !msg) return;
-
-        const broadcastMsg = {
-            id: Date.now(),
-            target: 'admin',
-            title: `User Inquiry (ID: ${idNo} | Phone: ${phone})`,
-            message: msg,
-            sender: idNo,
-            date: new Date().toISOString().split('T')[0],
-            pdfData: null
-        };
-        notificationsList.unshift(broadcastMsg);
-        saveNotifications();
-        alert('Your message was successfully submitted to the Administration!');
-        document.getElementById('userMsgIdNo').value = '';
-        document.getElementById('userMsgPhone').value = '';
-        document.getElementById('userMsgText').value = '';
-    }
-
-    function loadSystemUsers() {
-        const saved = localStorage.getItem(STORAGE_KEYS.USERS);
-        if (saved) {
-            try { systemUsers = JSON.parse(saved); } catch(e) { systemUsers = []; }
-        } else {
-            systemUsers = [
-                { id: 1, username: 'admin', password: '123', role: 'admin' },
-                { id: 2, username: 'superadmin', password: '123', role: 'super' },
-                { id: 3, username: 'officer', password: '123', role: 'superuser' }
-            ];
-            saveSystemUsers();
-        }
-        renderUserAccountsTable();
-    }
-
-    function saveSystemUsers() {
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(systemUsers));
-        updateChatRecipientOptions();
-        updateNotificationRecipientOptions();
-    }
-
-    function handleCreateUser(e) {
-        e.preventDefault();
-        const u = document.getElementById('newUsername').value.trim();
-        const p = document.getElementById('newPassword').value.trim();
-        const r = document.getElementById('newRole').value;
-
-        if (systemUsers.some(x => x.username === u)) {
-            alert('Username already exists!');
-            return;
-        }
-
-        systemUsers.push({ id: Date.now(), username: u, password: p, role: r });
-        saveSystemUsers();
-        renderUserAccountsTable();
-        alert('User account created successfully!');
-        document.getElementById('newUsername').value = '';
-        document.getElementById('newPassword').value = '';
-    }
-
-    function renderUserAccountsTable() {
-        const tbody = document.getElementById('userAccountsTableBody');
-        if (!tbody) return;
-        tbody.innerHTML = systemUsers.map(u => `
-            <tr class="border-b hover:bg-slate-50">
-                <td class="p-2.5 font-bold text-indigo-950">${u.username}</td>
-                <td class="p-2.5 uppercase font-semibold text-xs text-amber-700">${u.role}</td>
-                <td class="p-2.5 font-mono">${u.password}</td>
-                <td class="p-2.5 text-center">
-                    <button onclick="deleteUserAccount(${u.id})" class="bg-rose-600 text-white px-2.5 py-1 rounded text-[10px] font-bold">Delete</button>
-                </td>
-            </tr>
-        `).join('');
-    }
-
-    function deleteUserAccount(id) {
-        if (confirm('Delete this user account?')) {
-            systemUsers = systemUsers.filter(x => x.id !== id);
-            saveSystemUsers();
-            renderUserAccountsTable();
-        }
-    }
-
-    function toggleAuthModal() {
-        const m = document.getElementById('authModal');
-        if (m) m.classList.toggle('hidden');
-    }
-
-    function handleLogin(e) {
-        e.preventDefault();
-        const u = document.getElementById('loginUsername').value.trim();
-        const p = document.getElementById('loginPassword').value.trim();
-
-        const found = systemUsers.find(x => x.username === u && x.password === p);
-        if (found) {
-            authRole = found.role;
-            currentUser = found;
-            toggleAuthModal();
-            updateAuthUI();
-            alert(`Logged in successfully as ${found.role.toUpperCase()}`);
-            if (authRole === 'superuser') switchTab('progress-entry');
-            else switchTab('add-record');
-        } else {
-            alert('Invalid username or password!');
-        }
-    }
-
-    function updateAuthUI() {
-        const loggedInElements = document.querySelectorAll('.logged-in-only');
-        const adminElements = document.querySelectorAll('.admin-only');
-        const onlyAdminAndSuperElements = document.querySelectorAll('.only-admin-and-super');
-        const superAdminElements = document.querySelectorAll('.super-admin-only');
-        const superUserElements = document.querySelectorAll('.super-user-only');
-        const authBtn = document.getElementById('authBtn');
-        const userMsgCard = document.getElementById('userSendMessageCard');
-
-        let isSuperAdmin = authRole === 'super';
-        let isAdmin = authRole === 'admin' || authRole === 'super';
-        let isSuperUser = authRole === 'superuser';
-        let isLoggedIn = authRole !== 'none';
-
-        if (userMsgCard) {
-            if (isAdmin) userMsgCard.classList.add('hidden');
-            else userMsgCard.classList.remove('hidden');
-        }
-
-        loggedInElements.forEach(el => {
-            if (isLoggedIn) el.classList.remove('hidden');
-            else el.classList.add('hidden');
-        });
-
-        adminElements.forEach(el => {
-            if (isAdmin) el.classList.remove('hidden');
-            else el.classList.add('hidden');
-        });
-
-        onlyAdminAndSuperElements.forEach(el => {
-            if (isAdmin) el.classList.remove('hidden');
-            else el.classList.add('hidden');
-        });
-
-        superAdminElements.forEach(el => {
-            if (isSuperAdmin) el.classList.remove('hidden');
-            else el.classList.add('hidden');
-        });
-
-        superUserElements.forEach(el => {
-            if (isSuperUser) el.classList.remove('hidden');
-            else el.classList.add('hidden');
-        });
-
-        if (authBtn) {
-            if (isLoggedIn) {
-                authBtn.innerText = `🔓 Logout (${authRole.toUpperCase()})`;
-                authBtn.onclick = function() {
-                    authRole = 'none';
-                    currentUser = null;
-                    updateAuthUI();
-                    switchTab('add-record');
-                    alert('Logged out successfully.');
-                };
-            } else {
-                authBtn.innerText = '🔐 Login';
-                authBtn.onclick = toggleAuthModal;
-            }
-        }
-        updateChatRecipientOptions();
-        updateNotificationRecipientOptions();
-        renderLiveChatMessages();
-        renderNotifications();
-        renderHeaderYellowAlertList();
-    }
-
-    function switchTab(tabId) {
-        document.querySelectorAll('.tab-view').forEach(v => v.classList.add('hidden'));
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-
-        let target = document.getElementById('view-' + tabId);
-        if (target) target.classList.remove('hidden');
-
-        let btn = document.getElementById('tab-' + tabId);
-        if (btn) btn.classList.add('active');
-
-        if (tabId === 'dashboard') renderDashboard();
-        if (tabId === 'confirm-attendance') renderConfirmAttendanceTable();
-        if (tabId === 'manage-programs') renderConfiguredProgramsTable();
-        if (tabId === 'progress-reports') renderProgressPresentations();
-        if (tabId === 'training-plan-report') renderTrainingPlanTable();
-        if (tabId === 'resource-persons-master-report') renderMasterResourcePersonsTable();
-        if (tabId === 'analytics') renderAnalytics();
-    }
-
-    function loadProgramConfigs() {
-        const saved = localStorage.getItem(STORAGE_KEYS.PROGS);
-        if (saved) {
-            try { programConfigs = JSON.parse(saved); } catch(e) { programConfigs = []; }
-        } else {
-            programConfigs = [
-                { name: 'Advanced Office Management & Capacity Building', venue: 'MDTU Auditorium, Kurunegala', dates: ['2026-09-22', '2026-09-23'], hours: 12, resourcePersons: ['Prof. K.A. Perera', 'Dr. S.M. Bandara'] }
-            ];
-            saveProgramConfigs();
-        }
-        updateProgramDatalists();
-    }
-
-    function saveProgramConfigs() {
-        localStorage.setItem(STORAGE_KEYS.PROGS, JSON.stringify(programConfigs));
-        updateProgramDatalists();
-    }
-
-    function updateProgramDatalists() {
-        const pd = document.getElementById('programDatalist');
-        const attPs = document.getElementById('attProgSelect');
-        const adminPs = document.getElementById('adminConfirmProgramSelect');
-        const analyticsPs = document.getElementById('analyticsTrainingSelect');
-        const tnPs = document.getElementById('tnFilterProgram');
-
-        let opts = programConfigs.map(p => `<option value="${p.name}">`).join('');
-        let selOpts = programConfigs.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
-
-        if (pd) pd.innerHTML = opts;
-        if (attPs) attPs.innerHTML = `<option value="">-- Select Program --</option>` + selOpts;
-        if (adminPs) adminPs.innerHTML = `<option value="">-- Select Program --</option>` + selOpts;
-        if (analyticsPs) analyticsPs.innerHTML = `<option value="all">All Programs</option>` + selOpts;
-        if (tnPs) tnPs.innerHTML = `<option value="">-- Choose Program --</option>` + selOpts;
-    }
-
-    function onProgramSelected() {
-        let val = document.getElementById('trainingNameSelect').value;
-        let found = programConfigs.find(p => p.name === val);
-        if (found) {
-            document.getElementById('dateInput').value = found.dates[0] || '';
-            document.getElementById('hoursInput').value = found.hours || 6;
-            
-            let container = document.getElementById('resourceRatingsContainer');
-            container.innerHTML = found.resourcePersons.map((rp, idx) => `
-                <div class="bg-white p-3 rounded-lg border flex flex-col sm:flex-row justify-between items-center gap-2">
-                    <span class="text-xs font-bold text-indigo-950">${rp}</span>
-                    <select name="lecturerRating" data-lecturer="${rp}" class="p-1.5 text-xs border rounded font-bold text-amber-600 outline-none">
-                        <option value="5" selected>5 Stars ⭐⭐⭐⭐⭐</option>
-                        <option value="4">4 Stars ⭐⭐⭐⭐</option>
-                        <option value="3">3 Stars ⭐⭐⭐</option>
-                        <option value="2">2 Stars ⭐⭐</option>
-                        <option value="1">1 Star ⭐</option>
-                    </select>
-                </div>
-            `).join('');
-        }
-    }
-
-    function handleSingleSubmit(e) {
-        e.preventDefault();
-        const nic = convertNicFormat(document.getElementById('nicInput').value);
-        const name = document.getElementById('nameInput').value.trim();
-        const designation = document.getElementById('designationInput').value.trim();
-        const office = document.getElementById('officeInput').value.trim();
-        const trainingName = document.getElementById('trainingNameSelect').value.trim();
-        const date = document.getElementById('dateInput').value;
-        const hours = parseInt(document.getElementById('hoursInput').value) || 6;
-        const foodRating = parseInt(document.getElementById('foodRatingInput').value);
-        const coordinationRating = parseInt(document.getElementById('coordinationRatingInput').value);
-        const feedback = document.getElementById('feedbackInput').value.trim();
-
-        let lecturerEvals = [];
-        document.querySelectorAll('select[name="lecturerRating"]').forEach(sel => {
-            lecturerEvals.push({ lecturer: sel.getAttribute('data-lecturer'), rating: parseInt(sel.value) });
-        });
-
-        if (!globalDatabase[selectedYear]) globalDatabase[selectedYear] = [];
-
-        const newRecord = {
-            year: selectedYear, nic, name, designation, office, trainingName, date, hours, foodRating, coordinationRating, feedback, lecturerEvals, absentDates: '', confirmed: true
-        };
-
-        globalDatabase[selectedYear].push(newRecord);
-
-        fetch('api.php?action=save_record', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newRecord)
-        }).then(res => res.json()).then(data => {
-            console.log('Saved to server DB:', data);
-        }).catch(err => console.error('DB Save error:', err));
-
-        officersDirectory[nic] = { name, designation, office };
-        saveOfficersDirectory();
-        saveLiveData();
-        alert('Training record saved successfully!');
-        document.getElementById('addTrainingForm').reset();
-        document.getElementById('dateInput').valueAsDate = new Date();
-    }
-
-    function fetchLiveData() {
-        fetch('api.php?action=get_data&year=' + selectedYear)
-            .then(res => res.json())
-            .then(data => {
-                if (data && data.length > 0) {
-                    globalDatabase[selectedYear] = data;
-                } else {
-                    const saved = localStorage.getItem('mdtu_global_database_' + selectedYear);
-                    globalDatabase[selectedYear] = saved ? JSON.parse(saved) : [];
-                }
-                populateYearSelector();
-            })
-            .catch(err => {
-                console.error('API fetch error:', err);
-                const saved = localStorage.getItem('mdtu_global_database_' + selectedYear);
-                globalDatabase[selectedYear] = saved ? JSON.parse(saved) : [];
-                populateYearSelector();
-            });
-    }
-
-    function saveLiveData() {
-        localStorage.setItem('mdtu_global_database_' + selectedYear, JSON.stringify(globalDatabase[selectedYear]));
-    }
-
-    function populateYearSelector() {
-        const sel = document.getElementById('activeYearSelect');
-        if (!sel) return;
-        let years = [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2];
-        sel.innerHTML = years.map(y => `<option value="${y}" ${y === selectedYear ? 'selected' : ''}>${y}</option>`).join('');
-    }
-
-    function switchYear() {
-        selectedYear = parseInt(document.getElementById('activeYearSelect').value);
-        fetchLiveData();
-        loadProgressSubmissionsFromAPI();
-    }
-
-    function loadAnnualStaffMatrix() {
-        const saved = localStorage.getItem(STORAGE_KEYS.STAFF_MATRIX);
-        if (saved) {
-            try { annualStaffMatrix = JSON.parse(saved); } catch(e) { annualStaffMatrix = []; }
-        } else {
-            annualStaffMatrix = [
-                { office: 'District Secretariat, Kurunegala', 'Management Assistant': 25, 'Development Officer': 30, 'Executive Officer': 5, 'Office Assistant': 10 }
-            ];
-            saveAnnualStaffMatrix();
-        }
-        renderAnnualStaffMatrixTable();
-        updateOfficeDropdowns();
-    }
-
-    function saveAnnualStaffMatrix() {
-        localStorage.setItem(STORAGE_KEYS.STAFF_MATRIX, JSON.stringify(annualStaffMatrix));
-        updateOfficeDropdowns();
-    }
-
-    function updateOfficeDropdowns() {
-        const selects = ['officeReportSelect', 'officeDesignationSelect', 'presOfficeSelect'];
-        let matrixOffices = annualStaffMatrix.map(m => m.office);
-        let submissionOffices = progressSubmissions.map(p => p.office);
-        let offices = [...new Set([...matrixOffices, ...submissionOffices])];
-
-        let html = `<option value="">-- Choose Office --</option>` + offices.map(o => `<option value="${o}">${o}</option>`).join('');
-        let presHtml = `<option value="all">All Offices</option>` + offices.map(o => `<option value="${o}">${o}</option>`).join('');
-        
-        selects.forEach(id => {
-            let el = document.getElementById(id);
-            if (el) {
-                if (id === 'presOfficeSelect') el.innerHTML = presHtml;
-                else el.innerHTML = html;
-            }
-        });
-    }
-
-    function uploadAnnualStaffExcel() {
-        const fileInput = document.getElementById('annualStaffExcelFile');
-        if (!fileInput.files || fileInput.files.length === 0) {
-            alert('Please select an Excel file.');
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const json = XLSX.utils.sheet_to_json(worksheet);
-
-            if (json && json.length > 0) {
-                annualStaffMatrix = json.map(row => {
-                    let officeName = row['Office Name'] || row['Office'] || Object.values(row)[0];
-                    return { office: officeName, ...row };
-                });
-                saveAnnualStaffMatrix();
-                renderAnnualStaffMatrixTable();
-                alert('Annual staff matrix updated successfully!');
-            }
-        };
-        reader.readAsArrayBuffer(fileInput.files[0]);
-    }
-
-    function renderAnnualStaffMatrixTable() {
-        const head = document.getElementById('annualStaffMatrixHead');
-        const body = document.getElementById('annualStaffMatrixBody');
-        if (!head || !body || annualStaffMatrix.length === 0) return;
-
-        let keys = Object.keys(annualStaffMatrix[0]);
-        head.innerHTML = `<tr>` + keys.map(k => `<th class="p-2.5">${k}</th>`).join('') + `</tr>`;
-        body.innerHTML = annualStaffMatrix.map(row => `
-            <tr class="border-b">` + keys.map(k => `<td class="p-2.5">${row[k] || 0}</td>`).join('') + `</tr>
-        `).join('');
-    }
-
-    function renderDashboard() {
-        const records = globalDatabase[selectedYear] || [];
-        let total = records.length;
-        let completed = records.filter(r => r.hours >= 12).length;
-        let incomplete = total - completed;
-        let rate = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-        document.getElementById('statTotalOfficers').innerText = total;
-        document.getElementById('statCompletedOfficers').innerText = completed;
-        document.getElementById('statIncompleteOfficers').innerText = incomplete;
-        document.getElementById('statCompletionRate').innerText = rate + '%';
-
-        let tbody = document.getElementById('overviewTableBody');
-        if (tbody) {
-            tbody.innerHTML = records.map(r => `
-                <tr class="border-b hover:bg-slate-50">
-                    <td class="p-3 font-semibold">${r.office}</td>
-                    <td class="p-3 font-mono">${r.nic}</td>
-                    <td class="p-3 font-bold">${r.name}</td>
-                    <td class="p-3">${r.designation}</td>
-                    <td class="p-3 text-center font-bold text-indigo-900">${r.hours}h</td>
-                    <td class="p-3 text-center"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${r.hours >= 12 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">${r.hours >= 12 ? 'Completed' : 'Incomplete'}</span></td>
-                </tr>
-            `).join('');
-        }
-    }
-
-    function generateAttendanceCertSlip() {
-        const nic = convertNicFormat(document.getElementById('attNicInput').value);
-        const prog = document.getElementById('attProgSelect').value;
-
-        const records = globalDatabase[selectedYear] || [];
-        let found = records.find(r => r.nic === nic && r.trainingName === prog);
-
-        if (!found) {
-            alert('No matching attendance record found for this NIC and Program.');
-            return;
-        }
-
-        document.getElementById('attSlipName').innerText = found.name;
-        document.getElementById('attSlipDesignation').innerText = found.designation;
-        document.getElementById('attSlipOffice').innerText = found.office;
-        document.getElementById('attSlipNic').innerText = found.nic;
-        document.getElementById('attSlipProg').innerText = found.trainingName;
-        document.getElementById('attSlipVenue').innerText = 'Management Development Training Unit, Chief Secretariat, Kurunegala - 0372222018';
-        document.getElementById('attSlipDates').innerText = found.date;
-        document.getElementById('attSlipHours').innerText = found.hours;
-
-        if (found.absentDates) {
-            document.getElementById('attSlipAbsentSection').classList.remove('hidden');
-            document.getElementById('attSlipAbsentDates').innerText = found.absentDates;
-        } else {
-            document.getElementById('attSlipAbsentSection').classList.add('hidden');
-        }
-
-        if (found.confirmed) {
-            document.getElementById('attAdminConfirmedNotice').classList.remove('hidden');
-        } else {
-            document.getElementById('attAdminConfirmedNotice').classList.add('hidden');
-        }
-
-        document.getElementById('attendanceSlipContainer').classList.remove('hidden');
-    }
-
-    function renderConfirmAttendanceTable() {
-        const prog = document.getElementById('adminConfirmProgramSelect').value;
-        const date = document.getElementById('adminConfirmFirstDate').value;
-        const tbody = document.getElementById('confirmAttendanceTableBody');
-        if (!tbody) return;
-
-        const records = globalDatabase[selectedYear] || [];
-        let filtered = records.filter(r => (!prog || r.trainingName === prog) && (!date || r.date === date));
-
-        tbody.innerHTML = filtered.map((r, idx) => `
-            <tr class="border-b">
-                <td class="p-3 text-center"><input type="checkbox" ${r.confirmed ? 'checked' : ''} onchange="toggleConfirmAttendance(${idx}, this.checked)" class="w-4 h-4 accent-indigo-900 cursor-pointer"></td>
-                <td class="p-3 font-mono">${r.nic}</td>
-                <td class="p-3 font-bold">${r.name}</td>
-                <td class="p-3">${r.office}</td>
-                <td class="p-3">${r.trainingName}</td>
-                <td class="p-3 text-center font-mono">${r.date}</td>
-                <td class="p-3 text-center"><input type="text" value="${r.absentDates || ''}" onchange="updateAbsentDates(${idx}, this.value)" placeholder="e.g. 2026-10-02" class="w-full p-1.5 text-xs border rounded bg-white font-mono"></td>
-            </tr>
-        `).join('');
-    }
-
-    function toggleConfirmAttendance(idx, status) {
-        if (globalDatabase[selectedYear][idx]) {
-            globalDatabase[selectedYear][idx].confirmed = status;
-            saveLiveData();
-        }
-    }
-
-    function updateAbsentDates(idx, val) {
-        if (globalDatabase[selectedYear][idx]) {
-            globalDatabase[selectedYear][idx].absentDates = val;
-            saveLiveData();
-        }
-    }
-
-    function filterAdminConfirmAttendance() {
-        renderConfirmAttendanceTable();
-    }
-
-    function searchOfficerRecords() {
-        const nic = convertNicFormat(document.getElementById('verifyNicInput').value);
-        const records = globalDatabase[selectedYear] || [];
-        let matches = records.filter(r => r.nic === nic);
-
-        let resDiv = document.getElementById('verificationResults');
-        let notFound = document.getElementById('verificationNotFound');
-
-        if (matches.length > 0) {
-            resDiv.classList.remove('hidden');
-            notFound.classList.add('hidden');
-            document.getElementById('vOfficerName').innerText = matches[0].name;
-            document.getElementById('vOfficerDetails').innerText = `${matches[0].designation} - ${matches[0].office} (NIC: ${matches[0].nic})`;
-            let total = matches.reduce((acc, curr) => acc + curr.hours, 0);
-            document.getElementById('vTotalHours').innerText = total + ' Hours';
-
-            let tbody = document.getElementById('vHistoryTableBody');
-            tbody.innerHTML = matches.map((m, idx) => `
-                <tr class="border-b">
-                    <td class="p-3">${idx + 1}</td>
-                    <td class="p-3 font-bold">${m.trainingName}</td>
-                    <td class="p-3 font-mono">${m.date}</td>
-                    <td class="p-3 font-mono text-rose-600">${m.absentDates || '-'}</td>
-                    <td class="p-3">${m.lecturerEvals ? m.lecturerEvals.map(l => l.lecturer).join(', ') : '-'}</td>
-                    <td class="p-3 text-center font-bold text-emerald-700">${m.hours}h</td>
-                </tr>
-            `).join('');
-        } else {
-            resDiv.classList.add('hidden');
-            notFound.classList.remove('hidden');
-        }
-    }
-
-    function renderConfiguredProgramsTable() {
-        const tbody = document.getElementById('configuredProgramsTableBody');
-        if (!tbody) return;
-        tbody.innerHTML = programConfigs.map(p => `
-            <tr class="border-b">
-                <td class="p-2 font-bold">${p.name}</td>
-                <td class="p-2">${p.venue}</td>
-                <td class="p-2 font-mono text-xs">${p.dates.join(', ')}</td>
-                <td class="p-2 text-center font-bold text-amber-700">${p.hours}h</td>
-                <td class="p-2">${p.resourcePersons.join(', ')}</td>
-            </tr>
-        `).join('');
-    }
-
-    function addResourcePersonConfigRow() {
-        let container = document.getElementById('progResourcePersonsContainer');
-        let div = document.createElement('div');
-        div.className = 'flex gap-2';
-        div.innerHTML = `<input type="text" placeholder="Resource Person / Lecturer Name" class="flex-1 p-2 text-xs border rounded outline-none resource-person-input"><button type="button" onclick="this.parentElement.remove()" class="bg-rose-600 text-white px-3 py-1 rounded text-xs font-bold">X</button>`;
-        container.appendChild(div);
-    }
-
-    function calculateProgramHours() {
-        let datesStr = document.getElementById('progDatesConfig').value;
-        let dates = datesStr.split(',').map(d => d.trim()).filter(d => d);
-        if (dates.length > 0) {
-            document.getElementById('progFirstDateConfig').value = dates[0];
-            document.getElementById('progHoursConfig').value = dates.length * 6;
-        }
-    }
-
-    function handleSaveProgramConfig(e) {
-        e.preventDefault();
-        const name = document.getElementById('progNameConfig').value.trim();
-        const venue = document.getElementById('progVenueConfig').value.trim();
-        const datesStr = document.getElementById('progDatesConfig').value.trim();
-        const dates = datesStr.split(',').map(d => d.trim()).filter(d => d);
-        const hours = parseInt(document.getElementById('progHoursConfig').value) || (dates.length * 6);
-
-        let resourcePersons = [];
-        document.querySelectorAll('.resource-person-input').forEach(inp => {
-            if (inp.value.trim()) resourcePersons.push(inp.value.trim());
-        });
-
-        programConfigs.push({ name, venue, dates, hours, resourcePersons });
-        saveProgramConfigs();
-        renderConfiguredProgramsTable();
-        alert('Program configuration saved successfully!');
-        e.target.reset();
-    }
-
-    function loadSavedTemplate() {
-        let logo = localStorage.getItem(STORAGE_KEYS.LOGO);
-        let sig = localStorage.getItem(STORAGE_KEYS.SIG);
-        let seal = localStorage.getItem(STORAGE_KEYS.SEAL);
-        let mName = localStorage.getItem(STORAGE_KEYS.MADAM_NAME);
-        let mTitle = localStorage.getItem(STORAGE_KEYS.MADAM_TITLE);
-
-        if (logo) {
-            let el = document.getElementById('certLogo');
-            if (el) { el.src = logo; el.classList.remove('hidden'); document.getElementById('defaultLogo').classList.add('hidden'); }
-            let headerLogo = document.getElementById('headerLogoImg');
-            let headerDefaultIcon = document.getElementById('headerDefaultIcon');
-            if (headerLogo) { headerLogo.src = logo; headerLogo.classList.remove('hidden'); if (headerDefaultIcon) headerDefaultIcon.classList.add('hidden'); }
-            let attLogo = document.getElementById('attSlipLogoImg');
-            let attDefaultLogo = document.getElementById('attSlipDefaultLogo');
-            if (attLogo) { attLogo.src = logo; attLogo.classList.remove('hidden'); if (attDefaultLogo) attDefaultLogo.classList.add('hidden'); }
-        }
-        if (sig) {
-            let el = document.getElementById('certSignature');
-            if (el) { el.src = sig; el.classList.remove('hidden'); document.getElementById('defaultSignature').classList.add('hidden'); }
-        }
-        if (seal) {
-            let el = document.getElementById('certSeal');
-            if (el) { el.src = seal; el.classList.remove('hidden'); document.getElementById('defaultSeal').classList.add('hidden'); }
-        }
-        if (mName) {
-            let el = document.getElementById('viewMadamName');
-            if (el) el.innerText = mName;
-        }
-        if (mTitle) {
-            let el = document.getElementById('viewMadamTitle');
-            if (el) el.innerText = mTitle;
-        }
-    }
-
-    function uploadTemplateAsset(type, event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(evt) {
-            let dataUrl = evt.target.result;
-            if (type === 'logo') localStorage.setItem(STORAGE_KEYS.LOGO, dataUrl);
-            if (type === 'signature') localStorage.setItem(STORAGE_KEYS.SIG, dataUrl);
-            if (type === 'seal') localStorage.setItem(STORAGE_KEYS.SEAL, dataUrl);
-            loadSavedTemplate();
-            alert('Template asset saved permanently!');
-        };
-        reader.readAsDataURL(file);
-    }
-
-    function saveMadamDetails() {
-        let name = document.getElementById('settingMadamName').value;
-        let title = document.getElementById('settingMadamTitle').value;
-        localStorage.setItem(STORAGE_KEYS.MADAM_NAME, name);
-        localStorage.setItem(STORAGE_KEYS.MADAM_TITLE, title);
-        loadSavedTemplate();
-    }
-
-    function resetTemplateSettings() {
-        if (confirm('Reset all permanent template settings?')) {
-            localStorage.removeItem(STORAGE_KEYS.LOGO);
-            localStorage.removeItem(STORAGE_KEYS.SIG);
-            localStorage.removeItem(STORAGE_KEYS.SEAL);
-            localStorage.removeItem(STORAGE_KEYS.MADAM_NAME);
-            localStorage.removeItem(STORAGE_KEYS.MADAM_TITLE);
-            location.reload();
-        }
-    }
-
-    function searchOfficerForCert() {
-        const nic = convertNicFormat(document.getElementById('certNicSearch').value);
-        const records = globalDatabase[selectedYear] || [];
-        let matches = records.filter(r => r.nic === nic);
-
-        let sel = document.getElementById('certProgramSelect');
-        if (matches.length > 0) {
-            sel.innerHTML = `<option value="">-- Select Attended Program --</option>` + matches.map(m => `<option value="${m.trainingName}">${m.trainingName} (${m.date})</option>`).join('');
-            sel.disabled = false;
-        } else {
-            sel.innerHTML = `<option value="">-- No records found for this NIC --</option>`;
-            sel.disabled = true;
-            alert('No attendance records found for this NIC number.');
-        }
-    }
-
-    function generateSelectedCertificate() {
-        const nic = convertNicFormat(document.getElementById('certNicSearch').value);
-        const progName = document.getElementById('certProgramSelect').value;
-        if (!progName) return;
-
-        const records = globalDatabase[selectedYear] || [];
-        let found = records.find(r => r.nic === nic && r.trainingName === progName);
-        if (!found) return;
-
-        document.getElementById('viewStudentName').innerText = found.name;
-        document.getElementById('viewStudentDetails').innerText = `${found.designation} - ${found.office}`;
-        document.getElementById('viewCourseTitle').innerText = found.trainingName;
-        document.getElementById('viewCourseDate').innerText = found.date;
-        document.getElementById('viewCourseHours').innerText = found.hours + ' Hours';
-        document.getElementById('certSerialNo').innerText = `MDTU-${selectedYear}-NWP-${Math.floor(1000 + Math.random() * 9000)}`;
-
-        document.getElementById('certDownloadBtn').disabled = false;
-        document.getElementById('certImageBtn').disabled = false;
-    }
-
-    function downloadCertPDF() {
-        const element = document.getElementById('certificateContainer');
-        html2pdf().from(element).save('MDTU_Certificate.pdf');
-    }
-
-    function downloadCertJPEG() {
-        const element = document.getElementById('certificateContainer');
-        html2canvas(element).then(canvas => {
-            let link = document.createElement('a');
-            link.download = 'MDTU_Certificate.jpg';
-            link.href = canvas.toDataURL('image/jpeg');
-            link.click();
-        });
-    }
-
-    function exportTableToExcel(tableId, filename) {
-        let table = document.getElementById(tableId);
-        let wb = XLSX.utils.table_to_book(table, { sheet: "Sheet1" });
-        XLSX.writeFile(wb, filename + '.xlsx');
-    }
-
-    function downloadOfficialReportPDF(containerId, filename) {
-        const element = document.getElementById(containerId);
-        html2pdf().from(element).set({
-            margin: 10,
-            filename: `${filename}_${selectedYear}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-        }).save();
-    }
-
-    function downloadAnalyticsPDF() {
-        const element = document.getElementById('pdfContentArea');
-        html2pdf().from(element).set({
-            margin: 8,
-            filename: `MDTU_Evaluation_Analytics_${selectedYear}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        }).save();
-    }
-
-    function generateOfficeReport() {
-        const office = document.getElementById('officeReportSelect').value;
-        const records = globalDatabase[selectedYear] || [];
-        let filtered = records.filter(r => r.office === office);
-
-        let header = document.getElementById('officeReportHeader');
-        let section = document.getElementById('officeCompletedSection');
-        let tbody = document.getElementById('officeCompletedTableBody');
-
-        if (!office || filtered.length === 0) {
-            header.classList.add('hidden');
-            section.classList.add('hidden');
-            return;
-        }
-
-        document.getElementById('officeReportTitle').innerText = office;
-        document.getElementById('officeReportSubtitle').innerText = `Training Hours Report - ${selectedYear}`;
-        header.classList.remove('hidden');
-        section.classList.remove('hidden');
-
-        tbody.innerHTML = filtered.map(r => `
-            <tr class="border-b">
-                <td class="p-2 font-mono">${r.nic}</td>
-                <td class="p-2 font-bold">${r.name}</td>
-                <td class="p-2">${r.designation}</td>
-                <td class="p-2 text-center font-bold ${r.hours >= 12 ? 'text-emerald-700' : 'text-amber-700'}">${r.hours}h</td>
-            </tr>
-        `).join('');
-    }
-
-    function generateOfficeDesignationReport() {
-        const office = document.getElementById('officeDesignationSelect').value;
-        const records = globalDatabase[selectedYear] || [];
-        let filtered = records.filter(r => r.office === office);
-        let staffEntry = annualStaffMatrix.find(m => m.office === office);
-
-        let header = document.getElementById('officeDesignationHeader');
-        let tbody = document.getElementById('officeDesignationTableBody');
-
-        if (!office) {
-            header.classList.add('hidden');
-            tbody.innerHTML = '';
-            return;
-        }
-
-        document.getElementById('odReportTitle').innerText = office;
-        document.getElementById('odReportSubtitle').innerText = `Designation-wise Hours Summary (${selectedYear})`;
-        header.classList.remove('hidden');
-
-        let desigs = ["Management Assistant", "Development Officer", "Executive Officer", "Office Assistant"];
-        if (staffEntry) {
-            desigs = Object.keys(staffEntry).filter(k => k !== 'office' && k !== 'Office Name');
-        }
-
-        tbody.innerHTML = desigs.map(d => {
-            let total = (staffEntry && staffEntry[d]) ? parseInt(staffEntry[d]) : filtered.filter(r => r.designation === d).length;
-            let dRecs = filtered.filter(r => r.designation === d);
-            let c12 = dRecs.filter(r => r.hours >= 12).length;
-            let c6 = dRecs.filter(r => r.hours >= 6 && r.hours < 12).length;
-            let incomp = Math.max(0, total - c12);
-
-            return `
-                <tr class="border-b hover:bg-slate-50">
-                    <td class="p-3 font-bold text-indigo-950">${d}</td>
-                    <td class="p-3 text-center font-bold">${total}</td>
-                    <td class="p-3 text-center text-emerald-700 font-bold">${c12}</td>
-                    <td class="p-3 text-center text-rose-700 font-bold">${incomp}</td>
-                    <td class="p-3 text-center text-amber-700 font-bold">${c6}</td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    function filterTrainingNamelist() {
-        const d = document.getElementById('tnFilterDate').value;
-        const p = document.getElementById('tnFilterProgram').value;
-        const tbody = document.getElementById('trainingNamelistTableBody');
-        const header = document.getElementById('tnReportHeader');
-
-        const records = globalDatabase[selectedYear] || [];
-        let filtered = records.filter(r => (!d || r.date === d) && (!p || r.trainingName === p));
-
-        if (header) {
-            header.classList.remove('hidden');
-            document.getElementById('tnReportTitle').innerText = p || 'All Training Programs';
-            document.getElementById('tnReportSubtitle').innerText = `Date: ${d || 'All Dates'} | Total Officers: ${filtered.length}`;
-        }
-
-        if (tbody) {
-            tbody.innerHTML = filtered.map((r, idx) => `
-                <tr class="border-b hover:bg-slate-50">
-                    <td class="p-3 font-mono">${idx + 1}</td>
-                    <td class="p-3 font-mono font-bold">${r.nic}</td>
-                    <td class="p-3 font-bold text-indigo-950">${r.name}</td>
-                    <td class="p-3">${r.office}</td>
-                    <td class="p-3">${r.designation}</td>
-                    <td class="p-3 text-center font-bold text-emerald-700">${r.hours}h</td>
-                </tr>
-            `).join('');
-        }
-    }
-
-    let doughnutChartInstance = null;
-    let barChartInstance = null;
-
-    function renderAnalytics() {
-        const prog = document.getElementById('analyticsTrainingSelect').value;
-        const records = globalDatabase[selectedYear] || [];
-        let filtered = records.filter(r => prog === 'all' || !prog || r.trainingName === prog);
-
-        const meta = document.getElementById('analyticsHeaderMeta');
-        if (meta) {
-            meta.innerText = `Program: ${prog === 'all' || !prog ? 'All Programs' : prog} | Date: All Scheduled Dates`;
-        }
-
-        let total = filtered.length;
-        document.getElementById('aStatCount').innerText = total;
-
-        let avgFood = 0, avgCoord = 0, avgLect = 0;
-        let lectScores = [];
-
-        filtered.forEach(r => {
-            avgFood += (r.foodRating || 5);
-            avgCoord += (r.coordinationRating || 5);
-            if (r.lecturerEvals && r.lecturerEvals.length > 0) {
-                r.lecturerEvals.forEach(l => lectScores.push(l.rating));
-            }
-        });
-
-        avgFood = total > 0 ? (avgFood / total).toFixed(1) : "0.0";
-        avgCoord = total > 0 ? (avgCoord / total).toFixed(1) : "0.0";
-        avgLect = lectScores.length > 0 ? (lectScores.reduce((a, b) => a + b, 0) / lectScores.length).toFixed(1) : "0.0";
-
-        document.getElementById('aStatFood').innerText = `${avgFood} / 5`;
-        document.getElementById('aStatCoordination').innerText = `${avgCoord} / 5`;
-        document.getElementById('aStatLecturer').innerText = `${avgLect} / 5`;
-
-        let tbody = document.getElementById('analyticsFeedbackTableBody');
-        if (tbody) {
-            tbody.innerHTML = filtered.map(r => `
-                <tr class="border-b">
-                    <td class="p-2.5 font-bold">${r.lecturerEvals ? r.lecturerEvals.map(l => l.lecturer).join(', ') : 'Faculty'}</td>
-                    <td class="p-2.5 text-center font-bold text-amber-600">${r.foodRating || 5} ⭐</td>
-                    <td class="p-2.5 text-center font-bold text-teal-600">${r.coordinationRating || 5} ⭐</td>
-                    <td class="p-2.5 text-slate-700">${r.feedback || 'Good session.'}</td>
-                </tr>
-            `).join('');
-        }
-
-        const ctxD = document.getElementById('feedbackDoughnutChart').getContext('2d');
-        if (doughnutChartInstance) doughnutChartInstance.destroy();
-        doughnutChartInstance = new Chart(ctxD, {
-            type: 'doughnut',
-            data: {
-                labels: ['5 Stars', '4 Stars', '3 Stars', '1-2 Stars'],
-                datasets: [{
-                    data: [total * 0.7 || 1, total * 0.2 || 0, total * 0.1 || 0, 0],
-                    backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444']
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false }
-        });
-
-        const ctxB = document.getElementById('quarterlyBarChart').getContext('2d');
-        if (barChartInstance) barChartInstance.destroy();
-        barChartInstance = new Chart(ctxB, {
-            type: 'bar',
-            data: {
-                labels: ['Lecturer', 'Food', 'Coordination'],
-                datasets: [{
-                    label: 'Average Score (/5)',
-                    data: [parseFloat(avgLect) || 4.5, parseFloat(avgFood) || 4.8, parseFloat(avgCoord) || 4.6],
-                    backgroundColor: ['#4338ca', '#10b981', '#f59e0b']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { y: { beginAtZero: true, max: 5 } }
-            }
-        });
-    }
-</script>
+<script src="assets/app.js?v=<?= (int) @filemtime(__DIR__ . '/assets/app.js') ?>"></script>
 </body>
 </html>
