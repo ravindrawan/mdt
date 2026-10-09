@@ -13,6 +13,13 @@
 //    3. DB_HOST is normally 'localhost' on SLT hosting.
 //    The tables are created automatically the first time the site is opened.
 
+
+//    $host = getenv('MDTU_DB_HOST') ?: 'localhost';
+//    $user = getenv('MDTU_DB_USER') ?: 'mdtunwgo_dbuser';
+//    $pass = getenv('MDTU_DB_PASS') ?: 'LsHnaTiuBg2Ih1A&';
+//    $name = getenv('MDTU_DB_NAME') ?: 'mdtunwgo_mdtu';
+
+
 const DB_HOST = 'localhost';
 const DB_PORT = 3306;
 const DB_NAME = 'mdtu_db';
