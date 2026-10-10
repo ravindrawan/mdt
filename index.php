@@ -1,6 +1,6 @@
 <?php
 require __DIR__ . '/config.php';
-$csrf = csrf_token();
+//$csrf = csrf_token();
 ?>
 <!DOCTYPE html>
 <html lang="en">
