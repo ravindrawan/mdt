@@ -164,6 +164,31 @@ function rating_in(array $src, $key)
     return max(1, min(5, $r));
 }
 
+function officer_gender(PDO $pdo, $nic, array $src)
+{
+    $st = $pdo->prepare("SELECT gender FROM officers WHERE nic = ?");
+    $st->execute([$nic]);
+    $saved = (string) ($st->fetchColumn() ?: '');
+    if ($saved === 'Female' || $saved === 'Male') {
+        return $saved;
+    }
+    $chosen = str_in($src, 'gender', 10, true, 'Gender');
+    if ($chosen !== 'Female' && $chosen !== 'Male') {
+        fail('Select Female or Male.');
+    }
+    return $chosen;
+}
+
+function officer_phone(array $src)
+{
+    $raw = str_in($src, 'phone', 20, true, 'Officer phone number');
+    $digits = preg_replace('/\D+/', '', $raw);
+    if (strlen($digits) < 9 || strlen($digits) > 15) {
+        fail('Enter a valid officer phone number, for example 0771234567.');
+    }
+    return $digits;
+}
+
 function normalize_nic($nic)
 {
     $clean = strtoupper(preg_replace('/\s+/', '', (string) $nic));
@@ -495,7 +520,7 @@ switch ($action) {
             $data['progress'] = load_progress($pdo, $year);
             $data['plans'] = load_plans($pdo, $year);
             $data['chatUsers'] = $pdo->query("SELECT username, role FROM users ORDER BY username")->fetchAll();
-            $data['officers'] = $pdo->query("SELECT nic, name, designation, office FROM officers ORDER BY name")->fetchAll();
+            $data['officers'] = $pdo->query("SELECT nic, name, designation, office, phone, gender FROM officers ORDER BY name")->fetchAll();
         }
         if (current_role() === 'super' && !must_change_password()) {
             $data['users'] = load_users($pdo);
@@ -606,7 +631,7 @@ switch ($action) {
 
     case 'lookup_officer':
         $nic = normalize_nic($_GET['nic'] ?? '');
-        $st = $pdo->prepare("SELECT nic, name, designation, office FROM officers WHERE nic = ?");
+        $st = $pdo->prepare("SELECT nic, name, designation, office, phone, gender FROM officers WHERE nic = ?");
         $st->execute([$nic]);
         respond(['status' => 'ok', 'officer' => $st->fetch() ?: null]);
 
@@ -615,6 +640,8 @@ switch ($action) {
         $name = str_in($in, 'name', 255, true, 'Officer name');
         $designation = str_in($in, 'designation', 255, true, 'Designation');
         $office = str_in($in, 'office', 255, true, 'Office');
+        $phone = officer_phone($in);
+        $gender = officer_gender($pdo, $nic, $in);
 
         $st = $pdo->prepare("SELECT * FROM programs WHERE id = ?");
         $st->execute([int_in($in, 'programId')]);
@@ -631,6 +658,11 @@ switch ($action) {
         }
 
         $confirmed = is_admin() ? 1 : 0;
+        // Save the officer first, so a changed phone number is kept even when this program was already registered.
+        $pdo->prepare("INSERT INTO officers (nic, name, designation, office, phone, gender) VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE name = VALUES(name), designation = VALUES(designation), office = VALUES(office), phone = VALUES(phone),
+            gender = IF(gender IS NULL OR gender = '', VALUES(gender), gender)")
+            ->execute([$nic, $name, $designation, $office, $phone, $gender]);
         try {
             $pdo->prepare("INSERT INTO training_records
                 (year, programId, nic, name, designation, office, trainingName, venue, date, hours, foodRating, coordinationRating, feedback, lecturerEvals, absentDates, confirmed, confirmedBy, confirmedAt)
@@ -651,10 +683,6 @@ switch ($action) {
         $id = (int) $pdo->lastInsertId();
         $serial = mdtu_cert_serial((int) substr($program['firstDate'], 0, 4), $id);
         $pdo->prepare("UPDATE training_records SET certSerial = ? WHERE id = ?")->execute([$serial, $id]);
-
-        $pdo->prepare("INSERT INTO officers (nic, name, designation, office) VALUES (?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE name = VALUES(name), designation = VALUES(designation), office = VALUES(office)")
-            ->execute([$nic, $name, $designation, $office]);
 
         audit('record.create', 'training_record', $id, ['nic' => $nic, 'name' => $name, 'designation' => $designation, 'office' => $office,
             'programId' => (int) $program['id'], 'program' => $program['name'], 'certSerial' => $serial, 'autoConfirmed' => (bool) $confirmed]);

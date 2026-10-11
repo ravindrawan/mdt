@@ -223,8 +223,11 @@ mdtu_security_headers();
                 🔐 Login
             </button>
 
-            <div class="bg-indigo-950/90 px-2 py-1 rounded-lg border border-indigo-700/80 flex items-center gap-1 shadow-inner">
-                <span class="text-[10px] font-black text-amber-400 uppercase tracking-wider">🌐<span class="hidden sm:inline"> Translate:</span></span>
+            <div class="notranslate bg-indigo-950/90 px-2 py-1 rounded-lg border border-indigo-700/80 flex items-center gap-1 shadow-inner">
+                <span class="text-[10px] font-black text-amber-400 uppercase tracking-wider">🌐</span>
+                <button type="button" data-lang-btn="si" onclick="setUiLang('si')" class="text-[10px] font-black px-2 py-1 rounded bg-indigo-950 text-amber-200">සිංහල</button>
+                <button type="button" data-lang-btn="en" onclick="setUiLang('en')" class="text-[10px] font-black px-2 py-1 rounded bg-indigo-950 text-amber-200">English</button>
+                <button type="button" data-lang-btn="ta" onclick="setUiLang('ta')" class="text-[10px] font-black px-2 py-1 rounded bg-indigo-950 text-amber-200">தமிழ்</button>
                 <div id="google_translate_element"></div>
             </div>
 
@@ -289,6 +292,7 @@ mdtu_security_headers();
 
         <details class="nav-group logged-in-only hidden" data-tile-color="indigo">
             <summary class="nav-heading text-indigo-300">Shared Reports</summary>
+            <button onclick="switchTab('participation-list')" id="tab-participation-list" class="tab-btn text-amber-200">📋 Participations List</button>
             <button onclick="switchTab('training-plan-report')" id="tab-training-plan-report" class="tab-btn text-teal-300">📋 Annual Training Plan Report</button>
             <button onclick="switchTab('resource-persons-master-report')" id="tab-resource-persons-master-report" class="tab-btn text-purple-300">👥 Resource Persons Directory</button>
             <button onclick="switchTab('office-report')" id="tab-office-report" class="tab-btn">🏢 Office 12h Status</button>
@@ -331,6 +335,13 @@ mdtu_security_headers();
                 </div>
             </div>
             <div id="homeStats" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+            <button type="button" onclick="switchTab('participation-list')" class="w-full text-left bg-white border-2 border-amber-300 hover:border-amber-500 rounded-2xl p-4 sm:p-5 shadow-sm flex items-center gap-4">
+                <span class="w-14 h-14 rounded-xl bg-amber-100 text-2xl flex items-center justify-center shrink-0">📋</span>
+                <span class="min-w-0">
+                    <span class="block text-base sm:text-lg font-black text-indigo-950">Participations List</span>
+                    <span class="block text-xs sm:text-sm text-slate-600 mt-0.5">One program at a time, by the dates it was held. Download Excel or PDF.</span>
+                </span>
+            </button>
             <div id="homeTiles" class="space-y-5"></div>
             <p class="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-xl p-3">🛡️ For security you are logged out automatically after 30 minutes without activity. Every change made in the system is written to a permanent, tamper-evident audit log.</p>
         </div>
@@ -478,7 +489,7 @@ mdtu_security_headers();
                             </div>
                             <div>
                                 <label class="block text-xs font-semibold text-slate-700 mb-1">Officer Name * (Auto-filled / Editable)</label>
-                                <input type="text" id="nameInput" required list="officerNameDatalist" autocomplete="off" onchange="onOfficerNameChosen()" placeholder="Officer Name" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
+                                <input type="text" id="nameInput" required list="officerNameDatalist" autocomplete="off" onchange="onOfficerNameChosen()" placeholder="Officer Name" class="notranslate w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
                                 <datalist id="officerNameDatalist"></datalist>
                             </div>
                         </div>
@@ -486,7 +497,7 @@ mdtu_security_headers();
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-xs font-semibold text-slate-700 mb-1">Designation * (Auto-filled / Select)</label>
-                                <input type="text" id="designationInput" list="designationDatalist" required placeholder="Designation" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
+                                <input type="text" id="designationInput" list="designationDatalist" required placeholder="Designation" class="notranslate w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
                                 <datalist id="designationDatalist">
                                     <option value="Management Assistant">
                                     <option value="Development Officer">
@@ -496,10 +507,23 @@ mdtu_security_headers();
                             </div>
                             <div>
                                 <label class="block text-xs font-semibold text-slate-700 mb-1">Office / Department * (Auto-filled / Select)</label>
-                                <input type="text" id="officeInput" list="officeDatalist" required placeholder="Type or select Office" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
+                                <input type="text" id="officeInput" list="officeDatalist" required placeholder="Type or select Office" class="notranslate w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
                                 <datalist id="officeDatalist">
                                     <option value="District Secretariat, Kurunegala">
                                 </datalist>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Officer Phone Number * (Auto-filled / Editable)</label>
+                                <input type="tel" id="phoneInput" required inputmode="tel" autocomplete="tel" placeholder="e.g. 0771234567" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white font-mono focus:ring-2 focus:ring-indigo-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Gender * (Select once)</label>
+                                <select id="genderInput" required class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white focus:ring-2 focus:ring-indigo-500">
+                                    <option value="">-- Female or Male --</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Male">Male</option>
+                                </select>
+                                <span id="genderLockNote" class="hidden text-[10px] font-bold text-slate-500 mt-1 block">Saved for this officer. It cannot be changed.</span>
                             </div>
                         </div>
                     </div>
@@ -561,7 +585,23 @@ mdtu_security_headers();
 
                         <div>
                             <label class="block text-xs font-semibold text-slate-700 mb-1">Feedback / Constructive Comments</label>
-                            <textarea id="feedbackInput" rows="2" placeholder="Write feedback comments here..." class="w-full p-2.5 text-xs border rounded-lg outline-none"></textarea>
+                            <div id="feedbackSuggestions" class="flex flex-wrap gap-1.5 mb-2">
+                                <button type="button" onclick="useFeedbackPhrase('Good')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Good</button>
+                                <button type="button" onclick="useFeedbackPhrase('Very good')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Very good</button>
+                                <button type="button" onclick="useFeedbackPhrase('Excellent')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Excellent</button>
+                                <button type="button" onclick="useFeedbackPhrase('Satisfactory')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Satisfactory</button>
+                                <button type="button" onclick="useFeedbackPhrase('Very useful')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Very useful</button>
+                                <button type="button" onclick="useFeedbackPhrase('Well organized')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Well organized</button>
+                            </div>
+                            <textarea id="feedbackInput" rows="2" list="feedbackPhrases" placeholder="Choose a phrase above, or type your own comment..." class="w-full p-2.5 text-xs border rounded-lg outline-none"></textarea>
+                            <datalist id="feedbackPhrases">
+                                <option value="Good">
+                                <option value="Very good">
+                                <option value="Excellent">
+                                <option value="Satisfactory">
+                                <option value="Very useful">
+                                <option value="Well organized">
+                            </datalist>
                         </div>
                     </div>
 
@@ -590,11 +630,11 @@ mdtu_security_headers();
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Office / Department</label>
-                            <input type="text" id="progUserOffice" required list="officeDatalist" onchange="autoCalculateOfficeStaffProgress(); populateAutoMdtuPrograms(this.value)" placeholder="Auto-filled / type office" class="w-full p-2.5 text-xs border rounded bg-white font-bold text-indigo-950">
+                            <input type="text" id="progUserOffice" required list="officeDatalist" onchange="autoCalculateOfficeStaffProgress(); populateAutoMdtuPrograms(readOfficerField('progUserOffice'))" placeholder="Auto-filled / type office" class="notranslate w-full p-2.5 text-xs border rounded bg-white font-bold text-indigo-950">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Designation</label>
-                            <input type="text" id="progUserDesignation" list="designationDatalist" placeholder="Auto-filled / type" class="w-full p-2.5 text-xs border rounded bg-white font-bold text-slate-800">
+                            <input type="text" id="progUserDesignation" list="designationDatalist" placeholder="Auto-filled / type" class="notranslate w-full p-2.5 text-xs border rounded bg-white font-bold text-slate-800">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Reporting Month *</label>
@@ -1285,30 +1325,30 @@ mdtu_security_headers();
                             </div>
                             <p class="lh-maroon" style="text-align:center; font-size:9.5px; font-weight:700; margin-top:12px; white-space:nowrap;">
                                 <span class="lh-si">පළාත් සභා කාර්යාල සංකීර්ණය, කුරුණෑගල</span>
-                                &nbsp;·&nbsp; <span class="lh-ta">மாகாண சபை அலுவலகத் தொகுதி, குருநாகல்</span>
-                                &nbsp;·&nbsp; <span class="lh-en">Provincial Council Office Complex, Kurunegala</span>
+                                <span class="lh-ta">மாகாண சபை அலுவலகத் தொகுதி, குருநாகல்</span>
+                                <span class="lh-en">Provincial Council Office Complex, Kurunegala</span>
                             </p>
                             <p style="text-align:center; font-size:10.5px; color:#111827; margin-top:6px; white-space:nowrap;">
                                 <span class="lh-si" style="font-weight:700;">කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය</span>
-                                &nbsp;·&nbsp; <span class="lh-ta" style="font-weight:500;">முகாமை அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு</span>
-                                &nbsp;·&nbsp; <span class="lh-en">Management Development &amp; Training Unit</span>
+                                <span class="lh-ta" style="font-weight:500;">முகாமை அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு</span>
+                                <span class="lh-en">Management Development &amp; Training Unit</span>
                             </p>
                             <div class="lh-rule" style="margin-top:10px;"></div>
 
                             <!-- My No / Your No / Date -->
                             <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 18px 0;">
                                 <div class="lh-ref">
-                                    <div class="lh-ref-labels"><div class="lh-si">මගේ අංකය</div><div class="lh-ta">எனது இலக்கம்</div><div>My No</div></div>
+                                    <div class="lh-ref-labels"><div class="lh-si">මගේ අංකය</div><div class="lh-ta">எனது இலக்கம்</div><div class="lh-en">My No</div></div>
                                     <span class="lh-brace" style="font-size:44px;">}</span>
                                     <span id="attSlipFileNo" class="lh-ref-value"></span>
                         </div>
                                 <div class="lh-ref">
-                                    <div class="lh-ref-labels"><div class="lh-si">ඔබේ අංකය</div><div class="lh-ta">உமது இலக்கம்</div><div>Your No</div></div>
+                                    <div class="lh-ref-labels"><div class="lh-si">ඔබේ අංකය</div><div class="lh-ta">உமது இலக்கம்</div><div class="lh-en">Your No</div></div>
                                     <span class="lh-brace" style="font-size:44px;">}</span>
                                     <span class="lh-ref-value" style="min-width:90px;"></span>
                     </div>
                                 <div class="lh-ref">
-                                    <div class="lh-ref-labels"><div class="lh-si">දිනය</div><div class="lh-ta">திகதி</div><div>Date</div></div>
+                                    <div class="lh-ref-labels"><div class="lh-si">දිනය</div><div class="lh-ta">திகதி</div><div class="lh-en">Date</div></div>
                                     <span class="lh-brace" style="font-size:44px;">}</span>
                                     <span id="attSlipIssueDate" class="lh-ref-value"></span>
                     </div>
@@ -1318,14 +1358,15 @@ mdtu_security_headers();
                             <div style="padding:0 30px; margin-top:26px;">
                                 <div style="text-align:center;">
                                     <p class="lh-si lh-maroon" style="font-size:15px; font-weight:700;">පැමිණීමේ සහතිකය</p>
-                                    <h2 style="font-size:25px; font-weight:700; letter-spacing:3px; color:#1e1b4b; text-transform:uppercase; margin-top:2px;">Certificate of Attendance</h2>
+                                    <p class="lh-ta lh-maroon" style="font-size:16px; font-weight:700;">வருகைச் சான்றிதழ்</p>
+                                    <h2 class="lh-en" style="font-size:25px; font-weight:700; letter-spacing:3px; color:#1e1b4b; text-transform:uppercase; margin-top:2px;">Certificate of Attendance</h2>
                                     <div style="width:220px; height:3px; margin:6px auto 0; border-top:1px solid #8b1a1a; border-bottom:1px solid #8b1a1a;"></div>
                                 </div>
 
                                 <div style="font-size:15px; margin-top:22px;">
-                                    <div class="lh-row"><span>Officer Name</span><span id="attSlipName" style="color:#1e1b4b; text-transform:uppercase;"></span></div>
-                                    <div class="lh-row"><span>Designation</span><span id="attSlipDesignation"></span></div>
-                                    <div class="lh-row"><span>Office / Department</span><span id="attSlipOffice"></span></div>
+                                    <div class="lh-row"><span>Officer Name</span><span id="attSlipName" class="notranslate" style="color:#1e1b4b; text-transform:uppercase;"></span></div>
+                                    <div class="lh-row"><span>Designation</span><span id="attSlipDesignation" class="notranslate"></span></div>
+                                    <div class="lh-row"><span>Office / Department</span><span id="attSlipOffice" class="notranslate"></span></div>
                                     <div class="lh-row"><span>National ID Number</span><span id="attSlipNic" style="font-family:'Courier New', monospace; letter-spacing:1px;"></span></div>
                     </div>
 
@@ -1469,8 +1510,8 @@ mdtu_security_headers();
                 <div id="verificationResults" class="hidden space-y-6">
                     <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
-                            <h3 id="vOfficerName" class="text-base sm:text-lg font-bold text-indigo-950"></h3>
-                            <p id="vOfficerDetails" class="text-xs text-slate-600 mt-0.5"></p>
+                            <h3 id="vOfficerName" class="notranslate text-base sm:text-lg font-bold text-indigo-950"></h3>
+                            <p id="vOfficerDetails" class="notranslate text-xs text-slate-600 mt-0.5"></p>
                         </div>
                         <div class="text-left sm:text-right">
                             <span class="text-xs text-slate-500 block">Confirmed Hours (this year / all years):</span>
@@ -1557,9 +1598,9 @@ mdtu_security_headers();
                             <div class="cert-rule" style="width:420px; margin-top:10px;"></div>
 
                             <p style="font-size:21px; font-style:italic; color:#334155; margin-top:auto;">This is to certify that</p>
-                            <h2 id="viewStudentName" style="font-family:'Great Vibes',cursive; font-size:56px; line-height:1.15; color:#1e1b4b; white-space:nowrap; max-width:900px; overflow:hidden;"></h2>
+                            <h2 id="viewStudentName" class="notranslate" style="font-family:'Great Vibes',cursive; font-size:56px; line-height:1.15; color:#1e1b4b; white-space:nowrap; max-width:900px; overflow:hidden;"></h2>
                             <div style="width:480px; height:1px; background:#b8860b;"></div>
-                            <p id="viewStudentDetails" style="font-size:18px; font-weight:600; color:#334155; margin-top:6px; max-width:900px;"></p>
+                            <p id="viewStudentDetails" class="notranslate" style="font-size:18px; font-weight:600; color:#334155; margin-top:6px; max-width:900px;"></p>
 
                             <p style="font-size:19px; font-style:italic; color:#334155; margin-top:8px;">has successfully completed the training programme</p>
                             <h4 id="viewCourseTitle" style="font-family:'Cinzel',serif; font-size:24px; font-weight:800; color:#1e1b4b; line-height:1.25; margin-top:4px; max-width:900px;"></h4>
@@ -1823,6 +1864,48 @@ mdtu_security_headers();
                                 </tr>
                             </thead>
                             <tbody id="officeDesignationTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PARTICIPATIONS LIST (admin, super admin, superuser) -->
+        <div id="view-participation-list" class="tab-view hidden space-y-6 logged-in-only w-full">
+            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200">
+                <div class="flex justify-between items-center border-b pb-4 mb-6 flex-wrap gap-2">
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold text-indigo-900">📋 Participations List</h2>
+                        <p class="text-xs text-slate-500">Choose one program, then all of its dates or a single day it was held.</p>
+                    </div>
+                    <div class="flex gap-2 flex-wrap no-print">
+                        <button type="button" onclick="downloadParticipationExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow">📊 Download Excel</button>
+                        <button type="button" onclick="downloadParticipationPDF()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-4 py-2.5 rounded-lg">📄 Download PDF</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 no-print">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1" for="plProgram">Program</label>
+                        <select id="plProgram" onchange="onParticipationProgramChange()" class="w-full p-2.5 text-xs border rounded-lg bg-white outline-none font-semibold"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1" for="plDate">Date the program was held</label>
+                        <select id="plDate" onchange="renderParticipationList()" class="w-full p-2.5 text-xs border rounded-lg bg-white outline-none font-semibold"></select>
+                    </div>
+                </div>
+
+                <div id="participationListContainer" class="space-y-4">
+                    <div id="plReportHeader" class="text-center border-b pb-3">
+                        <h3 class="text-xs font-black text-amber-600 uppercase">Management Development and Training Unit - NWP</h3>
+                        <h4 class="text-base font-black text-indigo-950 uppercase">Participations List</h4>
+                        <p id="plReportTitle" class="text-sm font-black text-indigo-950 mt-1"></p>
+                        <p id="plReportSubtitle" class="text-xs font-bold text-slate-500 mt-0.5"></p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table id="participationListTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[640px]">
+                            <thead id="participationListHead"></thead>
+                            <tbody id="participationListBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -2199,6 +2282,7 @@ mdtu_security_headers();
 </script>
 <script type="text/javascript" src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 
+<script src="assets/lang.js?v=<?= (int) @filemtime(__DIR__ . '/assets/lang.js') ?>"></script>
 <script src="assets/app.js?v=<?= (int) @filemtime(__DIR__ . '/assets/app.js') ?>"></script>
 </body>
 </html>

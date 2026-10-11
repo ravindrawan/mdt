@@ -38,6 +38,55 @@ function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function escTx(value) {
+    return '<span class="notranslate">' + esc(tx(value)) + '</span>';
+}
+
+let sourceIndexKey = '';
+let sourceIndex = null;
+function sourceText(text) {
+    const t = String(text ?? '').trim();
+    if (!t || typeof tx !== 'function') return t;
+    const cached = (typeof officerCache === 'object' && officerCache) ? Object.keys(officerCache).length : 0;
+    const key = uiLang() + ':' + state.officers.length + ':' + state.records.length + ':' + state.offices.length + ':' + cached;
+    if (key !== sourceIndexKey) {
+        const map = new Map();
+        const add = (s) => {
+            if (!s) return;
+            map.set(s, s);
+            const shown = tx(s);
+            if (shown && !map.has(shown)) map.set(shown, s);
+        };
+        state.officers.forEach(o => { add(o.name); add(o.designation); add(o.office); });
+        state.records.forEach(r => { add(r.name); add(r.designation); add(r.office); });
+        if (typeof officerCache === 'object' && officerCache) {
+            Object.values(officerCache).forEach(o => { if (o) { add(o.name); add(o.designation); add(o.office); } });
+        }
+        state.offices.forEach(add);
+        state.designations.forEach(add);
+        state.staffMatrix.forEach(m => add(m.office));
+        sourceIndex = map;
+        sourceIndexKey = key;
+    }
+    return sourceIndex.get(t) || t;
+}
+
+function showOfficerField(id, value) {
+    const el = $(id);
+    if (!el) return;
+    el.dataset.src = value || '';
+    el.value = tx(value || '');
+}
+
+function readOfficerField(id) {
+    const el = $(id);
+    if (!el) return '';
+    const cur = el.value.trim();
+    const src = el.dataset.src || '';
+    if (src && (cur === src || cur === tx(src))) return src;
+    return sourceText(cur);
+}
+
 const ROLE_LABELS = { super: 'Super Admin', admin: 'Admin', superuser: 'Superuser' };
 
 function role() { return state.user ? state.user.role : 'none'; }
@@ -319,6 +368,7 @@ const TAB_RENDERERS = {
     'pending': () => renderPendingReport(),
     'completed': () => renderCompletedReport(),
     'training-namelist-report': () => filterTrainingNamelist(),
+    'participation-list': () => renderParticipationList(),
     'office-report': () => generateOfficeReport(),
     'office-designation-report': () => generateOfficeDesignationReport(),
     'user-management': () => renderUserAccountsTable(),
@@ -610,7 +660,7 @@ function updateProgramDropdowns() {
 
     const venues = [...new Set(state.programs.map(p => p.venue))];
     if ($('venueDatalist')) $('venueDatalist').innerHTML = venues.map(v => `<option value="${esc(v)}">`).join('');
-    if ($('resourcePersonDatalist')) $('resourcePersonDatalist').innerHTML = state.resourcePersons.map(r => `<option value="${esc(r.name)}">`).join('');
+    if ($('resourcePersonDatalist')) $('resourcePersonDatalist').innerHTML = state.resourcePersons.map(r => `<option value="${esc(r.name || '')}">`).join('');
 }
 
 function onProgramSelected() {
@@ -791,15 +841,47 @@ async function lookupOfficer(nic) {
     }
 }
 
+function applyOfficerGender(gender) {
+    const el = $('genderInput');
+    const note = $('genderLockNote');
+    if (!el) return;
+    const locked = gender === 'Female' || gender === 'Male';
+    el.value = locked ? gender : '';
+    el.disabled = locked;
+    el.classList.toggle('bg-slate-100', locked);
+    el.classList.toggle('bg-white', !locked);
+    if (note) note.classList.toggle('hidden', !locked);
+}
+
 const autoFillOfficer = debounce(async nic => {
+    if (!nic || nic.length < 10) {
+        if (!nic) applyOfficerGender('');
+        return;
+    }
     const o = await lookupOfficer(nic);
-    if (o && convertNicFormat($('nicInput').value) === nic) {
-        $('nameInput').value = o.name || '';
-        $('designationInput').value = o.designation || '';
-        $('officeInput').value = o.office || '';
+    if (convertNicFormat($('nicInput').value) !== nic) return;
+    if (o) {
+        showOfficerField('nameInput', o.name || '');
+        showOfficerField('designationInput', o.designation || '');
+        showOfficerField('officeInput', o.office || '');
+        $('phoneInput').value = o.phone || '';
+        if (o.gender === 'Female' || o.gender === 'Male') applyOfficerGender(o.gender);
+        else if (!$('genderInput').value) applyOfficerGender('');
+        else $('genderInput').disabled = false;
         $('nicFormatNotice').textContent = `NIC: ${nic} — details loaded from the database ✓`;
+    } else {
+        applyOfficerGender('');
     }
 }, 400);
+
+function useFeedbackPhrase(phrase) {
+    const el = $('feedbackInput');
+    if (!el) return;
+    const cur = el.value.trim();
+    if (!cur) el.value = phrase;
+    else if (!cur.toLowerCase().includes(phrase.toLowerCase())) el.value = cur.replace(/[.\s]+$/, '') + '. ' + phrase;
+    el.focus();
+}
 
 function handleNicSmartInput(val) {
     const converted = convertNicFormat(val);
@@ -815,12 +897,18 @@ async function handleSingleSubmit(e) {
     e.preventDefault();
     const program = programById($('trainingNameSelect').value);
     if (!program) { notify('Please select a training program from the list.', 'error'); return; }
+    if ($('genderInput').value !== 'Female' && $('genderInput').value !== 'Male') {
+        notify('Select Female or Male.', 'error');
+        return;
+    }
 
     const payload = {
         nic: convertNicFormat($('nicInput').value),
-        name: $('nameInput').value.trim(),
-        designation: $('designationInput').value.trim(),
-        office: $('officeInput').value.trim(),
+        name: readOfficerField('nameInput'),
+        designation: readOfficerField('designationInput'),
+        office: readOfficerField('officeInput'),
+        phone: $('phoneInput').value.trim(),
+        gender: $('genderInput').value,
         programId: program.id,
         foodRating: parseInt($('foodRatingInput').value, 10),
         coordinationRating: parseInt($('coordinationRatingInput').value, 10),
@@ -833,19 +921,23 @@ async function handleSingleSubmit(e) {
     btn.textContent = 'Saving to database...';
     try {
         const res = await post('save_record', payload);
-        officerCache[payload.nic] = { nic: payload.nic, name: payload.name, designation: payload.designation, office: payload.office };
+        officerCache[payload.nic] = { nic: payload.nic, name: payload.name, designation: payload.designation, office: payload.office, phone: payload.phone, gender: payload.gender };
         if (state.user && res.record.year === state.year) state.records.unshift(res.record);
         state.offices.push(payload.office);
         state.designations.push(payload.designation);
-        if (state.user && !state.officers.some(o => o.nic === payload.nic)) state.officers.push(officerCache[payload.nic]);
+        const known = state.officers.findIndex(o => o.nic === payload.nic);
+        if (known >= 0) state.officers[known] = officerCache[payload.nic];
+        else if (state.user) state.officers.push(officerCache[payload.nic]);
         updateOfficeDropdowns();
         notify(res.record.confirmed
             ? 'Training record saved and confirmed.'
             : 'Training record saved. MDTU will confirm your attendance before certificates can be downloaded.');
         $('addTrainingForm').reset();
+        applyOfficerGender('');
         $('nicFormatNotice').textContent = '';
         onProgramSelected();
     } catch (err) {
+        delete officerCache[payload.nic];
         notify(err.message, 'error');
     } finally {
         btn.disabled = false;
@@ -866,37 +958,41 @@ function allOffices() {
 
 function updateOfficeDropdowns() {
     const offices = allOffices();
-    const opts = offices.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
+    const opts = offices.map(o => `<option value="${esc(o)}">${esc(tx(o))}</option>`).join('');
     [['officeReportSelect', '<option value="">-- Choose Office --</option>'],
      ['officeDesignationSelect', '<option value="">-- Select Office --</option>'],
      ['presOfficeSelect', '<option value="all">All Offices</option>'],
      ['dashProgressOffice', '<option value="all">All Offices</option>']].forEach(([id, first]) => {
         const el = $(id);
         if (!el) return;
+        el.classList.add('notranslate');
         const prev = el.value;
         el.innerHTML = first + opts;
         if ([...el.options].some(o => o.value === prev)) el.value = prev;
     });
-    if ($('officeDatalist')) $('officeDatalist').innerHTML = offices.map(o => `<option value="${esc(o)}">`).join('');
+    if ($('officeDatalist')) $('officeDatalist').innerHTML = offices.map(o => `<option value="${esc(tx(o))}">`).join('');
 
     const designations = [...new Set([...state.designations, ...state.records.map(r => r.designation)].filter(Boolean))]
         .sort((a, b) => a.localeCompare(b));
-    if ($('designationDatalist') && designations.length) $('designationDatalist').innerHTML = designations.map(d => `<option value="${esc(d)}">`).join('');
-    if ($('officerNameDatalist')) $('officerNameDatalist').innerHTML = state.officers.map(o => `<option value="${esc(o.name)}">${esc(o.nic)}</option>`).join('');
+    if ($('designationDatalist') && designations.length) $('designationDatalist').innerHTML = designations.map(d => `<option value="${esc(tx(d))}">`).join('');
+    if ($('officerNameDatalist')) $('officerNameDatalist').innerHTML = state.officers.map(o => `<option value="${esc(tx(o.name))}">${esc(o.nic)}</option>`).join('');
 }
 
 /** Picking a known officer name (staff only) fills NIC, designation and office. */
 function onOfficerNameChosen() {
     const name = $('nameInput').value.trim().toLowerCase();
-    const matches = state.officers.filter(o => o.name.toLowerCase() === name);
+    const matches = state.officers.filter(o => o.name.toLowerCase() === name || tx(o.name).toLowerCase() === name);
     if (matches.length !== 1) return;
     const o = matches[0];
+    $('nameInput').dataset.src = o.name || '';
     if (!$('nicInput').value.trim()) {
         $('nicInput').value = o.nic;
         $('nicFormatNotice').textContent = `NIC: ${o.nic} — details loaded from the database ✓`;
     }
-    if (!$('designationInput').value.trim()) $('designationInput').value = o.designation || '';
-    if (!$('officeInput').value.trim()) $('officeInput').value = o.office || '';
+    if (!$('designationInput').value.trim()) showOfficerField('designationInput', o.designation || '');
+    if (!$('officeInput').value.trim()) showOfficerField('officeInput', o.office || '');
+    if (!$('phoneInput').value.trim()) $('phoneInput').value = o.phone || '';
+    if (o.gender === 'Female' || o.gender === 'Male') applyOfficerGender(o.gender);
 }
 
 // ===================== Report helpers =====================
@@ -959,10 +1055,10 @@ function renderDashboard() {
     $('overviewTableBody').innerHTML = (pending ? `<tr><td colspan="6" class="p-3 bg-amber-50 text-amber-900 font-bold">⏳ ${pending} record(s) waiting for attendance confirmation — <a href="#" onclick="switchTab('confirm-attendance'); return false;" class="underline">confirm now</a></td></tr>` : '')
         + (officers.length ? officers.map(o => `
             <tr class="border-b hover:bg-slate-50">
-                <td class="p-3 font-semibold">${esc(o.office)}</td>
+                <td class="p-3 font-semibold">${escTx(o.office)}</td>
                 <td class="p-3 font-mono">${esc(o.nic)}</td>
-                <td class="p-3 font-bold">${esc(o.name)}</td>
-                <td class="p-3">${esc(o.designation)}</td>
+                <td class="p-3 font-bold">${escTx(o.name)}</td>
+                <td class="p-3">${escTx(o.designation)}</td>
                 <td class="p-3 text-center font-bold text-indigo-900">${o.hours}h</td>
                 <td class="p-3 text-center">${statusBadge(o.hours)}</td>
             </tr>`).join('') : emptyRow(6, `No confirmed training records for ${state.year}.`));
@@ -974,15 +1070,15 @@ function generateOfficeReport() {
     const header = $('officeReportHeader');
     const section = $('officeCompletedSection');
     if (!office) { header.classList.add('hidden'); section.classList.add('hidden'); return; }
-    $('officeReportTitle').textContent = office;
+    $('officeReportTitle').textContent = tx(office);
     $('officeReportSubtitle').textContent = `Training Hours Report - ${state.year} (confirmed attendance)`;
     header.classList.remove('hidden');
     section.classList.remove('hidden');
     $('officeCompletedTableBody').innerHTML = officers.length ? officers.map(o => `
         <tr class="border-b">
             <td class="p-2 font-mono">${esc(o.nic)}</td>
-            <td class="p-2 font-bold">${esc(o.name)}</td>
-            <td class="p-2">${esc(o.designation)}</td>
+            <td class="p-2 font-bold">${escTx(o.name)}</td>
+            <td class="p-2">${escTx(o.designation)}</td>
             <td class="p-2 text-center font-bold ${o.hours >= TARGET_HOURS ? 'text-emerald-700' : 'text-amber-700'}">${o.hours}h</td>
         </tr>`).join('') : emptyRow(4, 'No confirmed records for this office.');
 }
@@ -997,12 +1093,222 @@ function generateOfficeDesignationReport() {
     header.classList.remove('hidden');
     tbody.innerHTML = designationBreakdown(office).map(d => `
         <tr class="border-b hover:bg-slate-50">
-            <td class="p-3 font-bold text-indigo-950">${esc(d.designation)}</td>
+            <td class="p-3 font-bold text-indigo-950">${escTx(d.designation)}</td>
             <td class="p-3 text-center font-bold">${d.total}</td>
             <td class="p-3 text-center text-emerald-700 font-bold">${d.c12}</td>
             <td class="p-3 text-center text-rose-700 font-bold">${d.incomplete}</td>
             <td class="p-3 text-center text-amber-700 font-bold">${d.c6}</td>
         </tr>`).join('');
+}
+
+function participationPrograms() {
+    return state.programs.filter(p => {
+        const dates = (p.dates && p.dates.length) ? p.dates : [p.firstDate].filter(Boolean);
+        return dates.some(d => String(d).slice(0, 4) === String(state.year));
+    }).sort((a, b) => String(a.firstDate).localeCompare(String(b.firstDate)) || String(a.name).localeCompare(String(b.name)));
+}
+
+function programHeldDates(p) {
+    if (!p) return [];
+    const dates = (p.dates && p.dates.length) ? p.dates.slice() : (p.firstDate ? [p.firstDate] : []);
+    return dates.filter(Boolean).sort();
+}
+
+function shortDayLabel(d) {
+    return parseISO(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function dayShareHours(program, dates) {
+    const n = Math.max(1, (dates || []).length);
+    const total = parseInt(program && program.hours, 10) || (HOURS_PER_DAY * n);
+    return Math.round(total / n) || HOURS_PER_DAY;
+}
+
+function safeFilePart(value) {
+    return String(value || 'Program').replace(/[^\w\-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'Program';
+}
+
+function syncParticipationFilters(resetDate) {
+    const sel = $('plProgram');
+    const dateSel = $('plDate');
+    if (!sel || !dateSel) return;
+    const prev = sel.value;
+    const programs = participationPrograms();
+    sel.innerHTML = programs.length
+        ? '<option value="">-- Choose a program --</option>' + programs.map(p => `<option value="${p.id}">${esc(p.name)} — ${esc(formatProgramDates(programHeldDates(p)))}</option>`).join('')
+        : `<option value="">No programs in ${state.year}</option>`;
+    if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+    const prog = programById(sel.value);
+    const dates = programHeldDates(prog);
+    const prevDate = resetDate ? '' : dateSel.value;
+    dateSel.innerHTML = prog
+        ? `<option value="">All dates of this program (${esc(formatProgramDates(dates))})</option>`
+            + dates.map(d => `<option value="${esc(d)}">${esc(shortDayLabel(d))} only</option>`).join('')
+        : '<option value="">Select a program first</option>';
+    if ([...dateSel.options].some(o => o.value === prevDate)) dateSel.value = prevDate;
+}
+
+function onParticipationProgramChange() {
+    syncParticipationFilters(true);
+    renderParticipationList(true);
+}
+
+function officerByNic(nic) {
+    const key = convertNicFormat(nic);
+    return state.officers.find(o => convertNicFormat(o.nic) === key) || null;
+}
+
+function genderLabel(value) {
+    if (value === 'Female') return 'ස්ත්‍රී';
+    if (value === 'Male') return 'පුරුෂ';
+    return value || '';
+}
+
+function participationPerson(rec) {
+    const officer = officerByNic(rec.nic);
+    return {
+        name: tx(rec.name || (officer && officer.name) || ''),
+        nic: rec.nic || '',
+        designation: tx(rec.designation || (officer && officer.designation) || ''),
+        phone: (officer && officer.phone) || '',
+        gender: genderLabel(officer && officer.gender),
+        office: tx(rec.office || (officer && officer.office) || ''),
+    };
+}
+
+function participationSelection() {
+    const prog = programById($('plProgram') && $('plProgram').value);
+    const dates = programHeldDates(prog);
+    const day = ($('plDate') && $('plDate').value) || '';
+    const records = prog ? state.records.filter(r => String(r.programId) === String(prog.id)) : [];
+    const shownDates = day ? dates.filter(d => d === day) : dates;
+    const rows = records.filter(r => !day || !absentList(r).includes(day))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' }));
+    return { prog, dates, day, shownDates, rows, share: dayShareHours(prog, dates) };
+}
+
+function renderParticipationList(filtersReady) {
+    const head = $('participationListHead');
+    const body = $('participationListBody');
+    if (!head || !body) return;
+    if (!filtersReady) syncParticipationFilters(false);
+    const { prog, dates, day, shownDates, rows, share } = participationSelection();
+    if (!prog) {
+        $('plReportTitle').textContent = `Training year ${state.year}`;
+        $('plReportSubtitle').textContent = 'Choose a program to build this list.';
+        head.innerHTML = '';
+        body.innerHTML = emptyRow(9, 'Choose a program. Each program is downloaded on its own, for the dates it was held.');
+        return;
+    }
+    const absentOnDay = day ? state.records.filter(r => String(r.programId) === String(prog.id) && absentList(r).includes(day)).length : 0;
+    $('plReportTitle').textContent = tx(prog.name);
+    $('plReportSubtitle').textContent = [
+        prog.fileNo ? `File No: ${prog.fileNo}` : '',
+        prog.venue ? `Venue: ${tx(prog.venue)}` : '',
+        `Dates held: ${formatProgramDates(day ? [day] : dates)}`,
+        `Officers: ${rows.length}`,
+        day && absentOnDay ? `Absent this day: ${absentOnDay}` : '',
+    ].filter(Boolean).join('  |  ');
+
+    const dateHeaders = shownDates.map(d => `<th class="p-2 text-center">${esc(shortDayLabel(d))}</th>`).join('');
+    head.innerHTML = `<tr class="bg-indigo-900 text-white font-bold">
+        <th class="p-2">#</th>
+        <th class="p-2">නම</th>
+        <th class="p-2">ජාතික හැඳුනුම්පත් අංකය</th>
+        <th class="p-2">තනතුර</th>
+        <th class="p-2">දුරකථන අංකය</th>
+        <th class="p-2">ස්ත්‍රී/පුරුෂ භාවය</th>
+        <th class="p-2">කාර්යාලයේ නම</th>
+        ${dateHeaders}<th class="p-2 text-center">Hours</th>
+    </tr>`;
+    const cols = 8 + shownDates.length;
+    body.innerHTML = rows.length ? rows.map((r, i) => {
+        const person = participationPerson(r);
+        const absent = absentList(r);
+        const cells = shownDates.map(d => {
+            const present = !absent.includes(d);
+            return `<td class="p-2 text-center font-bold ${present ? 'text-emerald-700' : 'text-rose-600'}">${present ? 'Present' : 'Absent'}</td>`;
+        }).join('');
+        const hours = day ? share : effHours(r);
+        return `<tr class="border-b hover:bg-slate-50">
+            <td class="p-2 font-mono">${i + 1}</td>
+            <td class="p-2 font-bold text-indigo-950">${esc(person.name)}${r.confirmed ? '' : ' <span class="text-[9px] text-amber-600">(pending)</span>'}</td>
+            <td class="p-2 font-mono font-bold">${esc(person.nic)}</td>
+            <td class="p-2">${esc(person.designation)}</td>
+            <td class="p-2 font-mono">${esc(person.phone)}</td>
+            <td class="p-2">${esc(person.gender)}</td>
+            <td class="p-2">${esc(person.office)}</td>
+            ${cells}
+            <td class="p-2 text-center font-bold text-emerald-700">${hours}h</td>
+        </tr>`;
+    }).join('') : emptyRow(cols, day ? 'No officer was present on this date.' : 'No participants are recorded for this program.');
+}
+
+function participationSheetRows() {
+    const { prog, dates, day, shownDates, rows, share } = participationSelection();
+    if (!prog) return null;
+    const header = ['#', 'නම', 'ජාතික හැඳුනුම්පත් අංකය', 'තනතුර', 'දුරකථන අංකය', 'ස්ත්‍රී/පුරුෂ භාවය', 'කාර්යාලයේ නම', ...shownDates.map(shortDayLabel), 'Hours'];
+    const data = rows.map((r, i) => {
+        const person = participationPerson(r);
+        const absent = absentList(r);
+        return [i + 1, person.name, person.nic, person.designation, person.phone, person.gender, person.office,
+            ...shownDates.map(d => absent.includes(d) ? 'Absent' : 'Present'),
+            day ? share : effHours(r)];
+    });
+    return {
+        prog, day, dates, rows,
+        aoa: [
+            ['Management Development and Training Unit - NWP'],
+            ['Participations List'],
+            ['Program', tx(prog.name)],
+            ['File No', prog.fileNo || ''],
+            ['Venue', tx(prog.venue || '')],
+            ['Dates held', formatProgramDates(day ? [day] : dates)],
+            ['Officers', rows.length],
+            [],
+            header,
+            ...data,
+        ],
+    };
+}
+
+function participationFileBase() {
+    const { prog, day } = participationSelection();
+    if (!prog) return '';
+    return `Participations_List_${safeFilePart(prog.name)}_${day || 'all-dates'}_${state.year}`;
+}
+
+function downloadParticipationExcel() {
+    const sheet = participationSheetRows();
+    if (!sheet) { notify('Choose a program first.', 'error'); return; }
+    if (typeof XLSX === 'undefined') { notify('Excel library could not be loaded. Check your internet connection.', 'error'); return; }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheet.aoa);
+    ws['!cols'] = [{ wch: 5 }, { wch: 28 }, { wch: 24 }, { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 42 }];
+    const headerRow = sheet.aoa.findIndex(row => row[1] === 'නම');
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let r = headerRow + 1; r <= range.e.r; r++) {
+        [2, 4].forEach(c => {
+            const cell = ws[XLSX.utils.encode_cell({ r, c })];
+            if (!cell) return;
+            cell.t = 's';
+            cell.v = String(cell.v ?? '');
+        });
+    }
+    XLSX.utils.book_append_sheet(wb, ws, 'Participations');
+    XLSX.writeFile(wb, `${participationFileBase()}.xlsx`);
+}
+
+function downloadParticipationPDF() {
+    if (!participationSelection().prog) { notify('Choose a program first.', 'error'); return; }
+    if (typeof html2pdf === 'undefined') { notify('PDF library could not be loaded. Check your internet connection.', 'error'); return; }
+    html2pdf().from($('participationListContainer')).set({
+        margin: 8,
+        filename: `${participationFileBase()}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+    }).save();
 }
 
 function filterTrainingNamelist() {
@@ -1018,9 +1324,9 @@ function filterTrainingNamelist() {
         <tr class="border-b hover:bg-slate-50">
             <td class="p-3 font-mono">${i + 1}</td>
             <td class="p-3 font-mono font-bold">${esc(r.nic)}</td>
-            <td class="p-3 font-bold text-indigo-950">${esc(r.name)}${r.confirmed ? '' : ' <span class="text-[9px] text-amber-600">(pending)</span>'}</td>
-            <td class="p-3">${esc(r.office)}</td>
-            <td class="p-3">${esc(r.designation)}</td>
+            <td class="p-3 font-bold text-indigo-950">${escTx(r.name)}${r.confirmed ? '' : ' <span class="text-[9px] text-amber-600">(pending)</span>'}</td>
+            <td class="p-3">${escTx(r.office)}</td>
+            <td class="p-3">${escTx(r.designation)}</td>
             <td class="p-3 text-center font-bold text-emerald-700">${effHours(r)}h</td>
         </tr>`).join('') : emptyRow(6, 'No participants match these filters.');
 }
@@ -1029,8 +1335,8 @@ function renderDutyReport() {
     const officers = officerTotals(state.records);
     $('dutyReportTableBody').innerHTML = officers.length ? officers.map(o => `
         <tr class="border-b hover:bg-slate-50">
-            <td class="p-3 font-semibold">${esc(o.office)}</td>
-            <td class="p-3"><span class="text-slate-500">${esc(o.designation)}</span><br><strong>${esc(o.name)}</strong></td>
+            <td class="p-3 font-semibold">${escTx(o.office)}</td>
+            <td class="p-3"><span class="text-slate-500">${escTx(o.designation)}</span><br><strong>${escTx(o.name)}</strong></td>
             <td class="p-3 text-center font-bold text-indigo-900">${o.hours}h</td>
             <td class="p-3 text-center">${statusBadge(o.hours)}</td>
         </tr>`).join('') : emptyRow(4, `No confirmed records for ${state.year}.`);
@@ -1044,7 +1350,7 @@ function renderPendingReport() {
         <tr class="border-b align-top">
             <td class="p-3 font-bold">${esc(off)}</td>
             <td class="p-3 text-center font-black text-rose-700">${groups[off].length}</td>
-            <td class="p-3">${groups[off].map(o => `${esc(o.name)} <span class="text-slate-500">(${esc(o.nic)} · ${o.hours}h)</span>`).join('<br>')}</td>
+            <td class="p-3">${groups[off].map(o => `${escTx(o.name)} <span class="text-slate-500">(${esc(o.nic)} · ${o.hours}h)</span>`).join('<br>')}</td>
         </tr>`).join('') : emptyRow(3, 'No incomplete officers among confirmed records.');
 }
 
@@ -1052,9 +1358,9 @@ function renderCompletedReport() {
     const done = officerTotals(state.records).filter(o => o.hours >= TARGET_HOURS);
     $('completedTableBody').innerHTML = done.length ? done.map(o => `
         <tr class="border-b">
-            <td class="p-3 font-semibold">${esc(o.office)}</td>
+            <td class="p-3 font-semibold">${escTx(o.office)}</td>
             <td class="p-3 font-mono">${esc(o.nic)}</td>
-            <td class="p-3 font-bold">${esc(o.name)}</td>
+            <td class="p-3 font-bold">${escTx(o.name)}</td>
             <td class="p-3 text-center font-bold text-emerald-700">${o.hours}h</td>
         </tr>`).join('') : emptyRow(4, `No officers have completed ${TARGET_HOURS} hours yet.`);
 }
@@ -1107,7 +1413,7 @@ function renderResourceReport() {
     $('resourceReportTableBody').innerHTML = rows.length ? rows.map((r, i) => `
         <tr class="border-b hover:bg-slate-50">
             <td class="p-2.5 text-center">${i + 1}</td>
-            <td class="p-2.5 font-bold text-indigo-950">${esc(r.name)}</td>
+            <td class="p-2.5 font-bold text-indigo-950">${escTx(r.name)}</td>
             <td class="p-2.5 text-[11px]">${r.programNames.map(esc).join('<br>')}</td>
             <td class="p-2.5 text-center font-bold">${r.n}</td>
             ${r.counts.map(c => `<td class="p-2.5 text-center">${c || '-'}</td>`).join('')}
@@ -1235,8 +1541,8 @@ function renderConfirmAttendanceTable() {
         <tr class="border-b align-top ${r.confirmed ? '' : 'bg-amber-50/50'}">
             <td class="p-3 text-center"><input type="checkbox" ${r.confirmed ? 'checked' : ''} onchange="toggleConfirmAttendance(${r.id}, this.checked)" class="w-5 h-5 accent-indigo-900 cursor-pointer"></td>
             <td class="p-3 font-mono">${esc(r.nic)}</td>
-            <td class="p-3 font-bold">${esc(r.name)}<div class="text-[10px] font-normal text-slate-500">${esc(r.designation)}</div></td>
-            <td class="p-3">${esc(r.office)}</td>
+            <td class="p-3 font-bold">${escTx(r.name)}<div class="text-[10px] font-normal text-slate-500">${escTx(r.designation)}</div></td>
+            <td class="p-3">${escTx(r.office)}</td>
             <td class="p-3">${esc(r.trainingName)}<div class="text-[10px] text-slate-500">📍 ${esc(r.venue || '-')}</div></td>
             <td class="p-3 text-center font-mono">${esc(r.date)}</td>
             <td class="p-3 text-center">
@@ -1321,8 +1627,8 @@ async function searchOfficerRecords() {
         resDiv.classList.remove('hidden');
         notFound.classList.add('hidden');
         const latest = records[0];
-        $('vOfficerName').textContent = latest.name;
-        $('vOfficerDetails').textContent = `${latest.designation} - ${latest.office} (NIC: ${latest.nic})`;
+        $('vOfficerName').textContent = tx(latest.name);
+        $('vOfficerDetails').textContent = `${tx(latest.designation)} - ${tx(latest.office)} (NIC: ${latest.nic})`;
         const confirmed = records.filter(r => r.confirmed);
         const yearHours = confirmed.filter(r => r.year === state.year).reduce((a, r) => a + effHours(r), 0);
         const allHours = confirmed.reduce((a, r) => a + effHours(r), 0);
@@ -1457,10 +1763,10 @@ function generateAttendanceCertSlip() {
     const endDate = dates.filter(Boolean).slice().sort().pop() || r.date;
     $('attSlipFileNo').textContent = r.programFileNo || (program && program.fileNo) || '';
     $('attSlipIssueDate').textContent = formatDateLong(endDate);
-    $('attSlipName').textContent = r.name;
+    $('attSlipName').textContent = tx(r.name);
     $('attSlipNic').textContent = r.nic;
-    $('attSlipDesignation').textContent = r.designation;
-    $('attSlipOffice').textContent = r.office;
+    $('attSlipDesignation').textContent = tx(r.designation);
+    $('attSlipOffice').textContent = tx(r.office);
     $('attSlipProg').textContent = r.trainingName;
     $('attSlipVenue').textContent = r.venue || (program && program.venue) || '-';
     $('attSlipDates').textContent = formatProgramDates(dates);
@@ -1532,8 +1838,8 @@ async function generateSelectedCertificate() {
         setCertNotice('certStatusNotice', 'This record has no attended hours (all days marked absent), so a completion certificate cannot be issued.', 'error');
         return;
     }
-    $('viewStudentName').textContent = r.name;
-    $('viewStudentDetails').textContent = `${r.designation}, ${r.office}`;
+    $('viewStudentName').textContent = tx(r.name);
+    $('viewStudentDetails').textContent = `${tx(r.designation)}, ${tx(r.office)}`;
     $('viewCourseTitle').textContent = r.trainingName;
     $('viewCourseVenue').textContent = r.venue || 'MDTU, Kurunegala';
     $('viewCourseDate').textContent = formatProgramDates(r.programDates || [r.date]);
@@ -1616,8 +1922,8 @@ async function exportSheet(sheetId, orientation, filename, mode) {
 const lookupProgressUser = debounce(async (nic, officeId, desigId, after) => {
     const o = await lookupOfficer(nic);
     if (!o) return;
-    $(officeId).value = o.office || '';
-    $(desigId).value = o.designation || '';
+    showOfficerField(officeId, o.office || '');
+    showOfficerField(desigId, o.designation || '');
     if (after) after(o);
 }, 400);
 
@@ -1638,12 +1944,12 @@ function populateAutoMdtuPrograms(officeName) {
 }
 
 function autoCalculateOfficeStaffProgress() {
-    const office = $('progUserOffice').value;
+    const office = readOfficerField('progUserOffice');
     const tbody = $('progMatrixTableBody');
     if (!office || !tbody) return;
     tbody.innerHTML = designationBreakdown(office).map(d => `
         <tr class="border-b">
-            <td class="p-2 font-bold text-slate-800">${esc(d.designation)}</td>
+            <td class="p-2 font-bold text-slate-800">${escTx(d.designation)}</td>
             <td class="p-2 text-center font-bold">${d.total}</td>
             <td class="p-2 text-center text-emerald-700 font-bold">${d.c12}</td>
             <td class="p-2 text-center text-amber-700 font-bold">${d.c6}</td>
@@ -1676,8 +1982,8 @@ async function handleSaveSuperuserProgress(e) {
         await post('save_progress', {
             year: state.year,
             userId: convertNicFormat($('progUserId').value),
-            office: $('progUserOffice').value.trim(),
-            designation: $('progUserDesignation').value.trim(),
+            office: readOfficerField('progUserOffice'),
+            designation: readOfficerField('progUserDesignation'),
             month: $('progMonth').value,
             specialRemarks: $('progSpecialRemarks').value.trim(),
             productivityTasks: $('progProductivityTasks').value.trim(),
@@ -1852,7 +2158,7 @@ function renderMasterResourcePersonsTable() {
     if (!tbody) return;
     tbody.innerHTML = state.resourcePersons.length ? state.resourcePersons.map(r => `
         <tr class="border-b hover:bg-slate-50">
-            <td class="p-2.5 font-bold text-purple-950">${esc(r.name)}</td>
+            <td class="p-2.5 font-bold text-purple-950">${escTx(r.name)}</td>
             <td class="p-2.5">${esc(r.field)}</td>
             <td class="p-2.5">${esc(r.institution)}</td>
             <td class="p-2.5 font-mono">${esc(r.contact)}</td>
@@ -1892,9 +2198,9 @@ function renderAnnualStaffMatrixTable() {
         return;
     }
     const desigs = [...new Set(state.staffMatrix.flatMap(m => Object.keys(m.counts)))];
-    head.innerHTML = `<tr><th class="p-2.5">Office</th>${desigs.map(d => `<th class="p-2.5 text-center">${esc(d)}</th>`).join('')}</tr>`;
+    head.innerHTML = `<tr><th class="p-2.5">Office</th>${desigs.map(d => `<th class="p-2.5 text-center">${escTx(d)}</th>`).join('')}</tr>`;
     body.innerHTML = state.staffMatrix.map(m => `
-        <tr class="border-b"><td class="p-2.5 font-bold">${esc(m.office)}</td>${desigs.map(d => `<td class="p-2.5 text-center">${m.counts[d] ?? 0}</td>`).join('')}</tr>`).join('');
+        <tr class="border-b"><td class="p-2.5 font-bold">${escTx(m.office)}</td>${desigs.map(d => `<td class="p-2.5 text-center">${m.counts[d] ?? 0}</td>`).join('')}</tr>`).join('');
 }
 
 // ===================== Notifications =====================
@@ -2219,6 +2525,7 @@ const TILE_HINTS = {
     'cert-register': 'List of issued certificates, PDF for files',
     'manage-programs': 'Programs, venues, file numbers, speakers',
     'training-namelist-report': 'Name list of participants per program',
+    'participation-list': 'Excel and PDF list for one program, by the dates it was held',
     'analytics': 'Evaluation results by program',
     'resource-report': 'Ratings of lecturers / resource persons',
     'duty-report': 'Training hours per officer',
@@ -2581,9 +2888,9 @@ function renderCertRegister() {
         <tr class="border-b hover:bg-slate-50 ${r.timesIssued ? '' : 'text-slate-400'}">
             <td class="p-2">${i + 1}</td>
             <td class="p-2 font-mono text-[10px]">${esc(r.certSerial)}</td>
-            <td class="p-2 font-bold text-indigo-950">${esc(r.name)}</td>
+            <td class="p-2 font-bold text-indigo-950">${escTx(r.name)}</td>
             <td class="p-2 font-mono">${esc(r.nic)}</td>
-            <td class="p-2">${esc(r.designation)}<br><span class="text-[10px] text-slate-500">${esc(r.office)}</span></td>
+            <td class="p-2">${escTx(r.designation)}<br><span class="text-[10px] text-slate-500">${escTx(r.office)}</span></td>
             <td class="p-2">${esc(r.trainingName)}${r.programFileNo ? `<br><span class="text-[10px] text-slate-500 font-mono">${esc(r.programFileNo)}</span>` : ''}</td>
             <td class="p-2">${esc(formatProgramDates(r.programDates))}</td>
             <td class="p-2 text-center font-bold">${r.effectiveHours}</td>
