@@ -384,6 +384,7 @@ function route() {
   }
   document.body.classList.toggle("in-console", state.page === "console");
   document.body.classList.toggle("on-quiz", state.page === "quiz");
+  document.body.classList.toggle("on-home", state.page === "home");
   if (state.user && state.page === "home") {
     endSession();
     paintAccount();
@@ -654,6 +655,7 @@ async function loadAdminThread(id) {
 async function renderPublic() {
   const pages = {
     home: renderHome,
+    trainer: renderTrainer,
     register: renderRegister,
     programmes: () => renderDirectory("programmes", t("programmes"), t("searchProg")),
     calendar: renderCalendar,
@@ -677,6 +679,13 @@ async function renderPublic() {
   } catch (error) {
     view.innerHTML = `<div class="error">${esc(error.message)}</div>`;
   }
+}
+
+function renderTrainer(view) {
+  view.innerHTML = `<section class="panel coming-soon">
+    <h1>The Trainer (online magazine)</h1>
+    <p>Coming soon</p>
+  </section>`;
 }
 
 async function renderHome(view) {
@@ -1153,7 +1162,7 @@ async function renderConsole() {
     return;
   }
   $("#stage").innerHTML = `
-        <section class="work-page${classicPages()[state.module] || ["needs", "plan", "apply", "provision", "cp_atp", "applications", "attendance", "scheduled", "finish", "finish2", "advance", "estimate", "revise", "offweb", "signsheet", "panelsign", "private", "cp_staff", "cp_trainingofficers", "birthdays", "cp_completedtrainings", "signatory", "modular", "evaluation", "messages", "total", "pace", "person", "settle", "ahead", "attended"].includes(state.module) ? " classic" : ""}">
+        <section class="work-page${classicPages()[state.module] || ["needs", "plan", "apply", "provision", "cp_atp", "applications", "attendance", "scheduled", "finish", "finish2", "advance", "advsum", "estimate", "revise", "offweb", "signsheet", "panelsign", "private", "cp_staff", "cp_trainingofficers", "birthdays", "cp_completedtrainings", "signatory", "modular", "evaluation", "messages", "total", "pace", "person", "settle", "ahead", "attended"].includes(state.module) ? " classic" : ""}">
       <p class="crumb"><a href="#console/dashboard">${esc(t("back"))}</a> · ${esc((classicPages()[state.module] || (state.module === "needs" ? classicPages().cp_trrequirements : null))?.title?.() || deliveryTitle(state.module) || current.label)}</p>
       <div id="work"><p class="muted">Loading…</p></div>
     </section>`;
@@ -1186,6 +1195,7 @@ async function renderModule(item) {
   if (item.kind === "finish") return renderFinish(work);
   if (item.kind === "finish2") return renderFinish2(work);
   if (item.kind === "advance") return renderAdvance(work);
+  if (item.kind === "advsum") return renderAdvSum(work);
   if (item.kind === "reports") return renderReports(work);
   if (item.kind === "private") return renderPrivate(work);
   if (item.kind === "letter") return renderLetter(work);
@@ -1239,6 +1249,7 @@ function deliveryTitle(module) {
     finish: () => L("වැඩසටහන අවසන් කිරීම පියවර-1", "நிகழ்ச்சியை முடித்தல் படி 1", "Finish the programme, step 1"),
     finish2: () => L("වැඩසටහන අවසන් කිරීම පියවර 2", "நிகழ்ச்சியை முடித்தல் படி 2", "Finish the programme, step 2"),
     advance: () => L("අත්තිකාරම් විස්තර", "முன்பண விவரம்", "Advance details"),
+    advsum: () => L("අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
     provision: () => L("ප්‍රතිපාදන", "ஒதுக்கீடு", "Allocations"),
     revise: () => L("සංශෝධිත ඇස්තමේන්තු සැකසීම", "திருத்திய மதிப்பீடு அமைத்தல்", "Prepare a revised estimate"),
     offweb: () => L("වෙබ් අඩවිය මගින් කැඳවීම නොකර පවත්වන පුහුණු ඇතුළත් කිරීම හා ඇස්තමේන්තු සැකසීම", "இணையம் வழியாக அழைக்காமல் நடத்தும் பயிற்சியைச் சேர்த்தல் மற்றும் மதிப்பீடு", "Enter a training not called through the website and prepare the estimate"),
@@ -1302,6 +1313,7 @@ function boardsFor(role, color) {
     tile("#console/offweb", "form.png", "වෙබ් අඩවිය මගින් කැඳවීම නොකර පවත්වන පුහුණු ඇතුළත් කිරීම හා ඇස්තමේන්තු සැකසීම", "இணையம் வழியாக அழைக்காமல் நடத்தும் பயிற்சியைச் சேர்த்தல் மற்றும் மதிப்பீடு", "Enter a training not called through the website and prepare the estimate"),
     tile("#console/finish", "complete.png", "වැඩසටහන අවසන් කිරීම පියවර-1", "நிகழ்ச்சியை முடித்தல் படி 1", "Finish the programme, step 1"),
     tile("#console/finish2", "complete.png", "වැඩසටහන අවසන් කිරීම පියවර 2", "நிகழ்ச்சியை முடித்தல் படி 2", "Finish the programme, step 2"),
+    tile("#console/advsum", "budjrept.png", "අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
     tile("#console/cp_completedtrainings", "completed.png", "අවසන් කළ පුහුණු වැඩසටහන්", "முடிந்த பயிற்சிகள்", "Finished training programmes"),
     tile("#console/cp_privatetrainings", "pts.png", "පෞද්ගලික පුහුණු පාඨමාලා සඳහා ප්‍රතිපාදන", "தனியார் படிப்பு நிதி", "Funds for private training courses"),
     tile("#console/cp_othertrainings", "privatetrainings.png", "වෙනත් කාර්යාල මගින් පවත්වන ලද පුහුණු වැඩසටහන්", "பிற அலுவலகப் பயிற்சிகள்", "Programmes conducted by other offices"),
@@ -1343,6 +1355,7 @@ function boardsFor(role, color) {
     tile("#console/pace", "summary.png", "මාසික වාර්ෂික ප්‍රගතිය", "மாதாந்திர ஆண்டு முன்னேற்றம்", "Monthly and annual progress"),
     tile("#console/person", "reports.png", "එක් පුද්ගල වාර්තා", "ஒரு நபர் அறிக்கை", "One-person report"),
     role === "Administrator" ? tile("#console/total", "summary.png", "Total", "Total", "Total") : "",
+    tile("#console/advsum", "budjrept.png", "අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
     tile("#console/settle?tab=advance", "budjrept.png", "ඇස්තමේන්තු", "மதிப்பீடு", "Estimate"),
     tile("#console/settle?tab=food", "food.png", "ආහාර බිල් පියවීම", "உணவுப் பட்டியல் தீர்வு", "Food bill settlement"),
     tile("#console/settle?tab=pay", "funds.png", "දීමනා සියල්ල", "அனைத்துக் கொடுப்பனவு", "All allowances"),
@@ -3421,11 +3434,184 @@ async function renderAdvance(work) {
           ${advanceField(L("රිසිටි අංකය", "ரசீது எண்", "Receipt number"), `<input name="receipt" value="${esc(row.receipt || "0")}">`)}
         </div>
       </div>
-      <p class="pad-note">${esc(L("සහභාගි වූ සංඛ්‍යාව පැමිණීම තහවුරු කළ ලැයිස්තුවෙන්. රාජ්‍ය භාගය රාජ්‍ය සේවක සම්පත්දායක දීමනාවෙන් 10%. පුද්ගලික හා විශේෂිත කාණ්ඩ ගණන් නොගනී. ඒ මුදල වියදම ඇතුළේ තියෙනවා. ඉතිරි මුදල = අත්තිකාරම් මුදල − වියදම් වූ මුදල.", "பங்கேற்றோர் உறுதி செய்த பட்டியலில் இருந்து. அரசுப் பங்கு அரசு ஊழியர் வள ஆள் கொடுப்பனவின் 10%. தனியார் மற்றும் சிறப்புப் பிரிவு சேர்க்கப்படாது. அந்தத் தொகை செலவுக்குள் உள்ளது. மீதி = முன்பணம் − செலவு.", "The number who attended comes from the confirmed list. The government share is 10% of government officers' resource-person allowances. Private and special categories are not included. That amount is already inside the expenditure. Balance is the advance minus the amount spent."))}</p>
+      <p class="pad-note">${esc(row.offweb ? L("සහභාගි වූ සංඛ්‍යාව වෙබ් අඩවිය මගින් කැඳවීම නොකරන පුහුණු ලැයිස්තුවෙන් විතරක් වෙනස් කරන්න. රාජ්‍ය භාගය රාජ්‍ය සේවක සම්පත්දායක දීමනාවෙන් 10%. පුද්ගලික හා විශේෂිත කාණ්ඩ ගණන් නොගනී. ඒ මුදල වියදම ඇතුළේ තියෙනවා. ඉතිරි මුදල = අත්තිකාරම් මුදල − වියදම් වූ මුදල.", "பங்கேற்றோர் எண்ணை இணையம் வழியாக அழைக்காத பயிற்சிப் பட்டியலிலிருந்து மட்டும் மாற்றவும். அரசுப் பங்கு அரசு ஊழியர் வள ஆள் கொடுப்பனவின் 10%. தனியார் மற்றும் சிறப்புப் பிரிவு சேர்க்கப்படாது. அந்தத் தொகை செலவுக்குள் உள்ளது. மீதி = முன்பணம் − செலவு.", "Change the number who attended only in the list of training not called through the website. The government share is 10% of government officers' resource-person allowances. Private and special categories are not included. That amount is already inside the expenditure. Balance is the advance minus the amount spent.") : L("සහභාගි වූ සංඛ්‍යාව පැමිණීම තහවුරු කළ ලැයිස්තුවෙන්. රාජ්‍ය භාගය රාජ්‍ය සේවක සම්පත්දායක දීමනාවෙන් 10%. පුද්ගලික හා විශේෂිත කාණ්ඩ ගණන් නොගනී. ඒ මුදල වියදම ඇතුළේ තියෙනවා. ඉතිරි මුදල = අත්තිකාරම් මුදල − වියදම් වූ මුදල.", "பங்கேற்றோர் உறுதி செய்த பட்டியலில் இருந்து. அரசுப் பங்கு அரசு ஊழியர் வள ஆள் கொடுப்பனவின் 10%. தனியார் மற்றும் சிறப்புப் பிரிவு சேர்க்கப்படாது. அந்தத் தொகை செலவுக்குள் உள்ளது. மீதி = முன்பணம் − செலவு.", "The number who attended comes from the confirmed list. The government share is 10% of government officers' resource-person allowances. Private and special categories are not included. That amount is already inside the expenditure. Balance is the advance minus the amount spent."))}</p>
       <button type="submit">${esc(L("අත්තිකාරම් විස්තර", "முன்பண விவரம்", "Advance details"))}</button>
       <div id="form-msg"></div>
     </form>`;
   paintAdvance(document.getElementById("advance-form"));
+}
+
+function advsumMoney(name, value, solid) {
+  return `<input name="${name}" inputmode="decimal" value="${esc(value ?? "")}"${solid ? ' class="solid"' : ""}>`;
+}
+
+function advsumLine(label, name, value, note) {
+  return `<tr>
+    <td>${label}${note || ""}</td>
+    <td class="mid">${advsumMoney(name, value, false)}</td>
+    <td></td>
+  </tr>`;
+}
+
+function paintAdvSum(form) {
+  if (!form) return;
+  const names = ["resource", "coord", "supervise", "liaise", "travel", "account", "office", "food", "contingent", "other"];
+  const sum = names.reduce((total, name) => total + advanceNumber(form.elements[name]?.value), 0);
+  const gap = advanceNumber(form.elements.received?.value) - sum;
+  if (form.elements.total) form.elements.total.value = advanceMoney(sum);
+  if (form.elements.totalRight) form.elements.totalRight.value = advanceMoney(sum);
+  if (form.elements.gap) form.elements.gap.value = advanceMoney(gap);
+  if (form.elements.balance) form.elements.balance.value = advanceMoney(gap);
+  if (form.elements.shareBack?.dataset.auto === "1") form.elements.shareBack.value = advanceMoney(advanceNumber(form.elements.share?.value));
+  if (form.elements.balanceBack?.dataset.auto === "1") form.elements.balanceBack.value = advanceMoney(Math.max(gap, 0));
+}
+
+function fillAdvSum(form, sheet) {
+  Object.entries(sheet || {}).forEach(([key, value]) => {
+    const field = form.elements[key];
+    if (field && "value" in field) field.value = value ?? "";
+  });
+  if (form.elements.shareBack) form.elements.shareBack.dataset.auto = "1";
+  if (form.elements.balanceBack) form.elements.balanceBack.dataset.auto = "1";
+}
+
+function advsumForm(row) {
+  const shareNote = `<div class="advsum-note">(සම්පත්දායක දීමනා මුළු අනුග්‍රහයෙන් රාජ්‍ය භාගය ${advsumMoney("share", row.share, false)})</div>`;
+  return `<form id="advsum-form">
+    <input type="hidden" name="atp" value="${esc(row.atp || "")}">
+    <textarea id="advsum-calc" hidden></textarea>
+    <p class="advsum-actions">
+      <a href="#console/advsum">${esc(L("ලැයිස්තුව", "பட்டியல்", "List"))}</a>
+      <button type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
+      <button type="button" data-act="advsum-print">${esc(L("PDF / මුද්‍රණය", "PDF / அச்சு", "PDF / Print"))}</button>
+      <button type="button" data-act="advsum-refill">${esc(L("දත්ත ගබඩාවෙන් නැවත ගණනය කරන්න", "தரவிலிருந்து மீண்டும் கணக்கிடு", "Recalculate from the database"))}</button>
+    </p>
+    <p class="pad-note">${esc(L("ලැබුණු අත්තිකාරම්, දීමනා ගෙවීම සහ ආහාර බිල් වලින් මුදල් ගණනය වෙනවා. 2.2 සම්පත්දායක ගමන් වියදම සහ 2.9 අවිනිශ්චිත වියදම සුරැකි ඇස්තමේන්තුවෙන් එනවා. අත්තිකාරමින් වියදම් කළ මුදල දීමනා එකතුවට වඩා වැඩි නම් වැඩි කොටස 2.10 වෙනත් යටතේ යනවා. රාජ්‍ය භාගය වියදම ඇතුළේ තියෙන නිසා එකතුවට එකතු වෙන්නේ නැහැ. අගේ ඉතිරි මුදල සහ රාජ්‍ය භාගය වෙන වෙනම. රිසිට්පත් අංකය එකක්. මුළු වියදම = 2.1 සිට 2.10 දක්වා. ඉතිරි හෝ හිඟ මුදල = ලැබුණු අත්තිකාරම් − මුළු වියදම. හැම කොටුවක්ම වෙනස් කර සුරකින්න පුළුවන්.", "பெற்ற முன்பணம், கொடுப்பனவு மற்றும் உணவுப் பட்டியலிலிருந்து தொகை கணக்கிடப்படும். 2.2 பயணச் செலவும் 2.9 எதிர்பாராச் செலவும் சேமித்த மதிப்பீட்டிலிருந்து வரும். முன்பணச் செலவு கொடுப்பனவுக் கூட்டை விட அதிகமானால் மிகுதி 2.10 இல் வரும். அரசுப் பங்கு செலவுக்குள் இருப்பதால் மீண்டும் கூட்டப்படாது. இறுதியில் மீதியும் அரசுப் பங்கும் தனித்தனியே. ரசீது எண் ஒன்று. மொத்தம் = 2.1 முதல் 2.10. மீதி அல்லது பற்றாக்குறை = பெற்ற முன்பணம் − மொத்தம். ஒவ்வொரு கட்டத்தையும் மாற்றிச் சேமிக்கலாம்.", "Amounts come from the advance received, the allowance payment and the food bill. 2.2 resource-person travel and 2.9 contingencies come from the saved estimate. If the amount spent from the advance is higher than the allowance total, the extra goes to 2.10 Other. The government share is already inside the expenditure, so it is not added again. At the end, the remaining amount and the government share are separate, with one receipt number. Total expenditure is 2.1 to 2.10. The balance or shortfall is the advance received minus the total. Every box can be changed and saved."))}</p>
+    <article class="advsum" id="advsum-paper">
+      <h1>කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය.</h1>
+      <h2>අත්තිකාරම් මුදල් ගෙවීමේ සාරාංශය.</h2>
+      <p class="advsum-meta"><input name="dates" value="${esc(row.dates || "")}"> දිනය/දිනයන් <input name="file" value="${esc(row.file || "")}"> ලිපිගොනු අංකය</p>
+      <p class="advsum-name"><input name="name" value="${esc(row.name || "")}"> පුහුණු වැඩසටහනේ නම.</p>
+      <table>
+        <thead><tr><th>විස්තර</th><th>මුදල (රු.)</th><th>මුදල (රු.)</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>1) ලැබුණු අත්තිකාරම්</td>
+            <td></td>
+            <td class="mid">${advsumMoney("received", row.received, false)}</td>
+          </tr>
+          <tr><td>2) වියදම</td><td></td><td></td></tr>
+          ${advsumLine("2.1 සම්පත්දායක දීමනා", "resource", row.resource, shareNote)}
+          ${advsumLine("2.2 සම්පත්දායක ගමන් වියදම", "travel", row.travel)}
+          ${advsumLine("2.3 සමායෝජන දීමනා ගෙවූ වියදම", "coord", row.coord)}
+          ${advsumLine("2.4 අධීක්ෂණ දීමනා ගෙවූ වියදම", "supervise", row.supervise)}
+          ${advsumLine("2.5 සම්බන්ධීකරණ දීමනා ගෙවූ වියදම", "liaise", row.liaise)}
+          ${advsumLine("2.6 ගිණුම් අංශය සඳහා දීමනා", "account", row.account)}
+          ${advsumLine("2.7 කාර්යාල සහාය සඳහා දීමනා", "office", row.office)}
+          ${advsumLine("2.8 ආහාර පාන සඳහා වියදම", "food", row.food)}
+          ${advsumLine("2.9 අවිනිශ්චිත වියදම", "contingent", row.contingent)}
+          ${advsumLine("2.10 වෙනත්", "other", row.other)}
+          <tr>
+            <td>මුළු වියදම</td>
+            <td class="mid">${advsumMoney("total", row.total, true)}</td>
+            <td class="mid">${advsumMoney("totalRight", row.totalRight, false)}</td>
+          </tr>
+          <tr>
+            <td>ඉතිරි මුදල/හිඟ මුදල</td>
+            <td></td>
+            <td class="mid">${advsumMoney("gap", row.gap, false)}</td>
+          </tr>
+          <tr>
+            <td>ශේෂය</td>
+            <td></td>
+            <td class="mid">${advsumMoney("balance", row.balance, true)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="advsum-return"><span>ඉතිරි මුදල</span>${advsumMoney("balanceBack", row.balanceBack, false)}</p>
+      <p class="advsum-return"><span>රාජ්‍ය භාගය</span>${advsumMoney("shareBack", row.shareBack, false)}</p>
+      <p class="advsum-return"><span>රිසිට්පත් අංකය</span><input name="receipt" value="${esc(row.receipt || "")}"></p>
+      <p class="advsum-sign">
+        <input name="signTitle" value="${esc(row.signTitle || "පාඨමාලා සමායෝජක")}">
+        <input name="signName" value="${esc(row.signName || "නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)")}">
+        <input name="signPlace" value="${esc(row.signPlace || "වයඹ පළාත් ප්‍රධාන ලේකම් වෙනුවට")}">
+      </p>
+    </article>
+    <div id="form-msg"></div>
+  </form>`;
+}
+
+async function renderAdvSum(work) {
+  const atp = state.query?.get("atp") || "";
+  if (!atp) {
+    const data = await api("advsum", { query: { year: chosenYear() } });
+    const rows = (data.items || []).map((row) => `<tr>
+      <td><a href="#console/advsum?atp=${esc(row.id)}&year=${esc(data.year || chosenYear())}">${esc(L("සාරාංශ පත්‍රය", "சுருக்கப் படிவம்", "Summary sheet"))}</a></td>
+      <td class="wrap-cell">${esc(row.name)}</td>
+      <td>${esc(showDate(row.end) || row.end || "")}</td>
+      <td class="wrap-cell">${esc(row.file)}</td>
+      <td>${row.saved ? esc(L("සුරැකි", "சேமித்தது", "Saved")) : esc(L("ගණනය", "கணக்கு", "Calculated"))}</td>
+    </tr>`).join("");
+    work.innerHTML = `
+      <h2 class="classic-title">${esc(L("අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"))}</h2>
+      <p class="pad-note">${esc(L("ඉවර වූ පුහුණු වැඩසටහන් ඉවර වූ දිනයේ සිට මාස 3ක් මෙහි පේනවා. පත්‍රය විවෘත කර PDF එක ගන්න. මුද්‍රණ ඉඩ අගල 1ක්.", "முடிந்த பயிற்சிகள் முடிந்த நாளிலிருந்து 3 மாதம் இங்கே தெரியும். படிவத்தைத் திறந்து PDF எடுக்கவும். அச்சு ஓரம் 1 அங்குலம்.", "Finished programmes stay here for 3 months from the day they ended. Open the sheet and take the PDF. The print margin is 1 inch."))}</p>
+      <table>
+        <thead><tr>
+          <th></th>
+          <th>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</th>
+          <th>${esc(L("ඉවර වූ දිනය", "முடிந்த நாள்", "Finished on"))}</th>
+          <th>${esc(L("ලිපිගොනු අංකය", "கோப்பு எண்", "File number"))}</th>
+          <th>${esc(L("තත්ත්වය", "நிலை", "Status"))}</th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="5">${esc(L("මාස 3ක් ඇතුළත ඉවර වූ පුහුණු වැඩසටහන් නොමැත.", "3 மாதத்துக்குள் முடிந்த பயிற்சி இல்லை.", "No programmes finished within the last 3 months."))}</td></tr>`}</tbody>
+      </table>`;
+    return;
+  }
+  const data = await api("advsum", { query: { atp } });
+  const row = Object.assign({ atp }, data.item || {});
+  work.innerHTML = advsumForm(row);
+  const slot = document.getElementById("advsum-calc");
+  if (slot) slot.value = JSON.stringify(data.calc || {});
+  if (!data.saved) {
+    document.querySelectorAll("#advsum-form [name=shareBack], #advsum-form [name=balanceBack]").forEach((field) => {
+      field.dataset.auto = "1";
+    });
+  }
+}
+
+function printAdvSum() {
+  const paper = document.getElementById("advsum-paper");
+  if (!paper) return;
+  paper.querySelectorAll("input").forEach((field) => field.setAttribute("value", field.value));
+  let sheet = document.getElementById("advsum-official");
+  if (!sheet) {
+    sheet = document.createElement("article");
+    sheet.id = "advsum-official";
+    document.body.appendChild(sheet);
+  }
+  sheet.className = "advsum advsum-official";
+  sheet.innerHTML = paper.innerHTML;
+  sheet.style.zoom = "1";
+  sheet.style.minHeight = "";
+  const style = document.createElement("style");
+  style.id = "advsum-print-page";
+  style.textContent = "@media print { @page { size: A4 portrait; margin: 1in; } }";
+  document.head.appendChild(style);
+  document.body.classList.add("printing-advsum");
+  const pageHeight = ((297 - 25.4 * 2) / 25.4) * 96;
+  const used = sheet.getBoundingClientRect().height;
+  if (used > pageHeight - 4) {
+    sheet.style.zoom = String(Math.max(0.72, (pageHeight - 8) / used));
+  } else {
+    sheet.style.minHeight = "242mm";
+  }
+  const done = () => {
+    document.body.classList.remove("printing-advsum");
+    sheet.remove();
+    style.remove();
+  };
+  window.addEventListener("afterprint", done, { once: true });
+  window.print();
 }
 
 function moduleTabs(tab) {
@@ -5105,7 +5291,7 @@ function nidBoxes(count) {
 async function renderFinish(work) {
   const atp = state.query?.get("atp") || "";
   if (atp) {
-    const list = await api("applicants", { query: { atp, selected: "1" } });
+    const list = await api("applicants", { query: { atp, selected: "1", keep: "1" } });
     const rows = (list.items || []).map((row, index) => `<tr>
       <td><input type="checkbox" data-nid="${esc(row.tapp_officerNid)}" ${officerCame(row.tratt_isparti) ? "checked" : ""}></td>
       <td>${index + 1}</td>
@@ -5117,7 +5303,39 @@ async function renderFinish(work) {
     </tr>`).join("");
     work.innerHTML = `
       <h2 class="classic-title">${esc(L("පැමිණි නිලධාරීන් තහවුරු කරන්න", "வந்த அதிகாரிகளை உறுதி செய்", "Confirm the officers who attended"))}</h2>
-      <p class="pad-note">${esc(L("පුහුණුවට තෝරාගත් නිලධාරීන්. පැමිණියේ නැත්නම් ඉදිරියේ ඇති හරිය අයින් කරන්න.", "பயிற்சிக்குத் தேர்ந்த அதிகாரிகள். வராவிட்டால் முன்னுள்ள அடையாளத்தை நீக்கவும்.", "Officers selected for the programme. Clear the tick if an officer did not attend."))}</p>
+      <p class="pad-note">${esc(L("ඕන නම් ජාතික හැඳුනුම්පත් අංකය දාලා නිලධාරීන් එකතු කරන්න. ලැයිස්තුවේ තියෙන අය තෝරන්න. Excel ගොනුවක් දාලා උඩුගත කරන්නත් පුළුවන්. පැමිණියේ නැත්නම් ඉදිරියේ ඇති හරිය අයින් කරන්න.", "தேவைப்பட்டால் அடையாள எண்ணை எழுதி அதிகாரிகளைச் சேர்க்கவும். பட்டியலில் இருப்பவரைத் தேர்ந்தெடுக்கவும். Excel கோப்பைப் பதிவேற்றவும் முடியும். வராவிட்டால் முன்னுள்ள அடையாளத்தை நீக்கவும்.", "If you need to, type a national ID and add officers. Tick the people in the list. You can also upload an Excel file. Clear the tick if an officer did not attend."))}</p>
+      <h2 class="classic-title">${esc(L("හැඳුනුම්පත් අංකයෙන් එකතු කරන්න", "அடையாள எண்ணால் சேர்க்க", "Add by national ID"))}</h2>
+      <form class="sheet-tools" id="walkin-form">
+        <input type="hidden" name="atp_id" value="${esc(atp)}">
+        <input name="nid" placeholder="${esc(L("ජා.හැ.අංකය", "அடையாள எண்", "National ID"))}" required>
+        <button type="submit">${esc(L("එකතු කරන්න", "சேர்க்க", "Add"))}</button>
+      </form>
+      <p class="pad-note">${esc(L("වරකට ජා.හැ.අංක 10ක්. නිලධාරීන් 1000 දක්වා එකතු කරන්න පුළුවන්.", "ஒரு முறை 10 அடையாள எண்கள். 1000 அதிகாரிகள் வரை சேர்க்கலாம்.", "Ten ID numbers at a time. You can add up to 1000 officers."))}</p>
+      <form id="walkin-many">
+        <input type="hidden" name="atp_id" value="${esc(atp)}">
+        <div class="nid-grid" id="nid-grid">${nidBoxes(10)}</div>
+        <p>
+          <button type="button" data-act="more-nids">${esc(L("තව 10ක්", "மேலும் 10", "Add 10 more"))}</button>
+          <button type="submit">${esc(L("එකතු කරන්න", "சேர்க்க", "Add"))}</button>
+        </p>
+        <div id="many-msg"></div>
+      </form>
+      <h2 class="classic-title">${esc(L("Excel ගොනුව උඩුගත කරන්න", "Excel கோப்பைப் பதிவேற்று", "Upload an Excel file"))}</h2>
+      <form class="sheet-tools" id="attendance-upload">
+        <input type="hidden" name="atp_id" value="${esc(atp)}">
+        <input type="file" name="file" accept=".xls,.xlsx,.csv" required>
+        <button type="submit">${esc(L("හැඳුනුම්පත් අංක Excel එක", "அடையாள எண் Excel", "ID-number Excel"))}</button>
+        <button type="button" data-act="attendance-format">${esc(L("ආකෘතිය බාගත කරන්න", "வடிவத்தைப் பதிவிறக்கு", "Download the format"))}</button>
+        <div id="upload-msg"></div>
+      </form>
+      <form class="sheet-tools" id="namelist-upload">
+        <input type="hidden" name="atp_id" value="${esc(atp)}">
+        <input type="file" name="file" accept=".xls,.xlsx,.csv" required>
+        <button type="submit">${esc(L("නාම ලේඛන Excel එක", "பெயர்ப் பட்டியல் Excel", "Name-list Excel"))}</button>
+        <button type="button" data-act="namelist-format">${esc(L("ආකෘතිය බාගත කරන්න", "வடிவத்தைப் பதிவிறக்கு", "Download the format"))}</button>
+        <div id="namelist-msg"></div>
+      </form>
+      <p class="pad-note">${esc(L("නාම ලේඛනයේ තීරු: නම, ජාතික හැඳුනුම්පත් අංකය, තනතුර, දුරකථන අංකය, ස්ත්‍රී/පුරුෂ භාවය, කාර්යාලයේ නම. හැඳුනුම්පත් අංක Excel එකේ පළමු තීරුවේ අංකය විතරයි.", "பெயர்ப் பட்டியல் நெடுவரிசைகள்: பெயர், அடையாள எண், பதவி, தொலைபேசி, பாலினம், அலுவலகப் பெயர். அடையாள எண் Excel இன் முதல் நெடுவரிசையில் எண் மட்டும்.", "Name-list columns: name, national ID, designation, phone, gender, office name. The ID Excel has only the number in the first column."))}</p>
       <form id="confirm-attendance">
         <input type="hidden" name="atp_id" value="${esc(atp)}">
         <div class="table-wrap desig-list"><table>
@@ -5132,38 +5350,13 @@ async function renderFinish(work) {
           </tr></thead>
           <tbody>${rows || `<tr><td colspan="7">${esc(L("තෝරාගත් නිලධාරීන් නොමැත.", "தேர்ந்த அதிகாரிகள் இல்லை.", "No selected officers."))}</td></tr>`}</tbody>
         </table></div>
-        <p><button type="submit">${esc(L("තහවුරු කරන්න", "உறுதி செய்", "Confirm"))}</button></p>
+        <p><button type="submit">${esc(L("තෝරා තහවුරු කරන්න", "தேர்ந்து உறுதி செய்", "Tick and confirm"))}</button></p>
         <div id="form-msg"></div>
-      </form>
-      <h2 class="classic-title">${esc(L("අයදුම් නොකර ආ නිලධාරියෙකු", "விண்ணப்பிக்காமல் வந்த அதிகாரி", "An officer who did not apply"))}</h2>
-      <form class="sheet-tools" id="walkin-form">
-        <input type="hidden" name="atp_id" value="${esc(atp)}">
-        <input name="nid" placeholder="${esc(L("ජා.හැ.අංකය", "அடையாள எண்", "National ID"))}" required>
-        <button type="submit">${esc(L("එකතු කරන්න", "சேர்க்க", "Add"))}</button>
-      </form>
-      <h2 class="classic-title">${esc(L("වෙබ් අඩවියෙන් අයදුම් නොකළ නිලධාරීන්", "இணையத்தில் விண்ணப்பிக்காத அதிகாரிகள்", "Officers who did not apply on the website"))}</h2>
-      <p class="pad-note">${esc(L("වරකට ජා.හැ.අංක 10ක්. නිලධාරීන් 1000 දක්වා එකතු කරන්න පුළුවන්.", "ஒரு முறை 10 அடையாள எண்கள். 1000 அதிகாரிகள் வரை சேர்க்கலாம்.", "Ten ID numbers at a time. You can add up to 1000 officers."))}</p>
-      <form id="walkin-many">
-        <input type="hidden" name="atp_id" value="${esc(atp)}">
-        <div class="nid-grid" id="nid-grid">${nidBoxes(10)}</div>
-        <p>
-          <button type="button" data-act="more-nids">${esc(L("තව 10ක්", "மேலும் 10", "Add 10 more"))}</button>
-          <button type="submit">${esc(L("එකතු කරන්න", "சேர்க்க", "Add"))}</button>
-        </p>
-        <div id="many-msg"></div>
-      </form>
-      <h2 class="classic-title">Excel</h2>
-      <form class="sheet-tools" id="attendance-upload">
-        <input type="hidden" name="atp_id" value="${esc(atp)}">
-        <input type="file" name="file" accept=".xls,.xlsx,.csv" required>
-        <button type="submit">${esc(L("Excel ඇතුළත් කරන්න", "Excel பதிவேற்றம்", "Upload Excel"))}</button>
-        <button type="button" data-act="attendance-format">download format</button>
-        <div id="upload-msg"></div>
       </form>`;
     return;
   }
   const saved = await api("saved-estimates");
-  const rows = (saved.items || []).map((row) => `<tr>
+  const rows = (saved.items || []).filter((row) => !row.offweb).map((row) => `<tr>
     <td><a href="#console/finish?atp=${esc(row.id)}">${esc(L("පැමිණි නිලධාරීන් තහවුරු කරන්න", "வந்த அதிகாரிகளை உறுதி செய்", "Confirm the officers who attended"))}</a></td>
     <td><a href="#console/advance?atp=${esc(row.id)}">${esc(L("අත්තිකාරම් විස්තර", "முன்பண விவரம்", "Advance details"))}</a></td>
     <td class="wrap-cell">${esc(row.name)}</td>
@@ -5512,7 +5705,7 @@ async function renderAllowance(work, atp) {
           ${advanceField(L("සම්බන්ධිකරණ නිලධාරියාගේ නම", "ஒருங்கிணைப்பாளர் பெயர்", "Coordinator"), box("coordinator", row.coordinator, false))}
           ${advanceField(L("වැඩසටහන පවත්වන දින", "பயிற்சி நடைபெறும் நாட்கள்", "Programme dates"), box("dates", row.dates, false))}
           ${advanceField(L("සහභාගී කරගන්නා නිලධාරීන් ගණන", "சேர்க்கும் அதிகாரிகள்", "Officers to be included"), box("planned", row.planned, false))}
-          ${advanceField(L("සහභාගි වූ සංඛ්‍යාව", "பங்கேற்றோர்", "Number who attended"), box("attended", row.attended, false))}
+          ${advanceField(L("සහභාගි වූ සංඛ්‍යාව", "பங்கேற்றோர்", "Number who attended"), row.attendedLocked ? `<input name="attended" value="${esc(row.attended ?? 0)}" readonly>` : box("attended", row.attended, false))}
         </div>
         <div class="annual-col">
           ${advanceField(L("සම්පත්දායක දීමනා", "வள ஆள் கொடுப்பனவு", "Resource-person allowance"), pay("resource", row.resource, "resourceWho", row.resourceWho))}
@@ -5552,7 +5745,7 @@ async function renderFinish2(work) {
   </tr>`).join("");
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("වැඩසටහන අවසන් කිරීම පියවර 2", "நிகழ்ச்சியை முடித்தல் படி 2", "Finish the programme, step 2"))}</h2>
-    <p class="pad-note">${esc(L("පියවර 1 හි පෙනෙන වැඩසටහන් අතරින් අත්තිකාරම සුරැකූ, නම් ලේඛනය තහවුරු කළ සියල්ල.", "படி 1 இல் தெரியும் பயிற்சிகளில் முன்பணம் சேமித்து, பெயர்ப் பட்டியல் உறுதி செய்த அனைத்தும்.", "Every step 1 programme whose advance was saved and whose name list was confirmed."))}</p>
+    <p class="pad-note">${esc(L("අත්තිකාරම සුරැකූ, නම් ලේඛනය තහවුරු කළ සියලුම වැඩසටහන්. වෙබ් අඩවියෙන් නොකැඳවූ පුහුණුවක් නම් ලේඛනය තහවුරු කර අත්තිකාරම් පිරවූ පසු මෙතන පේනවා.", "முன்பணம் சேமித்து பெயர்ப் பட்டியல் உறுதி செய்த அனைத்துப் பயிற்சிகளும். இணையம் வழியாக அழைக்காத பயிற்சி, பெயர்ப் பட்டியல் உறுதி செய்து முன்பணம் நிரப்பிய பின் இங்கே தெரியும்.", "Every programme whose advance was saved and whose name list was confirmed. A training not called through the website appears here after the name list is confirmed and the advance is filled in."))}</p>
     <div class="table-wrap desig-list"><table>
       <thead><tr>
         <th>${esc(L("ආහාර බිල් පියවීම", "உணவுப் பட்டியல் தீர்வு", "Food bill settlement"))}</th>
@@ -5932,11 +6125,13 @@ async function renderEstimate(work) {
       const programmes = await api("list", { query: { table: "cp_atp", limit: 1000, page: 1 } });
       const chosen = (programmes.items || []).find((item) => String(item.atp_id) === String(atp));
       const data = await api("estimate", { query: { id: atp, days: chosen?.atp_noofdays || 1, people: chosen?.atp_noofparticipants || 1 } });
+      data.revised = state.module === "revise" || (state.module === "offweb" && !!data.saved);
+      data.offweb = state.module === "offweb";
       $("#paper").innerHTML = estimateSheetHtml(data);
       const form = $("#paper .estimate-form");
       if (form) {
         form.dataset.atp = atp;
-        if (state.module === "revise") form.dataset.revised = "1";
+        if (data.revised) form.dataset.revised = "1";
       }
       form?.addEventListener("focusin", (event) => {
         const input = event.target.closest?.(".est-formula");
@@ -5973,7 +6168,7 @@ async function renderEstimate(work) {
     api("list", { query: { table: "cp_atp", limit: 1000, page: 1 } }),
     api("saved-estimates"),
   ]);
-  const savedRows = (saved.items || []).map((row, index) => `<tr>
+  const savedRows = (saved.items || []).filter((row) => !row.offweb).map((row, index) => `<tr>
     <td>${index + 1}</td>
     <td>${esc(showDate(row.day))}</td>
     <td class="wrap-cell">${esc(row.name)}</td>
@@ -6012,6 +6207,7 @@ function addMonths(iso, months) {
 function revisedEstimates(items) {
   const today = localToday();
   return (items || []).filter((row) => {
+    if (row.offweb) return false;
     const end = showDate(row.end) || showDate(row.day);
     if (!end) return true;
     const until = addMonths(end, 3);
@@ -6075,6 +6271,7 @@ async function renderOffweb(work) {
     try { state.options = Object.assign(state.options || {}, await api("options")); } catch (error) { /* centres stay empty */ }
   }
   const saved = await api("offweb-list");
+  const canEditCame = state.user && (state.user.role === "Administrator" || state.user.role === "Super User");
   const rows = (saved.items || []).map((row, index) => `<tr>
     <td>${index + 1}</td>
     <td>${esc(showDate(row.day))}</td>
@@ -6082,10 +6279,13 @@ async function renderOffweb(work) {
     <td class="wrap-cell">${esc(row.file)}</td>
     <td class="wrap-cell">${esc(row.place)}</td>
     <td><a href="#console/offweb?atp=${esc(row.id)}">${esc(L("ඇස්තමේන්තුව", "மதிப்பீடு", "Estimate"))}</a></td>
+    <td>${row.estimate ? `<a href="#console/finish?atp=${esc(row.id)}">${esc(L("පැමිණි නිලධාරීන් තහවුරු කරන්න", "வந்த அதிகாரிகளை உறுதி செய்", "Confirm the officers who attended"))}</a>` : ""}</td>
+    <td>${row.estimate ? `<a href="#console/advance?atp=${esc(row.id)}">${esc(L("අත්තිකාරම් විස්තර", "முன்பண விவரம்", "Advance details"))}</a>` : ""}</td>
+    <td class="offweb-came-cell" data-id="${esc(row.id)}">${canEditCame ? `<span class="offweb-came-view">${esc(row.attended ?? 0)}</span> <button type="button" class="text-btn small" data-act="offweb-came-edit">${esc(L("සංස්කරණය", "திருத்து", "Edit"))}</button>` : esc(row.attended ?? 0)}</td>
   </tr>`).join("");
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("වෙබ් අඩවිය මගින් කැඳවීම නොකර පවත්වන පුහුණු ඇතුළත් කිරීම හා ඇස්තමේන්තු සැකසීම", "இணையம் வழியாக அழைக்காமல் நடத்தும் பயிற்சியைச் சேர்த்தல் மற்றும் மதிப்பீடு", "Enter a training not called through the website and prepare the estimate"))}</h2>
-    <p class="pad-note">${esc(L("මෙතනින් ඇතුළත් කරන වැඩසටහන මුල් පිටුවේ පෙන්වන්නේ නැත. පුහුණු වැඩසටහන් සඳහා අයදුම් කරන තැනත් පෙන්වන්නේ නැත.", "இங்கே சேர்க்கும் பயிற்சி முகப்பிலோ விண்ணப்பப் பக்கத்திலோ தெரியாது.", "A programme entered here does not appear on the home page or in the application list."))}</p>
+    <p class="pad-note">${esc(L("මෙතනින් ඇතුළත් කරන වැඩසටහන මුල් පිටුවේ පෙන්වන්නේ නැත. පුහුණු වැඩසටහන් සඳහා අයදුම් කරන තැනත් පෙන්වන්නේ නැත. ඇස්තමේන්තුව සුරැකූ පසු සංශෝධිත ඇස්තමේන්තුවේ හෝ පියවර 1 හි පෙන්වන්නේ නැත. නම් ලේඛනය තහවුරු කර අත්තිකාරම් පිරවූ පසු පියවර 2 හි පේනවා. වාර්තාවල සාමාන්‍ය වැඩසටහනක් වගේ යනවා. සහභාගි වූ සංඛ්‍යාව සුපිරි පරිශීලකයාට සහ පරිපාලකයාට විතරක් වෙනස් කරන්න පුළුවන්. සංස්කරණය කරලා සුරකින්න ඔබන්න. අත්තිකාරම් විස්තරවල ඒ සංඛ්‍යාව පේනවා.", "இங்கே சேர்க்கும் பயிற்சி முகப்பிலோ விண்ணப்பப் பக்கத்திலோ தெரியாது. மதிப்பீடு சேமித்த பின் திருத்திய மதிப்பீட்டிலோ படி 1 இலோ தெரியாது. பெயர்ப் பட்டியல் உறுதி செய்து முன்பணம் நிரப்பிய பின் படி 2 இல் தெரியும். அறிக்கைகளில் சாதாரண பயிற்சி போலச் சேரும். பங்கேற்றோர் எண்ணை சூப்பர் பயனரும் நிர்வாகியும் மட்டும் மாற்றலாம். திருத்திச் சேமி என்பதை அழுத்தவும். முன்பண விவரத்தில் அந்த எண் தெரியும்.", "A programme entered here does not appear on the home page or in the application list. After the estimate is saved it does not appear in the revised estimate or in step 1. It appears in step 2 after the name list is confirmed and the advance is filled in. Reports include it like any other programme. Only a Super User or an Administrator can change the number who attended. Edit it, then press Save. Advance details shows that number."))}</p>
     <form class="classic-form old-plan" id="offweb-form" action="#" method="post">
       ${annualFormFields({
         atp_trtype: TYPE_MDTU,
@@ -6105,9 +6305,12 @@ async function renderOffweb(work) {
         <th>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</th>
         <th>${esc(L("ලිපිගොනු අංකය", "கோப்பு எண்", "File number"))}</th>
         <th>${esc(L("ස්ථානය", "இடம்", "Place"))}</th>
-        <th></th>
+        <th>${esc(L("ඇස්තමේන්තුව", "மதிப்பீடு", "Estimate"))}</th>
+        <th>${esc(L("පැමිණි නිලධාරීන් තහවුරු කරන්න", "வந்த அதிகாரிகளை உறுதி செய்", "Confirm officers"))}</th>
+        <th>${esc(L("අත්තිකාරම් විස්තර", "முன்பண விவரம்", "Advance details"))}</th>
+        <th>${esc(L("සහභාගි වූ සංඛ්‍යාව", "பங்கேற்றோர்", "Number who attended"))}</th>
       </tr></thead>
-      <tbody>${rows || `<tr><td colspan="6">${esc(L("තවම ඇතුළත් කළ පුහුණු නොමැත.", "இன்னும் பயிற்சி சேர்க்கவில்லை.", "No trainings have been entered."))}</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="9">${esc(L("තවම ඇතුළත් කළ පුහුණු නොමැත.", "இன்னும் பயிற்சி சேர்க்கவில்லை.", "No trainings have been entered."))}</td></tr>`}</tbody>
     </table></div>`;
   paintPlanDates([""]);
   paintPlanPeople([]);
@@ -6508,7 +6711,10 @@ function estimateSheetHtml(data) {
     `<label class="classic-field est-line"><span>${esc(L("අනුමැතිය", "அனுமதி", "Approval"))}</span><textarea class="est-formula est-note" data-est="text" data-key="note" data-formula="${esc(note)}">${esc(note)}</textarea></label>`,
     `<label class="classic-field est-line"><span>${esc(L("මුළු එකතුව", "மொத்தத் தொகை", "Total"))}</span><output class="est-total" data-estimate-total>0.00</output></label>`,
   ].join("");
+  const remove = data.offweb && data.revised ? `<button type="button" class="secondary" data-act="offweb-delete">${esc(L("මකන්න", "நீக்கு", "Delete"))}</button>` : "";
+  const revisedHead = data.revised ? `<div class="est-revised-row"><h2 class="est-revised">සංශෝධිත ඇස්තමේන්තුව</h2>${remove}</div>` : "";
   return `<form class="classic-form old-plan estimate-form" data-days="${esc(days)}" data-coordinator="${esc(data.coordinator || "")}" data-coordinator-sex="${esc(data.coordinatorSex || "")}" data-signatory="${esc(data.signatory || "")}" action="#" method="post" onsubmit="return false">
+    ${revisedHead}
     <div class="annual-sheet">
       <div class="annual-col">${left}${right}</div>
     </div>
@@ -6567,6 +6773,7 @@ async function renderSignSheet(work) {
       <label class="classic-field"><span>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</span><select name="id">${programmeSelect(activeProgrammes(programmes.items || [], atp), atp)}</select></label>
       <button type="button" data-act="build-sign">${esc(L("අත්සන් ලේඛනය", "கையொப்பப் பட்டியல்", "Sign sheet"))}</button>
       <button type="button" data-act="sign-pdf">${esc(L("PDF බාගත කරන්න", "PDF பதிவிறக்கம்", "Download PDF"))}</button>
+      <button type="button" data-act="sign-excel">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
     </form>
     <div id="paper"></div>`;
   if (atp) await paintSignSheet(atp);
@@ -8515,6 +8722,41 @@ async function onClick(event) {
     event.preventDefault();
     printEstimate().catch((error) => alert(error.message));
   }
+  if (act.act === "offweb-came-edit") {
+    event.preventDefault();
+    const cell = event.target.closest(".offweb-came-cell");
+    if (!cell || cell.querySelector(".offweb-came")) return;
+    const current = cell.querySelector(".offweb-came-view")?.textContent.trim() || "0";
+    cell.innerHTML = `<input class="offweb-came" inputmode="numeric" value="${esc(current)}"> <button type="button" class="text-btn small" data-act="offweb-came-save">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>`;
+    cell.querySelector(".offweb-came")?.focus();
+  }
+  if (act.act === "offweb-came-save") {
+    event.preventDefault();
+    const cell = event.target.closest(".offweb-came-cell");
+    const field = cell?.querySelector(".offweb-came");
+    if (!cell || !field) return;
+    const attended = String(field.value || "").trim();
+    if (attended !== "" && !/^\d+$/.test(attended)) {
+      alert(L("සහභාගි වූ සංඛ්‍යාව ඉලක්කම් වලින් දෙන්න.", "பங்கேற்றோர் எண்ணை இலக்கங்களால் எழுதவும்.", "Enter the number who attended in digits."));
+      return;
+    }
+    try {
+      const saved = await api("offweb-came", { method: "POST", body: { id: cell.dataset.id, attended } });
+      const value = saved.attended ?? attended;
+      cell.innerHTML = `<span class="offweb-came-view">${esc(value)}</span> <button type="button" class="text-btn small" data-act="offweb-came-edit">${esc(L("සංස්කරණය", "திருத்து", "Edit"))}</button>`;
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+  if (act.act === "offweb-delete") {
+    event.preventDefault();
+    const id = document.querySelector(".estimate-form")?.dataset.atp || "";
+    if (!id) return;
+    if (!confirm(L("මෙම පුහුණු වැඩසටහන සහ ඇස්තමේන්තුව මකන්නද?", "இந்தப் பயிற்சியையும் மதிப்பீட்டையும் நீக்கவா?", "Delete this programme and its estimate?"))) return;
+    api("offweb-delete", { method: "POST", body: { id } }).then(() => {
+      location.hash = "#console/offweb";
+    }).catch((error) => alert(error.message));
+  }
   if (act.act === "estimate-add-dates") {
     event.preventDefault();
     appendEstimateDates(planCount(document.getElementById("estimate-date-count")));
@@ -8704,6 +8946,21 @@ async function onClick(event) {
     event.preventDefault();
     printFoodBill();
   }
+  if (act.act === "advsum-print") {
+    event.preventDefault();
+    printAdvSum();
+  }
+  if (act.act === "advsum-refill") {
+    event.preventDefault();
+    const form = document.getElementById("advsum-form");
+    const raw = document.getElementById("advsum-calc")?.value || "";
+    if (!form || !raw) return;
+    try {
+      fillAdvSum(form, JSON.parse(raw));
+    } catch (error) {
+      alert(error.message);
+    }
+  }
   if (act.act === "settle-pdf") {
     event.preventDefault();
     saveSettlePdf().catch((error) => alert(error.message));
@@ -8754,6 +9011,18 @@ async function onClick(event) {
     }
   }
   if (act.act === "sign-pdf") saveSignPdf().catch((error) => alert(error.message));
+  if (act.act === "sign-excel") saveSignExcel();
+  if (act.act === "namelist-format") {
+    event.preventDefault();
+    downloadExcelXml([[
+      L("නම", "பெயர்", "Name"),
+      L("ජාතික හැඳුනුම්පත් අංකය", "அடையாள எண்", "National ID"),
+      L("තනතුර", "பதவி", "Designation"),
+      L("දුරකථන අංකය", "தொலைபேசி எண்", "Phone number"),
+      L("ස්ත්‍රී/පුරුෂ භාවය", "பாலினம்", "Gender"),
+      L("කාර්යාලයේ නම", "அலுவலகப் பெயர்", "Office name"),
+    ]], "nama-lekanaya-format.xls");
+  }
   if (act.act === "panel-pdf") savePanelPdf().catch((error) => alert(error.message));
   if (act.act === "namelist-pdf") saveNameListPdf().catch((error) => alert(error.message));
   if (act.act === "attended-pdf") saveAttendedPdf().catch((error) => alert(error.message));
@@ -9243,6 +9512,18 @@ async function onSubmit(event) {
       if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
     }
   }
+  if (form.id === "namelist-upload") {
+    event.preventDefault();
+    const body = new FormData(form);
+    const slot = document.getElementById("namelist-msg");
+    try {
+      const saved = await api("namelist-upload", { method: "POST", form: body });
+      if (slot) slot.innerHTML = `<div class="ok">${esc(L("තහවුරු කළ නිලධාරීන් ", "உறுதி செய்த அதிகாரிகள் ", "Officers confirmed: "))}${esc(saved.enrolled)}. ${esc(L("අලුතින් එකතු කළ අය ", "புதிதாகச் சேர்த்தவர் ", "Newly added: "))}${esc(saved.added)}.</div>`;
+      route();
+    } catch (error) {
+      if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
+    }
+  }
   if (form.id === "attend-form") {
     event.preventDefault();
     await submitMessage(form, async () => {
@@ -9422,6 +9703,17 @@ async function onSubmit(event) {
     const data = Object.fromEntries(new FormData(form));
     await submitMessage(form, async () => {
       await api("advance-save", { method: "POST", body: data });
+      $("#form-msg").innerHTML = `<div class="ok">${esc(L("සුරැකුණා.", "சேமித்தது.", "Saved."))}</div>`;
+    });
+  }
+  if (form.id === "advsum-form") {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    await submitMessage(form, async () => {
+      await api("advsum-save", { method: "POST", body: data });
+      ["shareBack", "balanceBack"].forEach((name) => {
+        if (form.elements[name]) form.elements[name].dataset.auto = "0";
+      });
       $("#form-msg").innerHTML = `<div class="ok">${esc(L("සුරැකුණා.", "சேமித்தது.", "Saved."))}</div>`;
     });
   }
@@ -9747,7 +10039,7 @@ async function drawLetterCanvas() {
   const headW = width - margin * 2;
   const headH = Math.round(headW * head.height / head.width);
   ctx.drawImage(head, margin, y, headW, headH);
-  ctx.font = '600 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+  ctx.font = '400 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
   ctx.textAlign = "left";
   ctx.fillText(article.dataset.file || "", margin + headW * 0.22, y + headH * 0.86);
   const dateLabel = article.dataset.datelabel || "ලිපිය මුද්‍රණය කරන දිනය";
@@ -10015,6 +10307,46 @@ async function saveNameListPdf() {
   saveBlob(jpegPdfPages(images), `nama-lekanaya-${localToday()}.pdf`);
 }
 
+function downloadExcelXml(rows, filename) {
+  const xmlEsc = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const body = rows.map((row) => `<Row>${row.map((cell) => `<Cell><Data ss:Type="String">${xmlEsc(cell)}</Data></Cell>`).join("")}</Row>`).join("");
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n<Worksheet ss:Name="Sheet"><Table>${body}</Table></Worksheet>\n</Workbook>`;
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([xml], { type: "application/vnd.ms-excel" }));
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function saveSignExcel() {
+  const data = state.signsheet;
+  if (!data?.programme) {
+    alert(L("පළමුව අත්සන් ලේඛනය අරින්න.", "முதலில் கையொப்பப் பட்டியலைத் திறக்கவும்.", "Open the sign sheet first."));
+    return;
+  }
+  const days = (data.days || []).map((day) => showDate(day)).filter(Boolean);
+  const headers = [
+    L("අනු අංකය", "இல.", "No."),
+    L("නිලධාරියාගේ නම", "அதிகாரி பெயர்", "Officer name"),
+    L("ජාතික හැඳුනුම්පත් අංකය", "அடையாள எண்", "National ID"),
+    L("කාර්යාලය", "அலுவலகம்", "Office"),
+    L("දුරකථන අංකය", "தொலைபேசி எண்", "Phone number"),
+    ...days,
+  ];
+  const rows = [headers];
+  (data.rows || []).forEach((row, index) => {
+    rows.push([
+      String(index + 1),
+      `${row.stf_Name || row.tratt_name || ""} ${row.stf_desig || row.tratt_desig || ""}`.trim(),
+      row.tapp_officerNid || "",
+      row.tapp_office || "",
+      row.stf_mobile || row.tratt_mobile || "",
+      ...days.map(() => ""),
+    ]);
+  });
+  downloadExcelXml(rows, `athsan-lekanaya-${localToday()}.xls`);
+}
+
 async function saveSignPdf() {
   const data = state.signsheet;
   if (!data?.programme) {
@@ -10035,7 +10367,7 @@ async function saveSignPdf() {
   ];
   const width = 1754;
   const pageH = 1240;
-  const margin = 20;
+  const margin = 150;
   const tableW = width - margin * 2;
   const dayCount = days.length;
   let dayW = 0;
@@ -10050,7 +10382,7 @@ async function saveSignPdf() {
   const widths = raw.map((size) => size * tableW / rawSum);
   const fontSize = widths.slice(0, 5).some((size) => size < 110) ? 13 : 15;
   const lineH = fontSize + 6;
-  const fontFor = (header) => `${header ? 700 : 400} ${fontSize}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+  const fontFor = (header) => `${header ? 700 : 600} ${fontSize}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
   const measure = document.createElement("canvas").getContext("2d");
   const layoutRow = (cells, header) => {
     measure.font = fontFor(header);
@@ -10071,7 +10403,7 @@ async function saveSignPdf() {
     : [layoutRow([L("තෝරාගත් නිලධාරීන් නොමැත.", "தேர்ந்த அதிகாரிகள் இல்லை.", "No selected officers."), ...headers.slice(1).map(() => "")], false)];
   measure.font = '700 26px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
   const titleLines = canvasWrap(measure, L("සහභාගිවන්නන්ගේ අත්සන් ලේඛනය", "பங்கேற்பாளர் கையொப்பப் பட்டியல்", "Participants' sign sheet"), tableW);
-  measure.font = '400 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+  measure.font = '600 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
   const programmeLines = canvasWrap(measure, `${L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme")} - ${plan.atp_trname || ""}`, tableW);
   const placeLines = canvasWrap(measure, `${L("ආරම්භක දිනය", "தொடக்க திகதி", "Start date")} - ${showDate(plan.atp_day1)}   ${L("ස්ථානය", "இடம்", "Place")} - ${plan.atp_location || ""}`, tableW);
   const titleHeight = 18 + titleLines.length * 32 + programmeLines.length * 24 + placeLines.length * 24 + 8;
@@ -10079,8 +10411,8 @@ async function saveSignPdf() {
   let cursor = 0;
   let first = true;
   while (first || cursor < bodyRows.length) {
-    const limit = pageH - 16;
-    let used = (first ? titleHeight : 16) + headerRow.height;
+    const limit = pageH - margin * 2;
+    let used = (first ? titleHeight : 0) + headerRow.height;
     const slice = [];
     while (cursor < bodyRows.length && used + bodyRows[cursor].height <= limit) {
       slice.push(bodyRows[cursor]);
@@ -10106,14 +10438,14 @@ async function saveSignPdf() {
     ctx.fillStyle = "#111111";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    let y = 16;
+    let y = margin;
     if (pack.first) {
       ctx.font = '700 26px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
       titleLines.forEach((line) => {
         ctx.fillText(line, width / 2, y + 16);
         y += 32;
       });
-      ctx.font = '400 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+      ctx.font = '600 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
       programmeLines.forEach((line) => {
         ctx.fillText(line, width / 2, y + 12);
         y += 24;
@@ -10706,6 +11038,11 @@ document.body.addEventListener("input", (event) => {
   }
   const form = event.target.closest?.("#advance-form");
   if (form && (event.target.name === "advance" || event.target.name === "spent")) paintAdvance(form);
+  const advsum = event.target.closest?.("#advsum-form");
+  if (advsum && ["received", "share", "resource", "coord", "supervise", "liaise", "travel", "account", "office", "food", "contingent", "other"].includes(event.target.name)) paintAdvSum(advsum);
+  if (advsum && (event.target.name === "shareBack" || event.target.name === "balanceBack")) event.target.dataset.auto = "0";
+  if (advsum && event.target.name === "total" && advsum.elements.totalRight) advsum.elements.totalRight.value = event.target.value;
+  if (advsum && event.target.name === "totalRight" && advsum.elements.total) advsum.elements.total.value = event.target.value;
   const food = event.target.closest?.("#foodbill-form");
   if (food && event.target.name === "billamount") paintFoodBill(food, true);
   if (food && event.target.name === "food") paintFoodBill(food, false);

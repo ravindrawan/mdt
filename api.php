@@ -36,6 +36,7 @@ try {
         'confirm-attendance' => action_confirm_attendance(),
         'walkin-many' => action_walkin_many(),
         'attendance-upload' => action_attendance_upload(),
+        'namelist-upload' => action_namelist_upload(),
         'finish' => action_finish(),
         'report' => action_report(),
         'export' => action_export(),
@@ -109,6 +110,8 @@ try {
         'finish2' => action_finish2(),
         'offweb-save' => action_offweb_save(),
         'offweb-list' => action_offweb_list(),
+        'offweb-came' => action_offweb_came(),
+        'offweb-delete' => action_offweb_delete(),
         'provision' => action_provision(),
         'provision-save' => action_provision_save(),
         'provision-moves' => action_provision_moves(),
@@ -120,6 +123,8 @@ try {
         'advance' => action_advance(),
         'advance-save' => action_advance_save(),
         'advances' => action_advances(),
+        'advsum' => action_advsum(),
+        'advsum-save' => action_advsum_save(),
         'foodbill' => action_foodbill(),
         'foodbill-save' => action_foodbill_save(),
         'allowance' => action_allowance(),
@@ -517,6 +522,7 @@ function action_catalog(): void
         $items[] = ['id' => 'finish', 'label' => 'Finish a programme step 1', 'group' => 'Delivery', 'kind' => 'finish'];
         $items[] = ['id' => 'finish2', 'label' => 'Finish a programme step 2', 'group' => 'Delivery', 'kind' => 'finish2'];
         $items[] = ['id' => 'advance', 'label' => 'Advance details', 'group' => 'Delivery', 'kind' => 'advance'];
+        $items[] = ['id' => 'advsum', 'label' => 'Advance summary sheet', 'group' => 'Reports', 'kind' => 'advsum'];
         $items[] = ['id' => 'provision', 'label' => 'Allocations', 'group' => 'Plan', 'kind' => 'provision'];
     }
     if ($user['role'] === 'User' || is_super($user)) {
@@ -4655,6 +4661,83 @@ function action_offweb_save(): void
     json_out(['ok' => true, 'id' => (int) db()->insert_id]);
 }
 
+function programme_is_offweb(array $plan): bool
+{
+    return in_array((string) ($plan['atp_offweb'] ?? ''), [YES_SI, 'Yes', 'yes'], true);
+}
+
+function offweb_came_count(array $plan, int $fallback): int
+{
+    if (!programme_is_offweb($plan)) {
+        return $fallback;
+    }
+    $typed = trim((string) ($plan['atp_offcame'] ?? ''));
+    if ($typed === '' || !preg_match('/^\d+$/', $typed)) {
+        return $fallback;
+    }
+    return (int) $typed;
+}
+
+function action_offweb_came(): void
+{
+    csrf_check();
+    $user = require_user();
+    if (!is_super($user)) {
+        json_out(['ok' => false, 'error' => 'සහභාගි වූ සංඛ්‍යාව වෙනස් කරන්න පුළුවන් සුපිරි පරිශීලකයාට සහ පරිපාලකයාට පමණයි.'], 403);
+    }
+    $data = body();
+    $id = (int) ($data['id'] ?? 0);
+    $found = rows('SELECT atp_id, atp_offweb FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
+    if (!$found || !programme_is_offweb($found[0])) {
+        json_out(['ok' => false, 'error' => 'ඒ පුහුණු වැඩසටහන හමු නොවුණා.'], 404);
+    }
+    $raw = trim((string) ($data['attended'] ?? ''));
+    if ($raw !== '' && !preg_match('/^\d+$/', $raw)) {
+        json_out(['ok' => false, 'error' => 'සහභාගි වූ සංඛ්‍යාව ඉලක්කම් වලින් දෙන්න.'], 422);
+    }
+    $value = $raw === '' ? '' : (string) (int) $raw;
+    $stmt = db()->prepare('UPDATE cp_atp SET atp_offcame=? WHERE atp_id=?');
+    if (!$stmt || !bind_and_run($stmt, 'si', [$value, $id])) {
+        json_out(['ok' => false, 'error' => 'සහභාගි වූ සංඛ්‍යාව සුරැකිය නොහැකි විය.'], 500);
+    }
+    $shown = $value === '' ? (string) (advance_attended_map()[$id] ?? 0) : $value;
+    $sync = db()->prepare('UPDATE cp_allowances SET al_attended=? WHERE al_atpid=?');
+    if ($sync) {
+        bind_and_run($sync, 'si', [$shown, $id]);
+    }
+    json_out(['ok' => true, 'attended' => $shown]);
+}
+
+function action_offweb_delete(): void
+{
+    csrf_check();
+    $user = require_user();
+    if (!is_super($user)) {
+        json_out(['ok' => false, 'error' => 'මෙය මකන්න පුළුවන් පුහුණු කාර්ය මණ්ඩලයට පමණයි.'], 403);
+    }
+    $id = (int) (body()['id'] ?? 0);
+    $found = rows('SELECT atp_id, atp_offweb FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
+    if (!$found || !programme_is_offweb($found[0])) {
+        json_out(['ok' => false, 'error' => 'ඒ පුහුණු වැඩසටහන හමු නොවුණා.'], 404);
+    }
+    foreach ([
+        'DELETE FROM cp_savedestimates WHERE se_atpid = ?',
+        'DELETE FROM cp_advsums WHERE av_atpid = ?',
+        'DELETE FROM cp_advances WHERE ad_atpid = ?',
+        'DELETE FROM cp_allowances WHERE al_atpid = ?',
+        'DELETE FROM cp_foodbills WHERE fb_atpid = ?',
+        'DELETE FROM cp_trainingattendance WHERE tratt_atpid = ?',
+        'DELETE FROM cp_trainingapplications WHERE tapp_atpid = ?',
+        'DELETE FROM cp_atp WHERE atp_id = ?',
+    ] as $sql) {
+        $stmt = db()->prepare($sql);
+        if ($stmt) {
+            bind_and_run($stmt, 'i', [$id]);
+        }
+    }
+    json_out(['ok' => true]);
+}
+
 function action_offweb_list(): void
 {
     $user = require_user();
@@ -4662,20 +4745,28 @@ function action_offweb_list(): void
         json_out(['ok' => false, 'error' => 'මෙම ලැයිස්තුව බලන්න පුළුවන් පුහුණු කාර්ය මණ්ඩලයට පමණයි.'], 403);
     }
     $items = rows(
-        'SELECT atp_id, atp_trname, atp_fileno, atp_day1, atp_targetgroup, atp_location
+        'SELECT atp_id, atp_trname, atp_fileno, atp_day1, atp_targetgroup, atp_location, atp_offweb, atp_offcame
          FROM cp_atp WHERE atp_offweb = ? OR atp_offweb = ? OR atp_offweb = ?',
         'sss',
         [YES_SI, 'Yes', 'yes']
     );
+    $estimated = [];
+    foreach (rows('SELECT se_atpid FROM cp_savedestimates') as $saved) {
+        $estimated[(int) $saved['se_atpid']] = true;
+    }
+    $counts = advance_attended_map();
     $out = [];
     foreach ($items as $row) {
+        $id = (int) $row['atp_id'];
         $out[] = [
-            'id' => (int) $row['atp_id'],
+            'id' => $id,
             'name' => (string) $row['atp_trname'],
             'file' => (string) $row['atp_fileno'],
             'day' => substr((string) $row['atp_day1'], 0, 10),
             'target' => (string) $row['atp_targetgroup'],
             'place' => (string) $row['atp_location'],
+            'estimate' => !empty($estimated[$id]),
+            'attended' => offweb_came_count($row, $counts[$id] ?? 0),
         ];
     }
     usort($out, static function (array $a, array $b): int {
@@ -4820,9 +4911,9 @@ function total_bundle(string $year): array
             'applied' => (string) ($applied[$id] ?? 0),
             'selected' => (string) ($selected[$id] ?? 0),
             'budget' => $budget,
-            'estimate' => !$offweb ? ($savedTotal !== '' ? $savedTotal : $budget) : '',
+            'estimate' => $savedTotal !== '' ? $savedTotal : $budget,
             'revised' => !$offweb && $savedTotal !== '' && $budget !== '' && advance_number($savedTotal) != advance_number($budget) ? $savedTotal : '',
-            'offest' => $offweb ? ($savedTotal !== '' ? $savedTotal : $budget) : '',
+            'offest' => '',
             'step1' => (string) ($came[$id] ?? 0),
             'step2' => isset($pays[$id]) ? total_step2($pays[$id]) : '',
         ];
@@ -6879,8 +6970,9 @@ function action_advance(): void
     $saved = $stored[0] ?? [];
     $counts = advance_attended_map();
     $names = [];
-    $item = advance_pack($found[0], $saved, $counts[$id] ?? 0, advance_coordinator((string) ($found[0]['atp_supportstaff1'] ?? ''), $names), advance_government_share($id));
+    $item = advance_pack($found[0], $saved, offweb_came_count($found[0], $counts[$id] ?? 0), advance_coordinator((string) ($found[0]['atp_supportstaff1'] ?? ''), $names), advance_government_share($id));
     unset($item['numbers']);
+    $item['offweb'] = programme_is_offweb($found[0]);
     json_out(['ok' => true, 'item' => $item]);
 }
 
@@ -6922,6 +7014,239 @@ function action_advance_save(): void
     json_out(['ok' => true]);
 }
 
+function advsum_text(string $value, int $max = 300): string
+{
+    return mb_substr(trim($value), 0, $max);
+}
+
+function advsum_calc(array $plan): array
+{
+    $id = (int) $plan['atp_id'];
+    $advance = rows('SELECT ad_id, ad_advance, ad_spent, ad_government, ad_receipt FROM cp_advances WHERE ad_atpid = ? LIMIT 1', 'i', [$id]);
+    $pay = rows('SELECT al_resource, al_coord, al_supervise, al_liaise, al_account, al_office FROM cp_allowances WHERE al_atpid = ? LIMIT 1', 'i', [$id]);
+    $food = rows('SELECT fb_food FROM cp_foodbills WHERE fb_atpid = ? LIMIT 1', 'i', [$id]);
+    $savedAdvance = $advance[0] ?? [];
+    $savedPay = $pay[0] ?? [];
+    $box = static function (array $row, string $key): string {
+        return advance_box(advance_number((string) ($row[$key] ?? '0')));
+    };
+    $resource = advance_number($box($savedPay, 'al_resource'));
+    $coord = advance_number($box($savedPay, 'al_coord'));
+    $supervise = advance_number($box($savedPay, 'al_supervise'));
+    $liaise = advance_number($box($savedPay, 'al_liaise'));
+    $account = advance_number($box($savedPay, 'al_account'));
+    $office = advance_number($box($savedPay, 'al_office'));
+    $spent = advance_number((string) ($savedAdvance['ad_spent'] ?? '0'));
+    $allowanceSum = $resource + $coord + $supervise + $liaise + $account + $office;
+    $other = $spent > $allowanceSum + 0.009 ? $spent - $allowanceSum : 0.0;
+    $foodAmount = advance_number((string) ($food[0]['fb_food'] ?? '0'));
+    $travel = 0.0;
+    $contingent = 0.0;
+    $estimate = rows('SELECT se_sheet FROM cp_savedestimates WHERE se_atpid = ? LIMIT 1', 'i', [$id]);
+    if ($estimate) {
+        $decodedEstimate = json_decode((string) $estimate[0]['se_sheet'], true);
+        if (is_array($decodedEstimate)) {
+            foreach ((array) ($decodedEstimate['lines'] ?? []) as $line) {
+                if (!is_array($line)) {
+                    continue;
+                }
+                $lineKey = (string) ($line['key'] ?? '');
+                $lineAmount = advance_formula((string) ($line['formula'] ?? ''));
+                if ($lineKey === '6.14') {
+                    $travel = $lineAmount;
+                } elseif ($lineKey === '6.15') {
+                    $contingent = $lineAmount;
+                }
+            }
+        }
+    }
+    $received = advance_number((string) ($savedAdvance['ad_advance'] ?? '0'));
+    $share = !empty($savedAdvance['ad_id'])
+        ? advance_number((string) ($savedAdvance['ad_government'] ?? '0'))
+        : advance_government_share($id);
+    $sum = $resource + $coord + $supervise + $liaise + $account + $office + $foodAmount + $travel + $contingent + $other;
+    $gap = $received - $sum;
+    $dates = programme_days($plan, 'atp_day');
+    sort($dates);
+    $receipt = trim((string) ($savedAdvance['ad_receipt'] ?? ''));
+    if ($receipt === '0') {
+        $receipt = '';
+    }
+    return [
+        'dates' => implode(', ', $dates),
+        'file' => trim((string) ($plan['atp_fileno'] ?? '')),
+        'name' => trim((string) ($plan['atp_trname'] ?? '')),
+        'received' => advance_box($received),
+        'share' => advance_box($share),
+        'resource' => advance_box($resource),
+        'coord' => advance_box($coord),
+        'supervise' => advance_box($supervise),
+        'liaise' => advance_box($liaise),
+        'travel' => advance_box($travel),
+        'account' => advance_box($account),
+        'office' => advance_box($office),
+        'food' => advance_box($foodAmount),
+        'contingent' => advance_box($contingent),
+        'other' => advance_box($other),
+        'total' => advance_box($sum),
+        'totalRight' => advance_box($sum),
+        'gap' => advance_box($gap),
+        'balance' => advance_box($gap),
+        'shareBack' => advance_box($share),
+        'balanceBack' => advance_box(max($gap, 0.0)),
+        'receipt' => $receipt,
+        'signTitle' => 'පාඨමාලා සමායෝජක',
+        'signName' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)',
+        'signPlace' => 'වයඹ පළාත් ප්‍රධාන ලේකම් වෙනුවට',
+    ];
+}
+
+function advsum_item(int $id): ?array
+{
+    $found = rows('SELECT atp_id, atp_trname, atp_fileno, atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
+    if (!$found) {
+        return null;
+    }
+    $calc = advsum_calc($found[0]);
+    $stored = rows('SELECT av_sheet FROM cp_advsums WHERE av_atpid = ? LIMIT 1', 'i', [$id]);
+    $item = $calc;
+    $saved = false;
+    if ($stored) {
+        $decoded = json_decode((string) $stored[0]['av_sheet'], true);
+        if (is_array($decoded)) {
+            $saved = true;
+            if (!array_key_exists('travel', $decoded) && abs(advance_number((string) ($decoded['labour'] ?? '0'))) > 0.00001) {
+                $decoded['travel'] = (string) $decoded['labour'];
+            }
+            if (!array_key_exists('contingent', $decoded) && abs(advance_number((string) ($decoded['need'] ?? '0'))) > 0.00001) {
+                $decoded['contingent'] = (string) $decoded['need'];
+            }
+            if (!array_key_exists('balanceBack', $decoded) && array_key_exists('returned', $decoded)) {
+                $decoded['balanceBack'] = (string) $decoded['returned'];
+            }
+            if (trim((string) ($decoded['receipt'] ?? '')) === '') {
+                $savedReceipt = trim((string) ($decoded['balanceReceipt'] ?? $decoded['shareReceipt'] ?? ''));
+                if ($savedReceipt !== '') {
+                    $decoded['receipt'] = $savedReceipt;
+                }
+            }
+            foreach ($decoded as $key => $value) {
+                if (array_key_exists($key, $item)) {
+                    $item[$key] = is_scalar($value) ? (string) $value : $item[$key];
+                }
+            }
+            $retired = [
+                'signTitle' => 'සම්බන්ධීකරණ සහකාරයා',
+                'signName' => 'එන්.ඩබ්.එම්. (සුපුන්)',
+                'signPlace' => 'වයඹ පළාත් පුහුණු ආයතනය.',
+            ];
+            foreach ($retired as $key => $value) {
+                $current = trim((string) ($item[$key] ?? ''));
+                if ($current === $value || $current === rtrim($value, '.')) {
+                    $item[$key] = $calc[$key];
+                }
+            }
+        }
+    }
+    return ['item' => $item, 'calc' => $calc, 'saved' => $saved];
+}
+
+function action_advsum(): void
+{
+    $user = require_user();
+    if (!is_super($user)) {
+        json_out(['ok' => false, 'error' => 'මෙම සාරාංශ පත්‍රය බලන්න පුළුවන් පුහුණු කාර්ය මණ්ඩලයට පමණයි.'], 403);
+    }
+    $id = (int) ($_GET['atp'] ?? 0);
+    if ($id > 0) {
+        $sheet = advsum_item($id);
+        if (!$sheet) {
+            json_out(['ok' => false, 'error' => 'ඒ වැඩසටහන හමු නොවුණා.'], 404);
+        }
+        json_out(['ok' => true, 'item' => $sheet['item'], 'calc' => $sheet['calc'], 'saved' => $sheet['saved']]);
+    }
+    $plans = rows(
+        'SELECT atp_id, atp_trname, atp_fileno, atp_day1, atp_day2, atp_day3, atp_day4, atp_day5,
+                atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays
+         FROM cp_atp WHERE TRIM(atp_trname) <> \'\''
+    );
+    $savedIds = [];
+    foreach (rows('SELECT av_atpid AS id FROM cp_advsums') as $row) {
+        $savedIds[(int) $row['id']] = true;
+    }
+    $today = date('Y-m-d');
+    $items = [];
+    foreach ($plans as $plan) {
+        $end = programme_last_day($plan);
+        if (!preg_match('/^(19|20)\d{2}-\d{2}-\d{2}$/', $end) || $end > $today) {
+            continue;
+        }
+        $until = date('Y-m-d', strtotime($end . ' +3 months'));
+        if ($today > $until) {
+            continue;
+        }
+        $dates = programme_days($plan, 'atp_day');
+        sort($dates);
+        $planId = (int) $plan['atp_id'];
+        $items[] = [
+            'id' => $planId,
+            'name' => (string) $plan['atp_trname'],
+            'file' => (string) ($plan['atp_fileno'] ?? ''),
+            'dates' => implode(', ', $dates),
+            'end' => $end,
+            'until' => $until,
+            'saved' => !empty($savedIds[$planId]),
+        ];
+    }
+    usort($items, static function (array $left, array $right): int {
+        return strcmp($right['end'], $left['end']);
+    });
+    json_out(['ok' => true, 'items' => $items]);
+}
+
+function action_advsum_save(): void
+{
+    csrf_check();
+    $user = require_user();
+    if (!is_super($user)) {
+        json_out(['ok' => false, 'error' => 'මෙම සාරාංශ පත්‍රය සුරකින්න පුළුවන් පුහුණු කාර්ය මණ්ඩලයට පමණයි.'], 403);
+    }
+    $data = body();
+    $id = (int) ($data['atp'] ?? 0);
+    $found = rows('SELECT atp_id FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
+    if (!$found) {
+        json_out(['ok' => false, 'error' => 'ඒ වැඩසටහන හමු නොවුණා.'], 404);
+    }
+    $money = ['received', 'share', 'resource', 'coord', 'supervise', 'liaise', 'travel', 'account', 'office', 'food', 'contingent', 'other', 'total', 'totalRight', 'gap', 'balance', 'shareBack', 'balanceBack'];
+    $sheet = [];
+    foreach ($money as $key) {
+        $sheet[$key] = advance_box(advance_number((string) ($data[$key] ?? '0')));
+    }
+    $sheet['dates'] = advsum_text((string) ($data['dates'] ?? ''));
+    $sheet['file'] = advsum_text((string) ($data['file'] ?? ''), 120);
+    $sheet['name'] = advsum_text((string) ($data['name'] ?? ''));
+    $sheet['receipt'] = advsum_text((string) ($data['receipt'] ?? ''), 80);
+    $sheet['signTitle'] = advsum_text((string) ($data['signTitle'] ?? 'පාඨමාලා සමායෝජක'), 200);
+    $sheet['signName'] = advsum_text((string) ($data['signName'] ?? 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)'), 200);
+    $sheet['signPlace'] = advsum_text((string) ($data['signPlace'] ?? 'වයඹ පළාත් ප්‍රධාන ලේකම් වෙනුවට'), 200);
+    $json = json_encode($sheet, JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        json_out(['ok' => false, 'error' => 'සාරාංශ පත්‍රය සුරැකිය නොහැකි විය.'], 500);
+    }
+    $existing = rows('SELECT av_id FROM cp_advsums WHERE av_atpid = ? LIMIT 1', 'i', [$id]);
+    if ($existing) {
+        $stmt = db()->prepare('UPDATE cp_advsums SET av_sheet = ? WHERE av_atpid = ?');
+        $ok = $stmt && bind_and_run($stmt, 'si', [$json, $id]);
+    } else {
+        $stmt = db()->prepare('INSERT INTO cp_advsums (av_atpid, av_sheet) VALUES (?, ?)');
+        $ok = $stmt && bind_and_run($stmt, 'is', [$id, $json]);
+    }
+    if (!$ok) {
+        json_out(['ok' => false, 'error' => 'සාරාංශ පත්‍රය සුරැකිය නොහැකි විය.'], 500);
+    }
+    json_out(['ok' => true]);
+}
+
 function action_advances(): void
 {
     $user = require_user();
@@ -6930,7 +7255,7 @@ function action_advances(): void
     }
     $rows = rows(
         'SELECT d.ad_id, d.ad_atpid, d.ad_date, d.ad_advance, d.ad_spent, d.ad_government, d.ad_receipt, s.se_total,
-                a.atp_id, a.atp_panelno, a.atp_trname, a.atp_supportstaff1, a.atp_bdjet,
+                a.atp_id, a.atp_panelno, a.atp_trname, a.atp_supportstaff1, a.atp_bdjet, a.atp_offweb, a.atp_offcame,
                 a.atp_day1, a.atp_day2, a.atp_day3, a.atp_day4, a.atp_day5, a.atp_day6, a.atp_day7, a.atp_day8, a.atp_day9, a.atp_day10, a.atp_moredays
          FROM cp_advances d
          JOIN cp_atp a ON a.atp_id = d.ad_atpid
@@ -6941,7 +7266,7 @@ function action_advances(): void
     $packed = [];
     foreach ($rows as $row) {
         $id = (int) $row['atp_id'];
-        $packed[] = advance_pack($row, $row, $counts[$id] ?? 0, advance_coordinator((string) ($row['atp_supportstaff1'] ?? ''), $names), 0.0);
+        $packed[] = advance_pack($row, $row, offweb_came_count($row, $counts[$id] ?? 0), advance_coordinator((string) ($row['atp_supportstaff1'] ?? ''), $names), 0.0);
     }
     $years = [];
     foreach ($packed as $item) {
@@ -7029,7 +7354,7 @@ function foodbill_item(int $id): ?array
     $saved = $stored[0] ?? [];
     $counts = advance_attended_map();
     $names = [];
-    $base = advance_pack($found[0], $saved, $counts[$id] ?? 0, advance_coordinator((string) ($found[0]['atp_supportstaff1'] ?? ''), $names), 0.0);
+    $base = advance_pack($found[0], $saved, offweb_came_count($found[0], $counts[$id] ?? 0), advance_coordinator((string) ($found[0]['atp_supportstaff1'] ?? ''), $names), 0.0);
     $bill = rows('SELECT fb_id, fb_date, fb_advance, fb_food, fb_lines FROM cp_foodbills WHERE fb_atpid = ? LIMIT 1', 'i', [$id]);
     $row = $bill[0] ?? [];
     $lines = foodbill_lines($row['fb_lines'] ?? '[]');
@@ -7301,7 +7626,7 @@ function allowance_item(int $id): ?array
     $saved = $stored[0] ?? [];
     $counts = advance_attended_map();
     $names = [];
-    $base = advance_pack($found[0], $saved, $counts[$id] ?? 0, advance_coordinator((string) ($found[0]['atp_supportstaff1'] ?? ''), $names), 0.0);
+    $base = advance_pack($found[0], $saved, offweb_came_count($found[0], $counts[$id] ?? 0), advance_coordinator((string) ($found[0]['atp_supportstaff1'] ?? ''), $names), 0.0);
     $sheet = estimate_sheet($id);
     $plan = $found[0];
     $planned = trim((string) ($plan['atp_noofparticipants'] ?? ''));
@@ -7374,7 +7699,8 @@ function allowance_item(int $id): ?array
         'coordinator' => $pick('al_coordinator', 'coordinator', false),
         'dates' => $pick('al_dates', 'dates', false),
         'planned' => $pick('al_planned', 'planned', false),
-        'attended' => $pick('al_attended', 'attended', false),
+        'attended' => programme_is_offweb($plan) ? (string) $base['attended'] : $pick('al_attended', 'attended', false),
+        'attendedLocked' => programme_is_offweb($plan),
         'resource' => advance_box($resource),
         'resourceWho' => $suggest['resourceWho'],
         'coord' => advance_box($coord),
@@ -7426,13 +7752,17 @@ function action_allowance_save(): void
     }
     $data = body();
     $id = (int) ($data['atp'] ?? 0);
-    $found = rows('SELECT atp_id FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
+    $found = rows('SELECT atp_id, atp_offweb, atp_offcame FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
     if (!$found) {
         json_out(['ok' => false, 'error' => 'ඒ වැඩසටහන හමු නොවුණා.'], 404);
     }
     $date = trim((string) ($data['date'] ?? ''));
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         $date = date('Y-m-d');
+    }
+    $attendedValue = mb_substr(trim((string) ($data['attended'] ?? '')), 0, 80);
+    if (programme_is_offweb($found[0])) {
+        $attendedValue = (string) offweb_came_count($found[0], advance_attended_map()[$id] ?? 0);
     }
     $values = [
         $date,
@@ -7441,7 +7771,7 @@ function action_allowance_save(): void
         allowance_text((string) ($data['coordinator'] ?? '')),
         allowance_text((string) ($data['dates'] ?? '')),
         mb_substr(trim((string) ($data['planned'] ?? '')), 0, 80),
-        mb_substr(trim((string) ($data['attended'] ?? '')), 0, 80),
+        $attendedValue,
         advance_box(advance_number((string) ($data['resource'] ?? '0'))),
         allowance_text((string) ($data['resourceWho'] ?? '')),
         advance_box(advance_number((string) ($data['coord'] ?? '0'))),
@@ -7569,7 +7899,7 @@ function action_settle(): void
                 atp_resourcep1, atp_resourcep2, atp_resourcep3, atp_resourcep4, atp_resourcep5,
                 atp_resourcep6, atp_resourcep7, atp_resourcep8, atp_resourcep9, atp_resourcep10, atp_moreresource,
                 atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10,
-                atp_moredays, atp_requestDate
+                atp_moredays, atp_requestDate, atp_offweb, atp_offcame
          FROM cp_atp WHERE TRIM(atp_trname) <> \'\''
     );
     $advances = [];
@@ -7654,7 +7984,7 @@ function action_settle(): void
         $savedAdvance = $advances[$id] ?? [];
         $sheet = $sheets[$id] ?? [];
         $coordinator = advance_coordinator((string) ($plan['atp_supportstaff1'] ?? ''), $names);
-        $pack = advance_pack($plan, $savedAdvance, $attended[$id] ?? 0, $coordinator, 0.0);
+        $pack = advance_pack($plan, $savedAdvance, offweb_came_count($plan, $attended[$id] ?? 0), $coordinator, 0.0);
         $pack['prepared'] = ($prepared[$id] ?? '') !== '' ? $prepared[$id] : '0';
         $pack['dates'] = implode(', ', $dates);
         if (empty($savedAdvance['ad_id'])) {
@@ -8187,7 +8517,7 @@ function action_applicants(): void
     }
     $planRows = rows('SELECT * FROM cp_atp WHERE atp_id = ? LIMIT 1', 's', [$atp]);
     $plan = $planRows[0] ?? null;
-    if ($plan && (($_GET['selected'] ?? '') === '1')) {
+    if ($plan && (($_GET['selected'] ?? '') === '1') && (($_GET['keep'] ?? '') !== '1')) {
         $end = programme_last_day($plan);
         if ($end !== '' && $end < date('Y-m-d')) {
             json_out(['ok' => true, 'items' => []]);
@@ -8390,6 +8720,220 @@ function action_attendance_upload(): void
         }
     }
     json_out(['ok' => true, 'added' => $added]);
+}
+
+function sheet_column(array $head, array $needles): int
+{
+    foreach ($head as $index => $cell) {
+        $text = mb_strtolower(trim((string) $cell));
+        foreach ($needles as $needle) {
+            if ($text !== '' && str_contains($text, $needle)) {
+                return (int) $index;
+            }
+        }
+    }
+    return -1;
+}
+
+function staff_gender(string $value): string
+{
+    $text = mb_strtolower(trim($value));
+    if ($text === '') {
+        return '';
+    }
+    if (str_contains($value, 'ස්ත්') || str_contains($text, 'female') || $text === 'f' || str_contains($value, 'பெண்') || str_contains($text, 'ගැහැණු')) {
+        return 'ස්ත්‍රී';
+    }
+    if (str_contains($value, 'පුරුෂ') || str_contains($text, 'male') || $text === 'm' || str_contains($value, 'ஆண்') || str_contains($text, 'පිරිමි')) {
+        return 'පුරුෂ';
+    }
+    return mb_substr(trim($value), 0, 40);
+}
+
+function staff_cell(array $row, int $index): string
+{
+    return mb_substr(trim((string) ($row[$index] ?? '')), 0, 300);
+}
+
+function namelist_people(array $rows): array
+{
+    if (!$rows) {
+        return [];
+    }
+    $head = $rows[0];
+    $nameAt = -1;
+    foreach ($head as $index => $cell) {
+        $text = mb_strtolower(trim((string) $cell));
+        if ($text === '' || str_contains($text, 'කාර්යාල') || str_contains($text, 'office') || str_contains($text, 'அலுவலக')) {
+            continue;
+        }
+        if (str_contains($text, 'නම') || $text === 'name' || str_contains($text, 'பெயர்')) {
+            $nameAt = (int) $index;
+            break;
+        }
+    }
+    $nidAt = sheet_column($head, ['හැඳ', 'ජා', 'nid', 'id', 'அடையாள']);
+    $desigAt = sheet_column($head, ['තනතුර', 'desig', 'designation', 'பதவி']);
+    $phoneAt = sheet_column($head, ['දුර', 'phone', 'mobile', 'தொலை']);
+    $sexAt = sheet_column($head, ['ස්ත්', 'පුරුෂ', 'gender', 'sex', 'பாலின']);
+    $officeAt = sheet_column($head, ['කාර්යාල', 'office', 'அலுவலக']);
+    $headed = $nameAt >= 0 || $nidAt >= 0 || $phoneAt >= 0 || $desigAt >= 0;
+    $start = $headed ? 1 : 0;
+    if (!$headed) {
+        $nameAt = 0;
+        $nidAt = 1;
+        $desigAt = 2;
+        $phoneAt = 3;
+        $sexAt = 4;
+        $officeAt = 5;
+    } else {
+        if ($nameAt < 0) {
+            $nameAt = 0;
+        }
+        if ($nidAt < 0) {
+            $nidAt = 1;
+        }
+        if ($phoneAt < 0) {
+            $phoneAt = $desigAt >= 0 ? 3 : 2;
+        }
+        if ($sexAt < 0) {
+            $sexAt = $desigAt >= 0 ? 4 : 3;
+        }
+        if ($officeAt < 0) {
+            $officeAt = $desigAt >= 0 ? 5 : 4;
+        }
+    }
+    $people = [];
+    for ($i = $start; $i < count($rows) && count($people) < 1000; $i++) {
+        $nid = staff_cell($rows[$i], $nidAt);
+        $name = staff_cell($rows[$i], $nameAt);
+        if ($nid === '' || !preg_match('/\d/', $nid) || $name === '') {
+            continue;
+        }
+        $people[$nid] = [
+            'nid' => $nid,
+            'name' => $name,
+            'desig' => $desigAt >= 0 ? staff_cell($rows[$i], $desigAt) : '',
+            'phone' => staff_cell($rows[$i], $phoneAt),
+            'sex' => staff_gender(staff_cell($rows[$i], $sexAt)),
+            'office' => staff_cell($rows[$i], $officeAt),
+        ];
+    }
+    return array_values($people);
+}
+
+function staff_fill_blank(string $nid, string $name, string $sex, string $office, string $phone, string $desig = ''): string
+{
+    $found = rows('SELECT stf_ID, stf_Name, stf_sex, stf_desig, stf_office, stf_mobile FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$nid]);
+    if ($found) {
+        $sets = [];
+        $types = '';
+        $params = [];
+        $current = $found[0];
+        $blank = static function (string $value): bool {
+            return trim($value) === '';
+        };
+        if ($blank((string) $current['stf_Name']) && $name !== '') {
+            $sets[] = 'stf_Name = ?';
+            $types .= 's';
+            $params[] = $name;
+        }
+        if ($blank((string) $current['stf_sex']) && $sex !== '') {
+            $sets[] = 'stf_sex = ?';
+            $types .= 's';
+            $params[] = $sex;
+        }
+        if ($blank((string) $current['stf_desig']) && $desig !== '') {
+            $sets[] = 'stf_desig = ?';
+            $types .= 's';
+            $params[] = $desig;
+        }
+        if ($blank((string) $current['stf_office']) && $office !== '') {
+            $sets[] = 'stf_office = ?';
+            $types .= 's';
+            $params[] = $office;
+        }
+        if ($blank((string) $current['stf_mobile']) && $phone !== '') {
+            $sets[] = 'stf_mobile = ?';
+            $types .= 's';
+            $params[] = $phone;
+        }
+        if (!$sets) {
+            return 'kept';
+        }
+        $params[] = (int) $current['stf_ID'];
+        $stmt = db()->prepare('UPDATE cp_staff SET ' . implode(', ', $sets) . ' WHERE stf_ID = ?');
+        if (!$stmt || !bind_and_run($stmt, $types . 'i', $params)) {
+            return '';
+        }
+        return 'filled';
+    }
+    $empty = '';
+    $blankDate = '0000-00-00';
+    $stmt = db()->prepare('INSERT INTO cp_staff (stf_Photo, stf_Nid, stf_Name, stf_dob, stf_sex, stf_desig, stf_office, stf_suboff, stf_mobile, stf_ofstele, stf_email, stf_desigtype, stf_service, stf_class, stf_firstappdate, stf_cdesigdate, stf_blacklisted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    if (!$stmt) {
+        return '';
+    }
+    $stmt->bind_param(
+        'sssssssssssssssss',
+        $empty,
+        $nid,
+        $name,
+        $blankDate,
+        $sex,
+        $desig,
+        $office,
+        $empty,
+        $phone,
+        $empty,
+        $empty,
+        $empty,
+        $empty,
+        $empty,
+        $blankDate,
+        $blankDate,
+        $empty
+    );
+    return $stmt->execute() ? 'added' : '';
+}
+
+function action_namelist_upload(): void
+{
+    csrf_check();
+    $user = require_user();
+    if (!is_super($user)) {
+        json_out(['ok' => false, 'error' => 'නාම ලේඛනය ඇතුළත් කරන්න පුළුවන් පුහුණු කාර්ය මණ්ඩලයට පමණයි.'], 403);
+    }
+    $atpId = trim((string) ($_POST['atp_id'] ?? ''));
+    if ($atpId === '' || !isset($_FILES['file']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
+        json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහන සහ නාම ලේඛනය දෙන්න.'], 422);
+    }
+    $rows = read_sheet($_FILES['file']['tmp_name'], (string) $_FILES['file']['name']);
+    $people = namelist_people($rows);
+    if (!$people) {
+        json_out(['ok' => false, 'error' => 'නාම ලේඛනයේ නම සහ හැඳුනුම්පත් අංකය නොමැත.'], 422);
+    }
+    $added = 0;
+    $filled = 0;
+    $enrolled = 0;
+    foreach ($people as $person) {
+        $placed = staff_fill_blank($person['nid'], $person['name'], $person['sex'], $person['office'], $person['phone'], (string) ($person['desig'] ?? ''));
+        if ($placed === '') {
+            continue;
+        }
+        if ($placed === 'added') {
+            $added++;
+        } elseif ($placed === 'filled') {
+            $filled++;
+        }
+        if (enrol_officer($atpId, $person['nid'], 'Yes')) {
+            $enrolled++;
+        }
+    }
+    if ($enrolled === 0) {
+        json_out(['ok' => false, 'error' => 'නාම ලේඛනයෙන් නිලධාරීන් ඇතුළත් කළ නොහැකි විය.'], 500);
+    }
+    json_out(['ok' => true, 'added' => $added, 'filled' => $filled, 'enrolled' => $enrolled]);
 }
 
 function action_drop_participant(): void

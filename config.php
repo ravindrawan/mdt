@@ -94,6 +94,7 @@ function db(): mysqli
             ensure_provisions($con);
             ensure_pace($con);
             ensure_advances($con);
+            ensure_advsums($con);
             ensure_foodbills($con);
             ensure_allowances($con);
             ensure_selected_date($con);
@@ -152,7 +153,7 @@ function ensure_plan_lists(mysqli $con): void
     while ($row = $res->fetch_assoc()) {
         $have[$row['Field']] = true;
     }
-    foreach (['atp_moredays', 'atp_moreresource', 'atp_panelno', 'atp_supervisor', 'atp_moresupport', 'atp_offweb'] as $column) {
+    foreach (['atp_moredays', 'atp_moreresource', 'atp_panelno', 'atp_supervisor', 'atp_moresupport', 'atp_offweb', 'atp_offcame'] as $column) {
         if (!isset($have[$column])) {
             $con->query("ALTER TABLE cp_atp ADD `$column` TEXT NOT NULL");
         }
@@ -335,6 +336,25 @@ function ensure_advances(mysqli $con): void
     }
     if (!isset($have['ad_government'])) {
         $con->query("ALTER TABLE cp_advances ADD ad_government VARCHAR(40) NOT NULL DEFAULT '0'");
+    }
+}
+
+function ensure_advsums(mysqli $con): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $table = $con->query("SHOW TABLES LIKE 'cp_advsums'");
+    if ($table && $table->num_rows === 0) {
+        $con->query("CREATE TABLE cp_advsums (
+            av_id INT NOT NULL AUTO_INCREMENT,
+            av_atpid INT NOT NULL,
+            av_sheet MEDIUMTEXT NOT NULL,
+            PRIMARY KEY (av_id),
+            UNIQUE KEY av_atpid (av_atpid)
+        ) ENGINE=MyISAM DEFAULT CHARSET=latin1");
     }
 }
 
