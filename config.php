@@ -13,11 +13,15 @@ const MDTU_ORG  = 'North Western Provincial Council';
 const MDTU_PHONE = '+94 37 2222018';
 const MDTU_FAX   = '+94 37 2223655';
 const MDTU_PLACE = 'Kurunegala';
+const LETTER_SIGN_KEY = 'c4e8a1f07b3d69e25a0c8f14d7b3926e0a5c8d17f4b6903e2a7c1d85f0e4936b';
 
 const YES_SI = 'ඔව්';
 const NO_SI  = 'නැත';
 const TYPE_MDTU = 'MDTU පුහුණුවකි';
 const TYPE_PRODUCTIVITY = 'ඵලදායිතා පුහුණුවකි';
+const TYPE_MEETING = 'රැස්වීම් / ප්‍රගති සමාලෝචන රැස්වීම් / උපදේශන කමිටු';
+/** Shared secret for backup-cron.php (Task Scheduler / wget). Change in production. */
+const BACKUP_CRON_KEY = 'mdtu-backup-16h-nwp';
 
 const DOWNLOAD_TYPES = [
     'චක්‍රලේක' => 'Circulars',
@@ -42,6 +46,30 @@ function app_bootstrap(): void
         ]);
         session_start();
     }
+}
+
+function letter_verify_sig(string $nid, string $atp): string
+{
+    return substr(hash_hmac('sha256', 'p:' . $atp . ':' . $nid, LETTER_SIGN_KEY), 0, 24);
+}
+
+function letter_verify_token(string $nid, string $atp): string
+{
+    $nid = trim($nid);
+    $atp = trim($atp);
+    if ($nid === '' || preg_match('/^\d{1,10}$/', $atp) !== 1) {
+        return '';
+    }
+    return $atp . '.' . letter_verify_sig($nid, $atp);
+}
+
+function letter_verify_parts(string $token): ?array
+{
+    $token = trim($token);
+    if (preg_match('/^(\d{1,10})\.([a-f0-9]{24})$/', $token, $match) !== 1) {
+        return null;
+    }
+    return ['atp' => $match[1], 'sig' => $match[2]];
 }
 
 function csrf_token(): string
@@ -99,6 +127,7 @@ function db(): mysqli
             ensure_allowances($con);
             ensure_selected_date($con);
             ensure_signatory($con);
+            ensure_notice_end($con);
             ensure_blacklist($con);
             ensure_modules($con);
             ensure_eval($con);
@@ -153,7 +182,7 @@ function ensure_plan_lists(mysqli $con): void
     while ($row = $res->fetch_assoc()) {
         $have[$row['Field']] = true;
     }
-    foreach (['atp_moredays', 'atp_moreresource', 'atp_panelno', 'atp_supervisor', 'atp_moresupport', 'atp_offweb', 'atp_offcame'] as $column) {
+    foreach (['atp_moredays', 'atp_moreresource', 'atp_panelno', 'atp_supervisor', 'atp_moresupport', 'atp_offweb', 'atp_offcame', 'atp_coordname', 'atp_facilities'] as $column) {
         if (!isset($have[$column])) {
             $con->query("ALTER TABLE cp_atp ADD `$column` TEXT NOT NULL");
         }
@@ -445,9 +474,14 @@ function ensure_aheadsave(mysqli $con): void
             as_spent VARCHAR(40) NOT NULL DEFAULT '',
             as_people VARCHAR(20) NOT NULL DEFAULT '',
             as_money VARCHAR(40) NOT NULL DEFAULT '',
+            as_omit TINYINT NOT NULL DEFAULT 0,
             PRIMARY KEY (as_id),
             UNIQUE KEY as_slot (as_year, as_kind, as_atp)
         ) ENGINE=MyISAM DEFAULT CHARSET=latin1");
+    }
+    $column = $con->query("SHOW COLUMNS FROM cp_aheadsave LIKE 'as_omit'");
+    if ($column && $column->num_rows === 0) {
+        $con->query('ALTER TABLE cp_aheadsave ADD as_omit TINYINT NOT NULL DEFAULT 0');
     }
 }
 
@@ -653,6 +687,19 @@ function ensure_selected_date(mysqli $con): void
     }
 }
 
+function ensure_notice_end(mysqli $con): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $found = $con->query("SHOW COLUMNS FROM cp_messeges LIKE 'msg_end'");
+    if ($found && $found->num_rows === 0) {
+        $con->query('ALTER TABLE cp_messeges ADD msg_end DATE NULL');
+    }
+}
+
 function ensure_signatory(mysqli $con): void
 {
     static $done = false;
@@ -671,10 +718,22 @@ function ensure_signatory(mysqli $con): void
     foreach ([
         'sg_title' => "ALTER TABLE cp_signatory ADD sg_title VARCHAR(40) NOT NULL",
         'sg_photo' => "ALTER TABLE cp_signatory ADD sg_photo VARCHAR(200) NOT NULL",
+        'sg_supervisor' => "ALTER TABLE cp_signatory ADD sg_supervisor VARCHAR(200) NOT NULL DEFAULT ''",
+        'sg_support1' => "ALTER TABLE cp_signatory ADD sg_support1 VARCHAR(40) NOT NULL DEFAULT ''",
+        'sg_support2' => "ALTER TABLE cp_signatory ADD sg_support2 VARCHAR(40) NOT NULL DEFAULT ''",
+        'sg_support3' => "ALTER TABLE cp_signatory ADD sg_support3 VARCHAR(40) NOT NULL DEFAULT ''",
+        'sg_cash' => "ALTER TABLE cp_signatory ADD sg_cash VARCHAR(200) NOT NULL DEFAULT ''",
     ] as $column => $sql) {
         $found = $con->query("SHOW COLUMNS FROM cp_signatory LIKE '" . $column . "'");
         if ($found && $found->num_rows === 0) {
             $con->query($sql);
+        }
+    }
+    $cashCol = $con->query("SHOW COLUMNS FROM cp_signatory LIKE 'sg_cash'");
+    if ($cashCol && ($info = $cashCol->fetch_assoc())) {
+        $type = strtolower((string) ($info['Type'] ?? ''));
+        if (str_contains($type, 'varchar') && preg_match('/varchar\((\d+)\)/', $type, $match) && (int) $match[1] < 200) {
+            $con->query("ALTER TABLE cp_signatory MODIFY sg_cash VARCHAR(200) NOT NULL DEFAULT ''");
         }
     }
 }
@@ -793,10 +852,26 @@ function ensure_notify(mysqli $con): void
         nt_gmail_app VARCHAR(80) NOT NULL DEFAULT '',
         PRIMARY KEY (nt_id)
     ) ENGINE=MyISAM DEFAULT CHARSET=latin1");
-    $col = $con->query("SHOW COLUMNS FROM cp_notify LIKE 'nt_gmail_app'");
-    if ($col && $col->num_rows === 0) {
-        $con->query("ALTER TABLE cp_notify ADD nt_gmail_app VARCHAR(80) NOT NULL DEFAULT ''");
+    foreach ([
+        'nt_gmail_app' => "ALTER TABLE cp_notify ADD nt_gmail_app VARCHAR(80) NOT NULL DEFAULT ''",
+        'nt_sms_token' => "ALTER TABLE cp_notify ADD nt_sms_token TEXT NOT NULL",
+        'nt_sms_sender' => "ALTER TABLE cp_notify ADD nt_sms_sender VARCHAR(40) NOT NULL DEFAULT ''",
+        'nt_sms_url' => "ALTER TABLE cp_notify ADD nt_sms_url VARCHAR(250) NOT NULL DEFAULT ''",
+        'nt_bday_msg' => "ALTER TABLE cp_notify ADD nt_bday_msg TEXT NOT NULL",
+    ] as $column => $sql) {
+        $col = $con->query("SHOW COLUMNS FROM cp_notify LIKE '" . $column . "'");
+        if ($col && $col->num_rows === 0) {
+            $con->query($sql);
+        }
     }
+    $con->query("CREATE TABLE IF NOT EXISTS cp_bday_sent (
+        bs_id INT NOT NULL AUTO_INCREMENT,
+        bs_nid VARCHAR(40) NOT NULL,
+        bs_day DATE NOT NULL,
+        bs_at DATETIME NOT NULL,
+        PRIMARY KEY (bs_id),
+        UNIQUE KEY bs_one (bs_nid, bs_day)
+    ) ENGINE=MyISAM DEFAULT CHARSET=latin1");
 }
 
 function ensure_totals(mysqli $con): void
@@ -943,7 +1018,7 @@ function field_label(string $column): string
         'atp_panelno' => 'Training panel number', 'atp_supervisor' => 'Supervising officer',
         'atp_stime' => 'Start time', 'atp_etime' => 'End time', 'atp_fundsource' => 'Funding source', 'atp_bdjet' => 'Budget',
         'atp_isaddatp' => 'Added to plan', 'atp_addhome' => 'Show on home', 'atp_lastdateapply' => 'Application deadline',
-        'atp_otherfacts' => 'Other facts', 'atp_specialfacts' => 'Special facts', 'atp_showspecialfacts' => 'Show special facts',
+        'atp_otherfacts' => 'Other facts', 'atp_facilities' => 'පුහුණු පහසුකම්', 'atp_specialfacts' => 'Special facts', 'atp_showspecialfacts' => 'Show special facts',
         'atp_specialfinletter' => 'Special finance letter',
         'atp_resourcep1' => 'Resource person 1', 'atp_resourcep2' => 'Resource person 2', 'atp_resourcep3' => 'Resource person 3',
         'atp_resourcep4' => 'Resource person 4', 'atp_resourcep5' => 'Resource person 5', 'atp_resourcep6' => 'Resource person 6',
@@ -951,7 +1026,7 @@ function field_label(string $column): string
         'atp_resourcep10' => 'Resource person 10',
         'atp_cashofficername' => 'Cash officer', 'atp_cashofficerdesig' => 'Cash officer designation',
         'atp_cashofficerotherdetails' => 'Cash officer details',
-        'atp_supportstaff1' => 'Support staff 1', 'atp_supportstaff2' => 'Support staff 2', 'atp_supportstaff3' => 'Support staff 3',
+        'atp_supportstaff1' => 'සම්බන්ධීකරණය', 'atp_coordname' => 'සම්බන්ධීකරණ නිලධාරියාගේ නම', 'atp_supportstaff2' => 'Support staff 2', 'atp_supportstaff3' => 'Support staff 3',
         'atp_supportstaff4' => 'Support staff 4', 'atp_supportstaff5' => 'Support staff 5', 'atp_supportstaff6' => 'Support staff 6',
         'atp_trtype' => 'Programme type',
         'tapp_id' => 'ID', 'tapp_officerNid' => 'Officer ID', 'tapp_office' => 'Office', 'tapp_atpid' => 'Plan ID',
