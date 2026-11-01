@@ -14,6 +14,7 @@ const state = {
   leaving: false,
   activeAt: Date.now(),
   idleTimer: 0,
+  messageBusy: false,
 };
 
 const I18N = {
@@ -176,7 +177,8 @@ const I18N = {
 };
 
 function t(key) {
-  return (I18N[state.lang] || I18N.si)[key] || I18N.si[key] || key;
+  const value = (I18N[state.lang] || I18N.si)[key] || I18N.si[key] || key;
+  return key === "footer" ? value.replace("2026", localToday().slice(0, 4)) : value;
 }
 
 function L(si, ta, en) {
@@ -225,16 +227,22 @@ function showDate(value) {
 
 function dateYear(value) {
   const date = showDate(value);
-  return /^(19|20)\d{2}-\d{2}-\d{2}$/.test(date) ? date.slice(0, 4) : "";
+  return /^(19|2[0-2])\d{2}-\d{2}-\d{2}$/.test(date) ? date.slice(0, 4) : "";
 }
 
 function chosenYear() {
-  const asked = state.query?.get("year") || localStorage.getItem("mdtu-year") || localToday().slice(0, 4);
-  return /^(19|20)\d{2}$/.test(String(asked)) ? String(asked) : localToday().slice(0, 4);
+  const todayYear = localToday().slice(0, 4);
+  const seen = localStorage.getItem("mdtu-year-seen") || "";
+  if (seen !== todayYear) {
+    localStorage.setItem("mdtu-year-seen", todayYear);
+    if (seen !== "") localStorage.setItem("mdtu-year", todayYear);
+  }
+  const asked = state.query?.get("year") || localStorage.getItem("mdtu-year") || todayYear;
+  return /^(19|2[0-2])\d{2}$/.test(String(asked)) && Number(asked) <= 2200 ? String(asked) : todayYear;
 }
 
 function rememberYear(year) {
-  if (/^(19|20)\d{2}$/.test(String(year))) localStorage.setItem("mdtu-year", String(year));
+  if (/^(19|2[0-2])\d{2}$/.test(String(year)) && Number(year) <= 2200) localStorage.setItem("mdtu-year", String(year));
 }
 
 function programmeYear(row) {
@@ -246,7 +254,7 @@ function programmeYear(row) {
     const year = dateYear(row[key]);
     if (year) return year;
   }
-  const found = String(row.atp_moredays || "").match(/(19|20)\d{2}-\d{2}-\d{2}/);
+  const found = String(row.atp_moredays || "").match(/(19|2[0-2])\d{2}-\d{2}-\d{2}/);
   return found ? found[0].slice(0, 4) : "";
 }
 
@@ -255,14 +263,16 @@ function rowInYear(row, year) {
 }
 
 const YEAR_TABLES = new Set(["cp_atp", "cp_completedtrainings", "cp_privatetrainings", "cp_othertrainings", "cp_trrequirements", "cp_trainingapplications", "cp_trainingattendance", "cp_outsidetrcource"]);
-const YEAR_PAGES = new Set(["plan", "cp_atp", "applications", "attendance", "scheduled", "revise", "offweb", "finish", "finish2", "signsheet", "panelsign", "estimate", "modular", "evaluation", "messages", "apply", "cp_privatetrainings", "cp_othertrainings", "cp_trrequirements", "cp_trainingapplications", "cp_trainingattendance", "cp_outsidetrcource", "needs", "settle", "ahead", "attended"]);
+const YEAR_PAGES = new Set(["plan", "cp_atp", "applications", "attendance", "scheduled", "revise", "offweb", "finish", "finish2", "signsheet", "panelsign", "estimate", "modular", "evaluation", "messages", "apply", "cp_privatetrainings", "cp_othertrainings", "cp_trrequirements", "cp_trainingapplications", "cp_trainingattendance", "cp_outsidetrcource", "needs", "settle", "ahead", "attended", "coordreport"]);
 
 function yearChoices() {
   const now = Number(localToday().slice(0, 4));
+  const start = 2010;
+  const end = Math.min(2200, now + 50);
   const years = [];
-  for (let value = now + 1; value >= now - 8; value -= 1) years.push(String(value));
+  for (let value = end; value >= start; value -= 1) years.push(String(value));
   const current = chosenYear();
-  if (!years.includes(current)) years.unshift(current);
+  if (current && !years.includes(current)) years.unshift(current);
   return years;
 }
 
@@ -283,7 +293,30 @@ function fieldText(value) {
   return String(value ?? "");
 }
 
+function passwordBox(name, value, required, note) {
+  return `<span class="pwd-wrap"><input type="password" name="${esc(name)}" value="${esc(value || "")}" autocomplete="new-password" ${required} placeholder="${esc(note || "")}"><button type="button" class="pwd-eye" data-act="pwd-eye" aria-label="${esc(L("මුරපදය පෙන්වන්න", "கடவுச்சொல்லைக் காட்டு", "Show the password"))}">${passwordEye()}</button></span>`;
+}
+
+function passwordPeek(value) {
+  const secret = String(value || "");
+  if (!secret) return "";
+  return `<span class="pwd-wrap"><input class="pwd-peek" type="password" value="${esc(secret)}" readonly><button type="button" class="pwd-eye" data-act="pwd-eye" aria-label="${esc(L("මුරපදය පෙන්වන්න", "கடவுச்சொல்லைக் காட்டு", "Show the password"))}">${passwordEye()}</button></span>`;
+}
+
+function passwordEye() {
+  return `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+}
+
 async function api(action, options = {}) {
+  const posting = options.method === "POST" && action !== "pulse";
+  if (posting) {
+    state.posts = state.posts || {};
+    if (state.posts[action]) {
+      throw new Error(L("රැඳී සිටින්න. මේක ඇතුළත් වෙමින්.", "காத்திருக்கவும். இது சேர்க்கப்படுகிறது.", "Please wait. This is still being added."));
+    }
+    state.posts[action] = true;
+  }
+  try {
   const url = new URL("api.php", window.location.href);
   url.searchParams.set("action", action);
   Object.entries(options.query || {}).forEach(([key, value]) => {
@@ -337,6 +370,9 @@ async function api(action, options = {}) {
     data.items = data.items.filter((row) => rowInYear(row, year));
   }
   return data;
+  } finally {
+    if (posting) delete state.posts[action];
+  }
 }
 
 function endSession() {
@@ -670,6 +706,7 @@ async function renderPublic() {
     about: renderAbout,
     contact: renderContact,
     quiz: renderQuiz,
+    verify: renderLetterVerify,
   };
   const view = $("#stage");
   const draw = pages[state.page] || pages.home;
@@ -759,7 +796,7 @@ async function renderHome(view) {
         </section>
         <section class="panel">
           <h2>${esc(t("notices"))}</h2>
-          <div class="pad notice-pad"><ul class="list">${data.notices.map((item) => `<li>${esc(item.msg_message)}</li>`).join("") || `<li>${esc(t("none"))}</li>`}</ul></div>
+          <div class="pad notice-pad"><ul class="list">${homeNotices(data.notices).map((item) => `<li>${esc(item.msg_message)}</li>`).join("") || `<li>${esc(t("none"))}</li>`}</ul></div>
         </section>
       </div>
       <div class="home-three">
@@ -798,6 +835,26 @@ function monthGrid(month, events) {
   }
   const title = new Date(year, mon - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
   return `<p><strong>${esc(title)}</strong></p><div class="mini-cal">${heads}${cells}</div>`;
+}
+
+function noticeDeadline(item) {
+  const end = showDate(item.msg_end);
+  if (end) return end;
+  const found = String(item.msg_message || "").match(/අවසන් දිනය\s*(20\d{2}-\d{2}-\d{2})/);
+  return found ? found[1] : "";
+}
+
+function homeNotices(items) {
+  const today = localToday();
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    const end = noticeDeadline(item);
+    if (end && end < today) return false;
+    const key = String(item.msg_message || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function openOnHome(value) {
@@ -1002,16 +1059,23 @@ async function loadStaffHistory(nid) {
   try {
     const data = await api("officer-history", { query: { nid } });
     const officer = data.officer;
-    const rows = (data.trainings || []).map((row) => `<tr>
+    const year = chosenYear();
+    const rows = (data.trainings || []).map((row) => {
+      const letter = dateYear(row.start_date) === year
+        ? `<button class="btn small" type="button" data-act="print-letter" data-nid="${esc(nid)}" data-atp="${esc(row.atp_id)}">${esc(t("printLetter"))}</button>`
+        : "";
+      return `<tr>
       <td>${esc(row.name)}</td>
       <td>${esc(showDate(row.start_date))}</td>
       <td>${esc(row.location || "")}</td>
-      <td><button class="btn small" type="button" data-act="print-letter" data-nid="${esc(nid)}" data-atp="${esc(row.atp_id)}">${esc(t("printLetter"))}</button></td>
-    </tr>`).join("");
+      <td>${letter}</td>
+    </tr>`;
+    }).join("");
     slot.innerHTML = `
       <article class="card person">${officer.photo ? `<img class="avatar-lg" alt="" src="${esc(officer.photo)}">` : ""}<div><h2>${esc(officer.name)}</h2><p>${esc(officer.designation)}<br>${esc(officer.office)}</p></div></article>
       <h2>${esc(t("attended"))}</h2>
       <p><strong>${esc(L("පුහුණු ප්‍රමාණය", "பயிற்சி எண்ணிக்கை", "Number of trainings"))}: ${(data.trainings || []).length}</strong></p>
+      <p class="muted">${esc(year)} ${esc(L("වර්ෂයේ පුහුණුවලට පමණයි කැඳවීමේ ලිපිය. අනිත් වර්ෂවල ලිපි මෙහි නැත.", "ஆண்டின் பயிற்சிகளுக்கு மட்டும் அழைப்புக் கடிதம். பிற ஆண்டுக் கடிதங்கள் இங்கே இல்லை.", "The call letter is only for this year's programmes. Letters from other years are not here."))}</p>
       <div class="table-wrap"><table><thead><tr><th>${esc(t("programme"))}</th><th>${esc(t("date"))}</th><th>${esc(t("place"))}</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4">${esc(t("noTrainings"))}</td></tr>`}</tbody></table></div>
       <p class="muted">${esc(t("printHint"))}</p>`;
@@ -1162,7 +1226,7 @@ async function renderConsole() {
     return;
   }
   $("#stage").innerHTML = `
-        <section class="work-page${classicPages()[state.module] || ["needs", "plan", "apply", "provision", "cp_atp", "applications", "attendance", "scheduled", "finish", "finish2", "advance", "advsum", "estimate", "revise", "offweb", "signsheet", "panelsign", "private", "cp_staff", "cp_trainingofficers", "birthdays", "cp_completedtrainings", "signatory", "modular", "evaluation", "messages", "total", "pace", "person", "settle", "ahead", "attended"].includes(state.module) ? " classic" : ""}">
+        <section class="work-page${classicPages()[state.module] || ["needs", "plan", "apply", "provision", "cp_atp", "applications", "attendance", "scheduled", "finish", "finish2", "advance", "advsum", "estimate", "revise", "offweb", "signsheet", "panelsign", "private", "cp_staff", "cp_trainingofficers", "birthdays", "cp_completedtrainings", "signatory", "modular", "evaluation", "messages", "total", "pace", "person", "settle", "ahead", "attended", "coordreport", "backup"].includes(state.module) ? " classic" : ""}">
       <p class="crumb"><a href="#console/dashboard">${esc(t("back"))}</a> · ${esc((classicPages()[state.module] || (state.module === "needs" ? classicPages().cp_trrequirements : null))?.title?.() || deliveryTitle(state.module) || current.label)}</p>
       <div id="work"><p class="muted">Loading…</p></div>
     </section>`;
@@ -1214,6 +1278,8 @@ async function renderModule(item) {
   if (item.kind === "attended") return renderAttended(work);
   if (item.kind === "settle") return renderSettle(work);
   if (item.kind === "ahead") return renderAhead(work);
+  if (item.kind === "coordreport") return renderCoordReport(work);
+  if (item.kind === "backup") return renderBackup(work);
   work.innerHTML = "<p>This section is not available.</p>";
 }
 
@@ -1263,6 +1329,8 @@ function deliveryTitle(module) {
     person: () => L("එක් පුද්ගල වාර්තා", "ஒரு நபர் அறிக்கை", "One-person report"),
     settle: () => L("ඇස්තමේන්තු, ආහාර බිල් සහ දීමනා", "மதிப்பீடு, உணவுப் பட்டியல், கொடுப்பனவு", "Estimate, food bills and allowances"),
     ahead: () => L("ප්‍රගති වාර්තා", "முன்னேற்ற அறிக்கை", "Progress reports"),
+    coordreport: () => L("සම්බන්ධීකරණ ප්‍රගතිය", "ஒருங்கிணைப்பு முன்னேற்றம்", "Coordinator progress"),
+    backup: () => L("දත්ත සමුදා උපස්ථ", "தரவுத்தள காப்பு", "Database backup"),
     signatory: () => L("නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)", "துணைப் பிரதம செயலாளர் (பயிற்சி)", "Deputy Chief Secretary (Training)"),
     signsheet: () => L("අත්සන් පත්‍රය", "கையொப்பப் படிவம்", "Sign sheet"),
     panelsign: () => L("අත්සන් ලේඛණය කාර්යමණ්ඩල හා සම්පත්දායක", "கையொப்பப் பட்டியல்", "Staff and resource-person sign sheet"),
@@ -1275,127 +1343,129 @@ function deliveryTitle(module) {
 }
 
 function boardsFor(role, color) {
-  const control = board(color, "control.png", "පාලනය", "கட்டுப்பாடு", "Control", [
-    tile("#console/cp_desigs", "designations.png", "තනතුරු", "பதவிகள்", "Designations"),
-    tile("#console/offices", "office.png", "කාර්යාල", "அலுவலகங்கள்", "Offices"),
-    tile("#console/cp_login", "users.png", "පරිශීලකයන්", "பயனர்கள்", "Users"),
-    tile("#console/cp_trainings", "trainings.png", "පුහුණු වැඩසටහන්", "பயிற்சிகள்", "Training programmes"),
-    tile("#console/cp_trfields", "subjects.png", "විෂය ක්ෂේත්‍ර", "பாடத் துறைகள்", "Subject fields"),
-    tile("#console/cp_treqperiod", "timeframe.png", "පුහුණු අවශ්‍යතා කාල සීමාව", "பயிற்சி தேவை கால வரம்பு", "Training-needs period"),
-    tile("#console/cp_slideshowimgs", "photos.png", "මුල් පිටුවේ පෙන්වන රූප", "முகப்பில் காட்டும் படங்கள்", "Pictures on the home page"),
-    tile("#console/cp_usercomments", "comments.png", "පරිශීලක යෝජනා", "பயனர் ஆலோசனைகள்", "User suggestions"),
-    tile("#console/cp_downloads", "download.png", "බාගත කිරීම්", "பதிவிறக்கங்கள்", "Downloads"),
-    tile("#console/cp_services", "services.png", "සේවා", "சேவைகள்", "Services"),
-    tile("#console/cp_trcenters", "centers.png", "පුහුණු මධ්‍යස්ථාන", "பயிற்சி மையங்கள்", "Training centres"),
-    tile("#console/cp_funds", "funds.png", "අරමුදල්", "நிதி மூலங்கள்", "Funds"),
-    tile("#console/cp_messeges", "messages.png", "දැනුම්දීම්", "அறிவிப்புகள்", "Notices"),
-    tile("#console/cp_food", "food.png", "ආහාර", "உணவு", "Food"),
-    tile("#console/cp_foreignschols", "foreignscholarships.png", "විදේශ ශිෂ්‍යත්ව", "உதவித்தொகை", "Foreign scholarships"),
-    tile("#console/cp_outsidetrcource", "privatetrainings.png", "බාහිර පුහුණු පාඨමාලා", "வெளிப்புற பயிற்சிப் படிப்புகள்", "External training courses"),
-    tile("#console/cp_appliedforiegnscholars", "scholofficers.png", "ශිෂ්‍යත්ව සඳහා අයදුම් කළ නිලධාරීන්", "உதவித்தொகைக்கு விண்ணப்பித்த அதிகாரிகள்", "Officers who applied for scholarships"),
+  const control = board(color, "ic-control.svg", "පාලනය", "கட்டுப்பாடு", "Control", [
+    tile("#console/cp_desigs", "ic-posts.svg", "තනතුරු", "பதவிகள்", "Designations"),
+    tile("#console/offices", "ic-office.svg", "කාර්යාල", "அலுவலகங்கள்", "Offices"),
+    tile("#console/cp_login", "ic-users.svg", "පරිශීලකයන්", "பயனர்கள்", "Users"),
+    tile("#console/cp_trainings", "ic-programmes.svg", "පුහුණු වැඩසටහන්", "பயிற்சிகள்", "Training programmes"),
+    tile("#console/cp_trfields", "ic-subjects.svg", "විෂය ක්ෂේත්‍ර", "பாடத் துறைகள்", "Subject fields"),
+    tile("#console/cp_treqperiod", "ic-time.svg", "පුහුණු අවශ්‍යතා කාල සීමාව", "பயிற்சி தேவை கால வரம்பு", "Training-needs period"),
+    tile("#console/cp_slideshowimgs", "ic-photos.svg", "මුල් පිටුවේ පෙන්වන රූප", "முகப்பில் காட்டும் படங்கள்", "Pictures on the home page"),
+    tile("#console/cp_usercomments", "ic-comments.svg", "පරිශීලක යෝජනා", "பயனர் ஆலோசனைகள்", "User suggestions"),
+    tile("#console/cp_downloads", "ic-download.svg", "බාගත කිරීම්", "பதிவிறக்கங்கள்", "Downloads"),
+    tile("#console/cp_services", "ic-services.svg", "සේවා", "சேவைகள்", "Services"),
+    tile("#console/cp_trcenters", "ic-centers.svg", "පුහුණු මධ්‍යස්ථාන", "பயிற்சி மையங்கள்", "Training centres"),
+    tile("#console/cp_funds", "ic-funds.svg", "අරමුදල්", "நிதி மூலங்கள்", "Funds"),
+    tile("#console/cp_messeges", "ic-notices.svg", "දැනුම්දීම්", "அறிவிப்புகள்", "Notices"),
+    tile("#console/cp_food", "ic-food.svg", "ආහාර", "உணவு", "Food"),
+    tile("#console/cp_foreignschols", "ic-scholar.svg", "විදේශ ශිෂ්‍යත්ව", "உதவித்தொகை", "Foreign scholarships"),
+    tile("#console/cp_outsidetrcource", "ic-outside.svg", "බාහිර පුහුණු පාඨමාලා", "வெளிப்புற பயிற்சிப் படிப்புகள்", "External training courses"),
+    tile("#console/cp_appliedforiegnscholars", "ic-scholapply.svg", "ශිෂ්‍යත්ව සඳහා අයදුම් කළ නිලධාරීන්", "உதவித்தொகைக்கு விண்ணப்பித்த அதிகாரிகள்", "Officers who applied for scholarships"),
+    role === "Administrator" ? tile("#console/backup", "ic-download.svg", "දත්ත සමුදා උපස්ථ", "தரவுத்தள காப்பு", "Database backup") : "",
   ].join(""));
-  const plan = board(color, "trainingplan.png", "පුහුණු සැලසුම", "பயிற்சித் திட்டம்", "Training plan", [
-    tile("#console/cp_trrequirements", "trainingrequirements.png", "පුහුණු අවශ්‍යතා", "பயிற்சி தேவைகள்", "Training needs"),
-    tile("#console/trdate", "trdate.png", "පුහුණු අවශ්‍යතා ලැබුණු අවසන් දිනය", "பயிற்சி தேவைகள் கிடைக்கும் கடைசி நாள்", "Last date for training needs"),
-    tile("#console/plan", "preplan.png", "පුහුණු සැලසුම සකස් කිරීම", "பயிற்சித் திட்டம் அமைத்தல்", "Prepare the training plan"),
-    tile("#console/cp_atp", "changeplan.png", "පුහුණු සැලසුම වෙනස් කිරීම", "பயிற்சித் திட்டம் மாற்றுதல்", "Change the training plan"),
-    tile("#console/cp_resourcepersons", "resourcepersons.png", "සම්පත් දායකයන්", "வள ஆள்கள்", "Resource persons"),
-    tile("#console/cp_outsidetrcource", "privatetrainings.png", "පිටස්තර ආයතන මගින් පවත්වන පුහුණු වැඩසටහන්", "வெளி நிறுவனப் பயிற்சிகள்", "Programmes run by outside institutes"),
-    tile("#console/apply", "applytr.png", "පුහුණු වැඩසටහන් අයදුම් කිරීම", "பயிற்சி விண்ணப்பம்", "Apply for a programme"),
-    tile("#console/provision", "funds.png", "ප්‍රතිපාදන", "ஒதுக்கீடு", "Allocations"),
-    tile("#console/provision?tab=move", "budjrept.png", "ප්‍රතිපාදන මාරු කිරීම", "ஒதுக்கீட்டு மாற்றம்", "Allocation transfers"),
+  const plan = board(color, "ic-planboard.svg", "පුහුණු සැලසුම", "பயிற்சித் திட்டம்", "Training plan", [
+    tile("#console/cp_trrequirements", "ic-needs.svg", "පුහුණු අවශ්‍යතා", "பயிற்சி தேவைகள்", "Training needs"),
+    tile("#console/trdate", "ic-deadline.svg", "පුහුණු අවශ්‍යතා ලැබුණු අවසන් දිනය", "பயிற்சி தேவைகள் கிடைக்கும் கடைசி நாள்", "Last date for training needs"),
+    tile("#console/plan", "ic-prepare.svg", "පුහුණු සැලසුම සකස් කිරීම", "பயிற்சித் திட்டம் அமைத்தல்", "Prepare the training plan"),
+    tile("#console/cp_atp", "ic-editplan.svg", "පුහුණු සැලසුම වෙනස් කිරීම", "பயிற்சித் திட்டம் மாற்றுதல்", "Change the training plan"),
+    tile("#console/cp_resourcepersons", "ic-resource.svg", "සම්පත් දායකයන්", "வள ஆள்கள்", "Resource persons"),
+    tile("#console/cp_outsidetrcource", "ic-outside.svg", "පිටස්තර ආයතන මගින් පවත්වන පුහුණු වැඩසටහන්", "வெளி நிறுவனப் பயிற்சிகள்", "Programmes run by outside institutes"),
+    tile("#console/apply", "ic-apply.svg", "පුහුණු වැඩසටහන් අයදුම් කිරීම", "பயிற்சி விண்ணப்பம்", "Apply for a programme"),
+    tile("#console/provision", "ic-provision.svg", "ප්‍රතිපාදන", "ஒதுக்கீடு", "Allocations"),
+    tile("#console/provision?tab=move", "ic-transfer.svg", "ප්‍රතිපාදන මාරු කිරීම", "ஒதுக்கீட்டு மாற்றம்", "Allocation transfers"),
   ].join(""), true);
-  const conduct = board(color, "conducttraiings.png", "පුහුණු වැඩමුළු ක්‍රියාත්මක කිරීම", "பயிற்சிப் பட்டறை நடத்துதல்", "Running the workshops", [
-    tile("#console/applications", "applications.png", "පුහුණු වැඩසටහන් සඳහා අයදුම් කළ අය", "பயிற்சிக்கு விண்ணப்பித்தோர்", "People who applied for programmes"),
-    tile("#console/attendance", "selected.png", "පුහුණු වැඩමුළු සඳහා තෝරාගත් නිලධාරීන්", "பயிற்சிப் பட்டறைக்குத் தேர்ந்த அதிகாரிகள்", "Officers selected for the workshops"),
-    tile("#console/scheduled", "trlist.png", "පැවැත්වීමට නියමිත පුහුණු වැඩසටහන්", "நடத்தப்படவுள்ள பயிற்சிகள்", "Programmes due to be held"),
-    tile("#console/revise", "budjrept.png", "සංශෝධිත ඇස්තමේන්තු සැකසීම", "திருத்திய மதிப்பீடு அமைத்தல்", "Prepare a revised estimate"),
-    tile("#console/offweb", "form.png", "වෙබ් අඩවිය මගින් කැඳවීම නොකර පවත්වන පුහුණු ඇතුළත් කිරීම හා ඇස්තමේන්තු සැකසීම", "இணையம் வழியாக அழைக்காமல் நடத்தும் பயிற்சியைச் சேர்த்தல் மற்றும் மதிப்பீடு", "Enter a training not called through the website and prepare the estimate"),
-    tile("#console/finish", "complete.png", "වැඩසටහන අවසන් කිරීම පියවර-1", "நிகழ்ச்சியை முடித்தல் படி 1", "Finish the programme, step 1"),
-    tile("#console/finish2", "complete.png", "වැඩසටහන අවසන් කිරීම පියවර 2", "நிகழ்ச்சியை முடித்தல் படி 2", "Finish the programme, step 2"),
-    tile("#console/advsum", "budjrept.png", "අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
-    tile("#console/cp_completedtrainings", "completed.png", "අවසන් කළ පුහුණු වැඩසටහන්", "முடிந்த பயிற்சிகள்", "Finished training programmes"),
-    tile("#console/cp_privatetrainings", "pts.png", "පෞද්ගලික පුහුණු පාඨමාලා සඳහා ප්‍රතිපාදන", "தனியார் படிப்பு நிதி", "Funds for private training courses"),
-    tile("#console/cp_othertrainings", "privatetrainings.png", "වෙනත් කාර්යාල මගින් පවත්වන ලද පුහුණු වැඩසටහන්", "பிற அலுவலகப் பயிற்சிகள்", "Programmes conducted by other offices"),
-    tile("#console/letter", "letter.png", "කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"),
-    role === "Administrator" ? tile("#console/signatory", "letter.png", "නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)", "துணைப் பிரதம செயலாளர் (பயிற்சி)", "Deputy Chief Secretary (Training)") : "",
-    tile("#console/signsheet", "participatedemps.png", "සහභාගිවූවන්ගේ අත්සන් පත්‍රය", "பங்கேற்றோர் கையொப்பப் படிவம்", "Participants' sign sheet"),
-    tile("#console/estimate", "budjrept.png", "ඇස්තමේන්තුව", "மதிப்பீடு", "Estimate"),
-    tile("#console/modular", "form.png", "මොඩියුලර් සැකසීම", "மட்டு அமைப்பு", "Modular setup"),
-    tile("#console/evaluation", "papers.png", "පෙර ඇගයීම සහ පසු ඇගයීම", "முன் மதிப்பீடு மற்றும் பின் மதிப்பீடு", "Pre-evaluation and post-evaluation"),
-    tile("#console/messages", "messages.png", "පණිවිඩ", "செய்திகள்", "Messages"),
-    tile("#console/reports", "antrpl.png", "වාර්තා", "அறிக்கைகள்", "Reports"),
+  const conduct = board(color, "ic-conduct.svg", "පුහුණු වැඩමුළු ක්‍රියාත්මක කිරීම", "பயிற்சிப் பட்டறை நடத்துதல்", "Running the workshops", [
+    tile("#console/applications", "ic-applicants.svg", "පුහුණු වැඩසටහන් සඳහා අයදුම් කළ අය", "பயிற்சிக்கு விண்ணப்பித்தோர்", "People who applied for programmes"),
+    tile("#console/attendance", "ic-selected.svg", "පුහුණු වැඩමුළු සඳහා තෝරාගත් නිලධාරීන්", "பயிற்சிப் பட்டறைக்குத் தேர்ந்த அதிகாரிகள்", "Officers selected for the workshops"),
+    tile("#console/scheduled", "ic-scheduled.svg", "පැවැත්වීමට නියමිත පුහුණු වැඩසටහන්", "நடத்தப்படவுள்ள பயிற்சிகள்", "Programmes due to be held"),
+    tile("#console/revise", "ic-revise.svg", "සංශෝධිත ඇස්තමේන්තු සැකසීම", "திருத்திய மதிப்பீடு அமைத்தல்", "Prepare a revised estimate"),
+    tile("#console/offweb", "ic-offweb.svg", "වෙබ් අඩවිය මගින් කැඳවීම නොකර පවත්වන පුහුණු ඇතුළත් කිරීම හා ඇස්තමේන්තු සැකසීම", "இணையம் வழியாக அழைக்காமல் நடத்தும் பயிற்சியைச் சேர்த்தல் மற்றும் மதிப்பீடு", "Enter a training not called through the website and prepare the estimate"),
+    tile("#console/finish", "ic-finish.svg", "වැඩසටහන අවසන් කිරීම පියවර-1", "நிகழ்ச்சியை முடித்தல் படி 1", "Finish the programme, step 1"),
+    tile("#console/finish2", "ic-finish2.svg", "වැඩසටහන අවසන් කිරීම පියවර 2", "நிகழ்ச்சியை முடித்தல் படி 2", "Finish the programme, step 2"),
+    tile("#console/advsum", "ic-advance.svg", "අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
+    tile("#console/cp_completedtrainings", "ic-completed.svg", "අවසන් කළ පුහුණු වැඩසටහන්", "முடிந்த பயிற்சிகள்", "Finished training programmes"),
+    tile("#console/cp_privatetrainings", "ic-pts.svg", "පෞද්ගලික පුහුණු පාඨමාලා සඳහා ප්‍රතිපාදන", "தனியார் படிப்பு நிதி", "Funds for private training courses"),
+    tile("#console/cp_othertrainings", "ic-otheroffice.svg", "වෙනත් කාර්යාල මගින් පවත්වන ලද පුහුණු වැඩසටහන්", "பிற அலுவலகப் பயிற்சிகள்", "Programmes conducted by other offices"),
+    tile("#console/letter", "ic-letter.svg", "කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"),
+    role === "Administrator" ? tile("#console/signatory", "ic-signatory.svg", "නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)", "துணைப் பிரதம செயலாளர் (பயிற்சி)", "Deputy Chief Secretary (Training)") : "",
+    tile("#console/signsheet", "ic-sign.svg", "සහභාගිවූවන්ගේ අත්සන් පත්‍රය", "பங்கேற்றோர் கையொப்பப் படிவம்", "Participants' sign sheet"),
+    tile("#console/estimate", "ic-estimate.svg", "ඇස්තමේන්තුව", "மதிப்பீடு", "Estimate"),
+    tile("#console/modular", "ic-modular.svg", "මොඩියුලර් සැකසීම", "மட்டு அமைப்பு", "Modular setup"),
+    tile("#console/evaluation", "ic-eval.svg", "පෙර ඇගයීම සහ පසු ඇගයීම", "முன் மதிப்பீடு மற்றும் பின் மதிப்பீடு", "Pre-evaluation and post-evaluation"),
+    tile("#console/messages", "ic-chat.svg", "පණිවිඩ", "செய்திகள்", "Messages"),
+    tile("#console/reports", "ic-report.svg", "වාර්තා", "அறிக்கைகள்", "Reports"),
   ].join(""));
-  const people = board(color, "employees.png", "කාර්යමණ්ඩල තොරතුරු", "பணியாளர் விவரங்கள்", "Staff details", [
-    tile("#console/cp_staff", "addemployee.png", "කාර්යමණ්ඩල ලේඛනය", "பணியாளர் பதிவு", "Staff register"),
-    tile("#console/cp_staff?tab=blacklist", "blacklist.png", "අසාදු ලේඛනය", "தடைப் பட்டியல்", "Blacklist"),
-    tile("#console/cp_trainingofficers", "subjectofficers.png", "පුහුණු නිලධාරීන්", "பயிற்சி அதிகாரிகள்", "Training officers"),
-    tile("#console/cp_resourcepersons", "resourcepersons.png", "සම්පත් දායකයන්", "வள ஆள்கள்", "Resource persons"),
-    tile("#console/panelsign", "participatedemps.png", "අත්සන් ලේඛණය කාර්යමණ්ඩල හා සම්පත්දායක", "கையொப்பப் பட்டியல்", "Staff and resource-person sign sheet"),
-    tile("#console/cp_foriegnscholars", "foriegnscholars.png", "විදේශ ශිෂ්‍යත්ව සඳහා සහභාගී වූ නිලධාරීන්", "உதவித்தொகை பெற்ற அதிகாரிகள்", "Officers who took part in foreign scholarships"),
-    tile("#console/birthdays", "birthdays.png", "අද දින උපන්දිනය සමරන නිලධාරීන්", "இன்று பிறந்தநாள் கொண்ட அதிகாரிகள்", "Officers celebrating a birthday today"),
+  const people = board(color, "ic-staffboard.svg", "කාර්යමණ්ඩල තොරතුරු", "பணியாளர் விவரங்கள்", "Staff details", [
+    tile("#console/cp_staff", "ic-staff.svg", "කාර්යමණ්ඩල ලේඛනය", "பணியாளர் பதிவு", "Staff register"),
+    tile("#console/cp_staff?tab=blacklist", "ic-blacklist.svg", "අසාදු ලේඛනය", "தடைப் பட்டியல்", "Blacklist"),
+    tile("#console/cp_trainingofficers", "ic-trainers.svg", "පුහුණු නිලධාරීන්", "பயிற்சி அதிகாரிகள்", "Training officers"),
+    tile("#console/cp_resourcepersons", "ic-resource.svg", "සම්පත් දායකයන්", "வள ஆள்கள்", "Resource persons"),
+    tile("#console/panelsign", "ic-panelsign.svg", "අත්සන් ලේඛණය කාර්යමණ්ඩල හා සම්පත්දායක", "கையொப்பப் பட்டியல்", "Staff and resource-person sign sheet"),
+    tile("#console/cp_foriegnscholars", "ic-scholars.svg", "විදේශ ශිෂ්‍යත්ව සඳහා සහභාගී වූ නිලධාරීන්", "உதவித்தொகை பெற்ற அதிகாரிகள்", "Officers who took part in foreign scholarships"),
+    tile("#console/birthdays", "ic-birthday.svg", "අද දින උපන්දිනය සමරන නිලධාරීන්", "இன்று பிறந்தநாள் கொண்ட அதிகாரிகள்", "Officers celebrating a birthday today"),
   ].join(""), true);
-  const reports = board(color, "reports.png", "වාර්තා", "அறிக்கைகள்", "Reports", [
-    tile("#console/ahead?tab=office", "office.png", "කාර්යාල ප්‍රගතිය", "அலுவலக முன்னேற்றம்", "Office progress"),
-    tile("#console/ahead?tab=general", "trainingplan.png", "පොදු පුහුණු ප්‍රගතිය", "பொதுப் பயிற்சி முன்னேற்றம்", "General training progress"),
-    tile("#console/ahead?tab=special", "trainings.png", "විශේෂ පුහුණු ප්‍රගතිය", "சிறப்புப் பயிற்சி முன்னேற்றம்", "Special training progress"),
-    tile("#console/ahead?tab=department", "centers.png", "දෙපාර්තමේන්තු පුහුණු ප්‍රගතිය", "திணைக்களப் பயிற்சி முன்னேற்றம்", "Departmental training progress"),
-    tile("#console/ahead?tab=compare", "summary.png", "වාර්ෂික ප්‍රගති සංසන්දනය", "ஆண்டு முன்னேற்ற ஒப்பீடு", "Yearly progress comparison"),
-    tile("#console/ahead?tab=drug", "summary.png", "මත්ද්‍රව්‍ය නිවාරණ හා උපදේශන ප්‍රගතිය", "போதை தடுப்பு ஆலோசனை முன்னேற்றம்", "Drug prevention and counselling progress"),
-    tile("#console/ahead?tab=tamil", "subjects.png", "දෙමළ භාෂා ප්‍රගතිය", "தமிழ் மொழி முன்னேற்றம்", "Tamil language progress"),
-    tile("#console/ahead?tab=external", "privatetrainings.png", "බාහිර පුහුණු ප්‍රගතිය", "வெளிப்புற பயிற்சி முன்னேற்றம்", "External training progress"),
-    tile("#console/ahead?tab=foreign", "foreignscholarships.png", "විදේශ පුහුණු ප්‍රගතිය", "வெளிநாட்டு பயிற்சி முன்னேற்றம்", "Foreign training progress"),
-    tile("#console/reports?name=annual", "summary.png", "වාර්ෂික පුහුණු සැලසුම් වාර්තාව", "ஆண்டுப் பயிற்சித் திட்ட அறிக்கை", "Annual training-plan report"),
-    tile("#console/reports?name=summary", "antrpl.png", "විෂය අනුව පුහුණු වැඩසටහන් සංඛ්‍යාව", "பாடம் வாரியான பயிற்சி எண்ணிக்கை", "Programmes by subject"),
-    tile("#console/reports?name=offices", "office.png", "කාර්යාල අනුව පුහුණු වැඩසටහන්", "அலுவலகம் வாரியான பயிற்சிகள்", "Programmes by office"),
-    tile("#console/reports?name=summary", "reports.png", "පුහුණු වැඩසටහන් සංඛ්‍යාලේඛන", "பயிற்சி புள்ளிவிவரம்", "Training statistics"),
-    tile("#console/reports?name=participants", "participatedemps.png", "පුහුණු වැඩසටහනකට සහභාගී වූ නිලධාරීන්", "பயிற்சியில் பங்கேற்ற அதிகாரிகள்", "Officers who took part in a programme"),
-    tile("#console/attended", "participatedemps.png", "පුහුණුවලට සහභාගී වූ නිලධාරීන්ගේ නාමලේඛනය", "பயிற்சியில் பங்கேற்ற அதிகாரிகளின் பெயர்ப்பட்டியல்", "Register of officers who attended training"),
-    tile("#console/cp_resourcepersons", "resourcepersons.png", "සම්පත් දායකයන්ගේ විස්තර", "வள ஆள்களின் விவரம்", "Resource-person details"),
-    tile("#console/pace", "summary.png", "මාසික වාර්ෂික ප්‍රගතිය", "மாதாந்திர ஆண்டு முன்னேற்றம்", "Monthly and annual progress"),
-    tile("#console/person", "reports.png", "එක් පුද්ගල වාර්තා", "ஒரு நபர் அறிக்கை", "One-person report"),
-    role === "Administrator" ? tile("#console/total", "summary.png", "Total", "Total", "Total") : "",
-    tile("#console/advsum", "budjrept.png", "අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
-    tile("#console/settle?tab=advance", "budjrept.png", "ඇස්තමේන්තු", "மதிப்பீடு", "Estimate"),
-    tile("#console/settle?tab=food", "food.png", "ආහාර බිල් පියවීම", "உணவுப் பட்டியல் தீர்வு", "Food bill settlement"),
-    tile("#console/settle?tab=pay", "funds.png", "දීමනා සියල්ල", "அனைத்துக் கொடுப்பனவு", "All allowances"),
+  const reports = board(color, "ic-reportboard.svg", "වාර්තා", "அறிக்கைகள்", "Reports", [
+    tile("#console/coordreport", "ic-coord.svg", "සම්බන්ධීකරණ නිලධාරීන්ගේ වාර්ෂික ප්‍රගතිය", "ஒருங்கிணைப்பாளர் ஆண்டு முன்னேற்றம்", "Coordinator progress for the year"),
+    tile("#console/ahead?tab=office", "ic-officepace.svg", "කාර්යාල ප්‍රගතිය", "அலுவலக முன்னேற்றம்", "Office progress"),
+    tile("#console/ahead?tab=general", "ic-general.svg", "පොදු පුහුණු ප්‍රගතිය", "பொதுப் பயிற்சி முன்னேற்றம்", "General training progress"),
+    tile("#console/ahead?tab=special", "ic-special.svg", "විශේෂ පුහුණු ප්‍රගතිය", "சிறப்புப் பயிற்சி முன்னேற்றம்", "Special training progress"),
+    tile("#console/ahead?tab=department", "ic-department.svg", "දෙපාර්තමේන්තු පුහුණු ප්‍රගතිය", "திணைக்களப் பயிற்சி முன்னேற்றம்", "Departmental training progress"),
+    tile("#console/ahead?tab=compare", "ic-compare.svg", "වාර්ෂික ප්‍රගති සංසන්දනය", "ஆண்டு முன்னேற்ற ஒப்பீடு", "Yearly progress comparison"),
+    tile("#console/ahead?tab=drug", "ic-drug.svg", "මත්ද්‍රව්‍ය නිවාරණ හා උපදේශන ප්‍රගතිය", "போதை தடுப்பு ஆலோசனை முன்னேற்றம்", "Drug prevention and counselling progress"),
+    tile("#console/ahead?tab=tamil", "ic-tamil.svg", "දෙමළ භාෂා ප්‍රගතිය", "தமிழ் மொழி முன்னேற்றம்", "Tamil language progress"),
+    tile("#console/ahead?tab=external", "ic-external.svg", "බාහිර පුහුණු ප්‍රගතිය", "வெளிப்புற பயிற்சி முன்னேற்றம்", "External training progress"),
+    tile("#console/ahead?tab=foreign", "ic-foreign.svg", "විදේශ පුහුණු ප්‍රගතිය", "வெளிநாட்டு பயிற்சி முன்னேற்றம்", "Foreign training progress"),
+    tile("#console/reports?name=annual", "ic-annual.svg", "වාර්ෂික පුහුණු සැලසුම් වාර්තාව", "ஆண்டுப் பயிற்சித் திட்ட அறிக்கை", "Annual training-plan report"),
+    tile("#console/reports?name=summary", "ic-stats.svg", "විෂය අනුව පුහුණු වැඩසටහන් සංඛ්‍යාව", "பாடம் வாரியான பயிற்சி எண்ணிக்கை", "Programmes by subject"),
+    tile("#console/reports?name=offices", "ic-offices.svg", "කාර්යාල අනුව පුහුණු වැඩසටහන්", "அலுவலகம் வாரியான பயிற்சிகள்", "Programmes by office"),
+    tile("#console/reports?name=summary", "ic-stats.svg", "පුහුණු වැඩසටහන් සංඛ්‍යාලේඛන", "பயிற்சி புள்ளிவிவரம்", "Training statistics"),
+    tile("#console/reports?name=participants", "ic-participants.svg", "පුහුණු වැඩසටහනකට සහභාගී වූ නිලධාරීන්", "பயிற்சியில் பங்கேற்ற அதிகாரிகள்", "Officers who took part in a programme"),
+    tile("#console/attended", "ic-attended.svg", "පුහුණුවලට සහභාගී වූ නිලධාරීන්ගේ නාමලේඛනය", "பயிற்சியில் பங்கேற்ற அதிகாரிகளின் பெயர்ப்பட்டியல்", "Register of officers who attended training"),
+    tile("#console/cp_resourcepersons", "ic-resource.svg", "සම්පත් දායකයන්ගේ විස්තර", "வள ஆள்களின் விவரம்", "Resource-person details"),
+    tile("#console/pace", "ic-pace.svg", "මාසික වාර්ෂික ප්‍රගතිය", "மாதாந்திர ஆண்டு முன்னேற்றம்", "Monthly and annual progress"),
+    tile("#console/person", "ic-person.svg", "එක් පුද්ගල වාර්තා", "ஒரு நபர் அறிக்கை", "One-person report"),
+    role === "Administrator" ? tile("#console/total", "ic-total.svg", "Total", "Total", "Total") : "",
+    tile("#console/advsum", "ic-advance.svg", "අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
+    tile("#console/settle?tab=advance", "ic-settle.svg", "ඇස්තමේන්තු", "மதிப்பீடு", "Estimate"),
+    tile("#console/settle?tab=food", "ic-foodbill.svg", "ආහාර බිල් පියවීම", "உணவுப் பட்டியல் தீர்வு", "Food bill settlement"),
+    tile("#console/settle?tab=pay", "ic-allowance.svg", "දීමනා සියල්ල", "அனைத்துக் கொடுப்பனவு", "All allowances"),
   ].join(""));
   if (role === "User") {
     return [
-      board(color, "employees.png", "කාර්යමණ්ඩලය", "பணியாளர்கள்", "Staff", [
-        tile("#console/cp_staff", "addemployee.png", "කාර්යමණ්ඩල ලේඛනය", "பணியாளர் பதிவு", "Staff register"),
-        tile("#console/cp_trainingofficers", "subjectofficers.png", "පුහුණු නිලධාරීන්", "பயிற்சி அதிகாரிகள்", "Training officers"),
-        tile("#console/cp_resourcepersons", "resourcepersons.png", "සම්පත් දායකයින්", "வள ஆள்கள்", "Resource persons"),
+      board(color, "ic-staffboard.svg", "කාර්යමණ්ඩලය", "பணியாளர்கள்", "Staff", [
+        tile("#console/cp_staff", "ic-staff.svg", "කාර්යමණ්ඩල ලේඛනය", "பணியாளர் பதிவு", "Staff register"),
+        tile("#console/cp_trainingofficers", "ic-trainers.svg", "පුහුණු නිලධාරීන්", "பயிற்சி அதிகாரிகள்", "Training officers"),
+        tile("#console/cp_resourcepersons", "ic-resource.svg", "සම්පත් දායකයින්", "வள ஆள்கள்", "Resource persons"),
       ].join("")),
-      board(color, "trainingplan.png", "පුහුණු සැලැස්ම", "பயிற்சி திட்டம்", "Training plan", [
-        tile("#console/needs", "trainingrequirements.png", "අවශ්‍යතාවක් එක් කරන්න", "தேவையை சேர்க்க", "Add a need"),
-        tile("#console/cp_trrequirements", "treq.png", "අපේ අවශ්‍යතා", "எமது தேவைகள்", "Our needs"),
-        tile("#console/apply", "applytr.png", "පුහුණු වැඩසටහන් අයදුම් කිරීම", "பயிற்சி விண்ணப்பம்", "Apply for a programme"),
-        tile("#console/cp_atp", "trlist.png", "වාර්ෂික සැලැස්ම", "ஆண்டுத் திட்டம்", "Annual plan"),
-        tile("#console/private", "pts.png", "පෞද්ගලික පාඨමාලාව", "தனியார் படிப்பு", "Private course"),
-        tile("#console/letter", "letter.png", "කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"),
-        tile("#console/signsheet", "selected.png", "අත්සන් පත්‍රය", "கையொப்பப் படிவம்", "Sign sheet"),
+      board(color, "ic-planboard.svg", "පුහුණු සැලැස්ම", "பயிற்சி திட்டம்", "Training plan", [
+        tile("#console/needs", "ic-need.svg", "අවශ්‍යතාවක් එක් කරන්න", "தேவையை சேர்க்க", "Add a need"),
+        tile("#console/cp_trrequirements", "ic-needs.svg", "අපේ අවශ්‍යතා", "எமது தேவைகள்", "Our needs"),
+        tile("#console/apply", "ic-apply.svg", "පුහුණු වැඩසටහන් අයදුම් කිරීම", "பயிற்சி விண்ணப்பம்", "Apply for a programme"),
+        tile("#console/cp_atp", "ic-editplan.svg", "වාර්ෂික සැලැස්ම", "ஆண்டுத் திட்டம்", "Annual plan"),
+        tile("#console/private", "ic-private.svg", "පෞද්ගලික පාඨමාලාව", "தனியார் படிப்பு", "Private course"),
+        tile("#console/letter", "ic-letter.svg", "කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"),
+        tile("#console/signsheet", "ic-sign.svg", "අත්සන් පත්‍රය", "கையொப்பப் படிவம்", "Sign sheet"),
       ].join("")),
-      board(color, "reports.png", "වාර්තා", "அறிக்கைகள்", "Reports", [
-        tile("#console/reports", "antrpl.png", "කාර්යාල වාර්තා", "அலுவலக அறிக்கை", "Office reports"),
-        tile("#console/attended", "participatedemps.png", "පුහුණුවලට සහභාගී වූ නිලධාරීන්ගේ නාමලේඛනය", "பயிற்சியில் பங்கேற்ற அதிகாரிகளின் பெயர்ப்பட்டியல்", "Register of officers who attended training"),
-        tile("#console/cp_trainingattendance", "participatedemps.png", "පැමිණීම", "வருகை", "Attendance"),
-        tile("#console/birthdays", "birthdays.png", "අද දින උපන්දිනය සමරන නිලධාරීන්", "இன்று பிறந்தநாள்", "Birthdays today"),
-        tile("#downloads", "download.png", "බාගත කිරීම්", "பதிவிறக்கங்கள்", "Downloads"),
+      board(color, "ic-reportboard.svg", "වාර්තා", "அறிக்கைகள்", "Reports", [
+        tile("#console/reports", "ic-report.svg", "කාර්යාල වාර්තා", "அலுவலக அறிக்கை", "Office reports"),
+        tile("#console/attended", "ic-attended.svg", "පුහුණුවලට සහභාගී වූ නිලධාරීන්ගේ නාමලේඛනය", "பயிற்சியில் பங்கேற்ற அதிகாரிகளின் பெயர்ப்பட்டியல்", "Register of officers who attended training"),
+        tile("#console/cp_trainingattendance", "ic-mark.svg", "පැමිණීම", "வருகை", "Attendance"),
+        tile("#console/birthdays", "ic-birthday.svg", "අද දින උපන්දිනය සමරන නිලධාරීන්", "இன்று பிறந்தநாள்", "Birthdays today"),
+        tile("#downloads", "ic-download2.svg", "බාගත කිරීම්", "பதிவிறக்கங்கள்", "Downloads"),
       ].join("")),
     ].join("");
   }
   if (role === "Super User") {
     return [
-      board(color, "control.png", "පාලනය", "கட்டுப்பாடு", "Control", [
-        tile("#console/cp_downloads", "download.png", "බාගත කිරීම්", "பதிவிறக்கங்கள்", "Downloads"),
-        tile("#console/cp_trcenters", "centers.png", "පුහුණු මධ්‍යස්ථාන", "பயிற்சி மையங்கள்", "Training centres"),
-        tile("#console/cp_funds", "funds.png", "අරමුදල්", "நிதி மூலங்கள்", "Funds"),
-        tile("#console/cp_messeges", "messages.png", "දැනුම්දීම්", "அறிவிப்புகள்", "Notices"),
-        tile("#console/cp_food", "food.png", "ආහාර", "உணவு", "Food"),
-        tile("#console/cp_foreignschols", "foreignscholarships.png", "විදේශ ශිෂ්‍යත්ව", "உதவித்தொகை", "Foreign scholarships"),
-        tile("#console/cp_outsidetrcource", "privatetrainings.png", "බාහිර පුහුණු පාඨමාලා", "வெளிப்புற பயிற்சிப் படிப்புகள்", "External training courses"),
-        tile("#console/cp_appliedforiegnscholars", "scholofficers.png", "ශිෂ්‍යත්ව සඳහා අයදුම් කළ නිලධාරීන්", "உதவித்தொகைக்கு விண்ணப்பித்த அதிகாரிகள்", "Officers who applied for scholarships"),
+      board(color, "ic-control.svg", "පාලනය", "கட்டுப்பாடு", "Control", [
+        tile("#console/cp_downloads", "ic-download.svg", "බාගත කිරීම්", "பதிவிறக்கங்கள்", "Downloads"),
+        tile("#console/cp_trcenters", "ic-centers.svg", "පුහුණු මධ්‍යස්ථාන", "பயிற்சி மையங்கள்", "Training centres"),
+        tile("#console/cp_funds", "ic-funds.svg", "අරමුදල්", "நிதி மூலங்கள்", "Funds"),
+        tile("#console/cp_messeges", "ic-notices.svg", "දැනුම්දීම්", "அறிவிப்புகள்", "Notices"),
+        tile("#console/cp_food", "ic-food.svg", "ආහාර", "உணவு", "Food"),
+        tile("#console/cp_foreignschols", "ic-scholar.svg", "විදේශ ශිෂ්‍යත්ව", "உதவித்தொகை", "Foreign scholarships"),
+        tile("#console/cp_outsidetrcource", "ic-outside.svg", "බාහිර පුහුණු පාඨමාලා", "வெளிப்புற பயிற்சிப் படிப்புகள்", "External training courses"),
+        tile("#console/cp_appliedforiegnscholars", "ic-scholapply.svg", "ශිෂ්‍යත්ව සඳහා අයදුම් කළ නිලධාරීන්", "உதவித்தொகைக்கு விண்ணப்பித்த அதிகாரிகள்", "Officers who applied for scholarships"),
       ].join(""), true),
       plan,
       conduct,
@@ -1456,6 +1526,7 @@ function classicPages() {
       columns: [
         { label: () => L("කාර්යාලය", "அலுவலகம்", "Office"), key: "lg_office" },
         { label: () => L("පරිශීලක නම", "பயனர் பெயர்", "Username"), key: "lg_uname" },
+        { label: () => L("මුර පදය", "கடவுச்சொல்", "Password"), key: "lg_pwd", secret: true },
       ],
       fields: [
         { name: "lg_office", label: () => L("කාර්යාලයේ නම", "அலுவலகப் பெயர்", "Office name"), kind: "offices", required: true },
@@ -1527,11 +1598,13 @@ function classicPages() {
       id: "msg_id",
       columns: [
         { label: () => L("ඇතුළත් කළ දිනය", "திகதி", "Date"), key: "msg_date" },
+        { label: () => L("අවසන් දිනය", "இறுதித் திகதி", "End date"), key: "msg_end" },
         { label: () => L("නිවේදනය", "அறிவிப்பு", "Notice"), key: "msg_message" },
         { label: () => L("පළකරන්නේ නම්", "வெளியிடவா", "Published"), key: "msg_status" },
       ],
       fields: [
         { name: "msg_date", label: () => L("ඇතුළත් කරන දිනය", "திகதி", "Date"), kind: "date", today: true, required: true },
+        { name: "msg_end", label: () => L("අවසන් දිනය", "இறுதித் திகதி", "End date"), kind: "date" },
         { name: "msg_message", label: () => L("නිවේදනය", "அறிவிப்பு", "Notice"), kind: "area", required: true },
         { name: "msg_status", label: () => L("නිවේදනය පළකරන්නේ නම්", "வெளியிடவா", "Publish"), kind: "yesno" },
       ],
@@ -1866,16 +1939,12 @@ function classicChoices(field, value) {
   if (field.kind === "blacklist") return [{ value: "", label: L("නැත", "இல்லை", "No") }, { value: "Yes", label: L("ඔව්", "ஆம்", "Yes") }];
   if (field.kind === "centres") return [{ value: "", label: "—" }, ...(state.options.centres || []).map((item) => ({ value: item.trc_name, label: item.trc_name })).filter((item) => String(item.value || "").trim())];
   if (field.kind === "plantype") return [
-    { value: "MDTU පුහුණුවකි", label: L("MDTU පුහුණුවකි", "MDTU பயிற்சி", "MDTU programme") },
-    { value: "ඵලදායිතා පුහුණුවකි", label: L("ඵලදායිතා පුහුණුවකි", "உற்பத்தித் திறன்", "Productivity programme") },
+    { value: "MDTU පුහුණුවකි", label: L("පොදු පුහුණු", "பொதுப் பயிற்சி", "General training") },
     { value: "විශේෂ පුහුණු", label: L("විශේෂ පුහුණු", "சிறப்புப் பயிற்சி", "Special training") },
     { value: "දෙපාර්තමේන්තු පුහුණු", label: L("දෙපාර්තමේන්තු පුහුණු", "திணைக்களப் பயிற்சி", "Departmental training") },
-    { value: "භාෂා පුහුණු", label: L("භාෂා පුහුණු", "மொழிப் பயிற்சி", "Language training") },
-    { value: "OBT", label: "OBT" },
+    { value: "භාෂා පුහුණු", label: L("දෙමළ භාෂා පුහුණු", "தமிழ் மொழிப் பயிற்சி", "Tamil language training") },
     { value: "උපදේශණය හා මත්ද්‍රවය නිවාරණ", label: L("උපදේශණය හා මත්ද්‍රවය නිවාරණ", "ஆலோசனை மற்றும் போதைத் தடுப்பு", "Counselling and drug prevention") },
-    { value: "රැස්වීම්", label: L("රැස්වීම්", "கூட்டங்கள்", "Meetings") },
-    { value: "උපදේශන කමිටුව", label: L("උපදේශන කමිටුව", "ஆலோசனைக் குழு", "Advisory committee") },
-    { value: "ප්‍රගති සමාලෝචන", label: L("ප්‍රගති සමාලෝචන", "முன்னேற்ற மதிப்பாய்வு", "Progress review") },
+    { value: "රැස්වීම් / ප්‍රගති සමාලෝචන රැස්වීම් / උපදේශන කමිටු", label: L("රැස්වීම් / ප්‍රගති සමාලෝචන රැස්වීම් / උපදේශන කමිටු", "கூட்டங்கள் / முன்னேற்ற மதிப்பாய்வு / ஆலோசனைக் குழு", "Meetings / progress review meetings / advisory committees") },
     { value: "වෙනත්", label: L("වෙනත්", "மற்றவை", "Other") },
   ];
   return [];
@@ -1887,7 +1956,8 @@ function classicControl(field, row) {
   const hint = field.hint ? `<span class="classic-hint">${esc(field.hint())}</span>` : "";
   if (field.kind === "password") {
     const note = row ? L("හිස්ව තැබුවොත් පරණ මුරපදය පවතී", "வெறுமையாக விட்டால் பழைய கடவுச்சொல் இருக்கும்", "Leave blank to keep the current password") : "";
-    return `<input type="password" name="${esc(field.name)}" autocomplete="new-password" ${row ? "" : "required"} placeholder="${esc(note)}">`;
+    const current = row ? fieldText(row[field.name]) : "";
+    return passwordBox(field.name, current, row ? "" : "required", note);
   }
   if (field.kind === "file") {
     return `<span><input type="text" name="${esc(field.name)}" value="${esc(value)}" hidden><input type="file" accept="${esc(field.accept || "")}" data-upload="${esc(field.name)}" data-folder="${esc(field.folder)}" ${field.required && !value ? "required" : ""}>${value ? `<span class="classic-hint">${esc(value)}</span>` : ""}${hint}</span>`;
@@ -1896,9 +1966,14 @@ function classicControl(field, row) {
     return `<input name="${esc(field.name)}" value="${esc(value)}" readonly>`;
   }
   if (field.kind === "myoffice") {
-    const office = state.user?.office || value || "";
-    if (state.user?.role === "User") return `<input name="${esc(field.name)}" value="${esc(office)}" readonly>`;
-    field = { ...field, kind: "offices" };
+    if (row && field.name === "stf_office") {
+      field = { ...field, kind: "offices" };
+    } else if (state.user?.role === "User") {
+      const office = state.user?.office || value || "";
+      return `<input name="${esc(field.name)}" value="${esc(office)}" readonly>`;
+    } else {
+      field = { ...field, kind: "offices" };
+    }
   }
   if (field.kind === "area") return `<textarea name="${esc(field.name)}" ${required}>${esc(value)}</textarea>`;
   if (field.kind === "date") {
@@ -1922,6 +1997,7 @@ function classicCell(row, column) {
   if (column.file) {
     return url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(column.label())}</a>` : "";
   }
+  if (column.secret) return passwordPeek(row[column.key]);
   if (column.key === "rp_whatsapp") {
     const text = String(row.rp_whatsapp || "").trim();
     const digits = text.replace(/\D/g, "");
@@ -2090,7 +2166,7 @@ function control(field, value) {
   if (/date/i.test(field.type)) return `<input type="date" ${common} value="${esc(value)}">`;
   if (/int|double|decimal|float/i.test(field.type)) return `<input type="number" step="any" ${common} value="${esc(value)}">`;
   if (/text/i.test(field.type)) return `<textarea ${common}>${esc(value)}</textarea>`;
-  if (name === "lg_pwd") return `<input type="password" ${common} placeholder="${value ? "Leave blank to keep the current password" : ""}" autocomplete="new-password">`;
+  if (name === "lg_pwd") return passwordBox(name, value, "", value ? "Leave blank to keep the current password" : "");
   return `<input ${common} value="${esc(value)}">`;
 }
 
@@ -2129,11 +2205,34 @@ function paintApplyPick(work, note, nid = "") {
     </form>`;
 }
 
+function planYear(plan) {
+  const start = showDate(plan?.atp_day1) || "";
+  if (/^\d{4}/.test(start)) return start.slice(0, 4);
+  return String(new Date().getFullYear());
+}
+
+function yearTrainingNote(row) {
+  const year = String(row?.year || "").trim();
+  if (!year) return "";
+  const count = Number(row.yearTrainings || 0);
+  const names = Array.isArray(row.yearTrainingNames) ? row.yearTrainingNames.map((item) => String(item || "").trim()).filter(Boolean) : [];
+  const text = count === 0
+    ? L(`${year} තුළ සහභාගී වූ පුහුණු නැත`, `${year} இல் பயிற்சி இல்லை`, `No trainings attended in ${year}`)
+    : L(`${year} තුළ පුහුණු ${count}ක් — ${names.join(" · ")}`, `${year} இல் பயிற்சி ${count} — ${names.join(" · ")}`, `${count} training(s) in ${year} — ${names.join(" · ")}`);
+  return `<div class="year-train-note${count === 0 ? " is-zero" : ""}" title="${esc(text)}">${esc(text)}</div>`;
+}
+
+function paintYearTrainingNote(person) {
+  const slot = $("#apply-year-note");
+  if (!slot) return;
+  slot.innerHTML = yearTrainingNote(person || {});
+}
+
 async function beginApply(plan, nid) {
   const id = String(nid || "").trim();
   if (!plan || !id) return;
   try {
-    const data = await api("profile", { query: { nid: id } });
+    const data = await api("profile", { query: { nid: id, year: planYear(plan) } });
     const person = data.profile || {};
     if (!person.name) throw new Error(L("හැඳුනුම්පතට නිලධාරියෙකු හමු වුණේ නැහැ.", "அந்த அடையாள எண்ணுக்கு அதிகாரி இல்லை.", "No officer was found for that ID."));
     if (person.blacklisted === "Yes") {
@@ -2145,6 +2244,7 @@ async function beginApply(plan, nid) {
     }
     state.applyNid = id;
     state.applyPerson = person;
+    state.applyPlan = plan;
   } catch (error) {
     const slot = $("#form-msg");
     if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
@@ -2166,6 +2266,7 @@ function openApplyForm(plan) {
   $("#apply-email").value = person.email || "";
   $("#apply-birth").value = showDate(person.birth);
   $("#apply-gender").value = person.gender || "";
+  paintYearTrainingNote(person);
   const details = $("#apply-details");
   if (details) details.hidden = !name.value;
 }
@@ -2193,7 +2294,7 @@ function paintApplySpecial(work, plan) {
 }
 
 function priorityOptions() {
-  let html = "";
+  let html = `<option value="">${esc(L("තෝරන්න *", "தேர்வு செய் *", "Select *"))}</option>`;
   for (let n = 1; n <= 50; n += 1) html += `<option value="${n}">${n}</option>`;
   return html;
 }
@@ -2214,6 +2315,7 @@ function paintApplyForm(work, plan) {
       <label class="classic-field"><span>${esc(L("නිලධාරී හැඳුනුම්පත් අංකය", "அதிகாரி அடையாள எண்", "Officer national ID"))}</span><input name="nid" required readonly value="${esc(state.applyNid || "")}"></label>
       <div id="apply-details" hidden>
         <label class="classic-field"><span>${esc(L("නිලධාරියාගේ නම", "அதிகாரி பெயர்", "Officer name"))}</span><input id="apply-name" readonly></label>
+        <div id="apply-year-note" class="apply-year-note"></div>
         <label class="classic-field"><span>${esc(L("තනතුර", "பதவி", "Designation"))}</span><input id="apply-post" readonly></label>
         <label class="classic-field"><span>${esc(L("කාර්යාලය", "அலுவலகம்", "Office"))}</span><input id="apply-office" readonly></label>
         <label class="classic-field"><span>${esc(L("ජංගම දුරකථන අංකය", "கைபேசி", "Mobile"))}</span><input id="apply-mobile" readonly></label>
@@ -2221,7 +2323,8 @@ function paintApplyForm(work, plan) {
         <label class="classic-field"><span>${esc(L("උපන් දිනය", "பிறந்த திகதி", "Date of birth"))}</span><input id="apply-birth" readonly></label>
         <label class="classic-field"><span>${esc(L("ස්ත්‍රී / පුරුෂ", "பாலினம்", "Gender"))}</span><input id="apply-gender" readonly></label>
         <label class="classic-field"><span>${esc(L("රාජකාරියට අදාළද", "பணிக்குத் தொடர்புடையதா", "Relevant to the duties"))}</span>${yesNoRadios("relevant")}</label>
-        <label class="classic-field"><span>${esc(L("ප්‍රමුඛත්වය", "முன்னுரிமை", "Priority"))}</span><select name="priority">${priorityOptions()}</select></label>
+        <label class="classic-field"><span>${esc(L("ප්‍රමුඛත්වය", "முன்னுரிமை", "Priority"))} *</span><select name="priority" required>${priorityOptions()}</select></label>
+        <p class="pad-note">${esc(L("ප්‍රමුඛතාව අනිවාර්යයි. මේ නිලධාරියාගේ කාර්යාලයෙන් මේ පුහුණුවට දැනටමත් දුන් අංකයක් නැවත දෙන්න බැහැ.", "முன்னுரிமை கட்டாயம். இந்த அதிகாரியின் அலுவலகத்திலிருந்து இந்தப் பயிற்சிக்கு ஏற்கனவே கொடுத்த எண்ணை மீண்டும் கொடுக்க முடியாது.", "Priority is required. You cannot reuse a priority already given by this officer’s office for this programme."))}</p>
         <label class="classic-field"><span>${esc(L("නවාතැන් අවශ්‍යද", "தங்குமிடம் வேண்டுமா", "Accommodation needed"))}</span>${yesNoRadios("accommodation")}</label>
         <button type="submit">${esc(L("අයදුම් කරන්න", "விண்ணப்பிக்க", "Apply"))}</button>
       </div>
@@ -2238,9 +2341,11 @@ async function fillApplyOfficer(nid) {
     const field = document.getElementById(id);
     if (field) field.value = "";
   });
+  paintYearTrainingNote({});
   if (!String(nid || "").trim()) return;
+  const year = planYear(state.applyPlan || {}) || String(new Date().getFullYear());
   try {
-    const data = await api("profile", { query: { nid: String(nid).trim() } });
+    const data = await api("profile", { query: { nid: String(nid).trim(), year } });
     const person = data.profile || {};
     name.value = person.name || "";
     $("#apply-post").value = person.designation || "";
@@ -2249,6 +2354,7 @@ async function fillApplyOfficer(nid) {
     $("#apply-email").value = person.email || "";
     $("#apply-birth").value = showDate(person.birth);
     $("#apply-gender").value = person.gender || "";
+    paintYearTrainingNote(person);
     const details = $("#apply-details");
     if (details) details.hidden = !name.value;
     if (!name.value) {
@@ -2293,6 +2399,7 @@ async function renderPlan(work) {
     const tick = `<input class="plan-tick" type="checkbox" value="${esc(row.atp_id)}" data-on="${on ? "1" : "0"}" ${on ? "checked" : ""}>`;
     return `<tr>
     <td>${index + 1}</td>
+    <td>${esc(row.atp_panelno || "")}</td>
     <td>${esc(showDate(row.atp_day1))}</td>
     <td class="wrap-cell">${esc(row.atp_trname)}</td>
     <td class="wrap-cell">${esc(who)}</td>
@@ -2304,6 +2411,15 @@ async function renderPlan(work) {
   }).join("");
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("වාර්ෂික පුහුණු සැලැස්ම සකස් කිරීමට ඇතුළත් කළ යුතු පුහුණු වැඩසටහන්", "ஆண்டுத் திட்டத்தில் சேர்க்க வேண்டிய பயிற்சிகள்", "Programmes to include when preparing the annual plan"))}</h2>
+    ${state.user.role === "User" ? "" : `<section>
+      <h2 class="classic-title">${esc(L("පුහුණු වැඩසටහන් උඩුගත කිරීම", "பயிற்சிகளைப் பதிவேற்றம்", "Upload programmes"))} — ${esc(chosenYear())}</h2>
+      <p class="pad-note">${esc(L("ආකෘතියේ මුල් පේළියේ තියෙන්නේ මේ වර්ෂයයි. වර්ගයට පොදු පුහුණු, දෙපාර්තමේන්තු පුහුණු, නැත්නම් විශේෂ පුහුණු ලියන්න. සම්බන්ධීකරණ තීරුවට ජාතික හැඳුනුම්පත් අංකය දාන්න. නම හිස් නම් අංකයෙන් ගනී. උඩුගත කළ පසු ඕනෑ ඒවා සැලැස්මට ඇතුළත් කරන්න.", "வார்ப்புருவின் முதல் வரி இந்த ஆண்டு. வகையில் பொது, திணைக்களம் அல்லது சிறப்பு என எழுதவும். ஒருங்கிணைப்பு நெடுவரிசையில் அடையாள எண்ணை இடுங்கள். பெயர் வெறுமையாக இருந்தால் எண்ணிலிருந்து வரும். பதிவேற்றிய பின் தேவையானவற்றைத் திட்டத்தில் சேர்க்கவும்.", "The first row of the template is this year. For the type write general, departmental, or special training. Put the national ID in the coordination column. An empty name is filled from that ID. After upload, tick the ones to include in the plan."))}</p>
+      <form class="sheet-tools" id="plan-upload">
+        <input type="hidden" name="year" value="${esc(chosenYear())}">
+        <button type="button" data-act="plan-template">${esc(L("ආකෘතිය බාගත කරන්න", "வார்ப்புரு பதிவிறக்கம்", "Download the template"))}</button>
+        <label class="file-pick">${esc(L("ලැයිස්තුව උඩුගත කරන්න", "பட்டியல் பதிவேற்றம்", "Upload the list"))}<input type="file" data-next-plan accept=".csv,.xls,.xlsx"></label>
+      </form>
+    </section>`}
     <form class="sheet-tools">
       <button type="button" data-act="export" data-table="cp_atp">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
       <label class="file-pick">${esc(L("Excel ඇතුළත් කරන්න", "Excel பதிவேற்றம்", "Upload Excel"))}<input type="file" data-import="cp_atp" accept=".xls,.xlsx,.csv"></label>
@@ -2312,6 +2428,7 @@ async function renderPlan(work) {
     <div class="table-wrap desig-list"><table>
       <thead><tr>
         <th>${esc(L("අනු අංකය", "இல.", "No."))}</th>
+        <th>${esc(L("පුහුණු සැලසුමේ අංකය", "பயிற்சித் திட்ட எண்", "Training plan number"))}</th>
         <th>${esc(L("ආරම්භක දිනය", "தொடக்க திகதி", "Start date"))}</th>
         <th>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</th>
         <th>${esc(L("නාමයෝජනා කරයි", "பரிந்துரை", "Nominated for"))}</th>
@@ -2320,7 +2437,7 @@ async function renderPlan(work) {
         <th>${esc(L("අවසන් වීද?", "முடிந்ததா?", "Finished?"))}</th>
         <th>${esc(L("සැලැස්මට ඇතුළත් කරන්න", "திட்டத்தில் சேர்க்க", "Add to the plan"))}</th>
       </tr></thead>
-      <tbody>${rows || `<tr><td colspan="8">${esc(L("තොරතුරු කිසිවක් නොමැත.", "பதிவுகள் இல்லை.", "Nothing listed yet."))}</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="9">${esc(L("තොරතුරු කිසිවක් නොමැත.", "பதிவுகள் இல்லை.", "Nothing listed yet."))}</td></tr>`}</tbody>
     </table></div>`;
 }
 
@@ -2418,13 +2535,86 @@ function paintPlanPeople(names) {
   )).join("");
 }
 
+function trainingTeam() {
+  return state.options?.team || {
+    dcs: { nid: "", name: "", role: "dcs" },
+    supervisor: { nid: "", name: "", role: "supervisor" },
+    cash: { nid: "", name: "", role: "cash" },
+    support: [],
+  };
+}
+
+function teamSupportChoices() {
+  return (trainingTeam().support || []).filter((item) => String(item?.nid || "").trim());
+}
+
+function supportStaffControl(value) {
+  const current = String(value || "").trim();
+  const choices = teamSupportChoices();
+  if (!choices.length) {
+    return `<input name="plan_staff" value="${esc(current)}">`;
+  }
+  const seen = new Set();
+  let options = `<option value="">—</option>`;
+  choices.forEach((item) => {
+    const nid = String(item.nid || "").trim();
+    if (!nid || seen.has(nid)) return;
+    seen.add(nid);
+    const label = String(item.name || "").trim() && String(item.name).trim() !== nid
+      ? `${item.name} · ${nid}`
+      : nid;
+    options += `<option value="${esc(nid)}" ${nid === current ? "selected" : ""}>${esc(label)}</option>`;
+  });
+  if (current && !seen.has(current)) {
+    options += `<option value="${esc(current)}" selected>${esc(current)}</option>`;
+  }
+  return `<select name="plan_staff">${options}</select>`;
+}
+
+function cashOfficerChoices() {
+  const team = trainingTeam();
+  const list = [];
+  const push = (item, roleLabel) => {
+    const name = String(item?.name || "").trim();
+    const nid = String(item?.nid || "").trim();
+    if (!name && !nid) return;
+    const value = name || nid;
+    list.push({ value, label: name && nid && name !== nid ? `${roleLabel}: ${name} · ${nid}` : `${roleLabel}: ${name || nid}` });
+  };
+  push(team.dcs, L("නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)", "துணைப் பிரதம செயலாளர் (பயிற்சி)", "Deputy Chief Secretary (Training)"));
+  push(team.cash, L("මුදල් භාර නිලධාරියා", "பண அதிகாரி", "Cash officer"));
+  push(team.supervisor, L("අධීක්ෂණ නිලධාරියා", "மேற்பார்வை அதிகாரி", "Supervising officer"));
+  return list;
+}
+
+function cashOfficerControl(current) {
+  const value = String(current || "").trim();
+  const choices = cashOfficerChoices();
+  if (!choices.length) {
+    return `<input name="atp_cashofficername" value="${esc(value)}">`;
+  }
+  const seen = new Set();
+  let options = `<option value="">—</option>`;
+  choices.forEach((item) => {
+    if (seen.has(item.value)) return;
+    seen.add(item.value);
+    options += `<option value="${esc(item.value)}" ${item.value === value ? "selected" : ""}>${esc(item.label)}</option>`;
+  });
+  if (value && !seen.has(value)) {
+    options += `<option value="${esc(value)}" selected>${esc(value)}</option>`;
+  }
+  return `<select name="atp_cashofficername">${options}</select>`;
+}
+
 function storedPlanStaff(row) {
   const names = [];
   for (let n = 2; n <= 6; n += 1) names.push(String(row["atp_supportstaff" + n] || "").trim());
   planLines(row.atp_moresupport).forEach((item) => names.push(item));
   let last = -1;
   names.forEach((item, index) => { if (item) last = index; });
-  return last < 0 ? [] : names.slice(0, last + 1);
+  if (last >= 0) return names.slice(0, last + 1);
+  const ready = Math.min(3, teamSupportChoices().length);
+  return ready ? Array.from({ length: ready }, () => "") : [];
 }
 
 function paintPlanStaff(names) {
@@ -2432,7 +2622,7 @@ function paintPlanStaff(names) {
   if (!slot) return;
   slot.innerHTML = names.map((value, index) => planLine(
     L((index + 1) + " වන සහාය කාර්ය මණ්ඩලය (ජා.හැ.අංකය)", (index + 1) + " ஆம் உதவி பணியாளர் (அடையாள எண்)", "Support staff " + (index + 1) + " (NIC)"),
-    `<input name="plan_staff" value="${esc(value)}">`,
+    supportStaffControl(value),
     "drop-plan-staff",
     index
   )).join("");
@@ -2446,17 +2636,41 @@ function venueField(row) {
   return `<label class="classic-field"><span>${esc(L("වැඩමුළුව පැවැත්වෙන ස්ථානය", "பட்டறை நடைபெறும் இடம்", "Workshop venue"))}</span><select name="atp_location"><option value="">—</option>${extra}${options}</select></label>`;
 }
 
-const FILE_PREFIX = "NWP/MDTU/2/";
+const FILE_PREFIX = "NWP/CS/T/";
+const OLD_FILE_PREFIXES = ["NWP/MDTU/2/", "NWP/MDTU/", "NWP/CS/T/"];
+const PLAN_PREFIX = "NWP/MDTU/";
+const OLD_PLAN_PREFIXES = ["NWP/MDTU/2/", "NWP/MDTU/"];
 
 function fileRest(value) {
   const text = String(value || "").trim();
-  return text.startsWith(FILE_PREFIX) ? text.slice(FILE_PREFIX.length) : text;
+  const old = OLD_FILE_PREFIXES.find((prefix) => text.startsWith(prefix));
+  if (old) return text.slice(old.length);
+  return text;
 }
 
 function fileFull(value) {
   const text = String(value || "").trim();
-  if (!text || text.startsWith("NWP/")) return text;
-  return FILE_PREFIX + text;
+  if (!text) return text;
+  const rest = fileRest(text);
+  return rest ? FILE_PREFIX + rest : "";
+}
+
+function planRest(value) {
+  const text = String(value || "").trim();
+  const old = OLD_PLAN_PREFIXES.find((prefix) => text.startsWith(prefix));
+  if (old) return text.slice(old.length);
+  return text;
+}
+
+function planFull(value) {
+  const text = String(value || "").trim();
+  if (!text) return text;
+  const rest = planRest(text);
+  return rest ? PLAN_PREFIX + rest : "";
+}
+
+function estimateFileNo(value) {
+  return fileFull(fileRest(value));
 }
 
 function appendPlanDates(count) {
@@ -2485,7 +2699,7 @@ function appendPlanPeople(count) {
 }
 
 function appendPlanStaff(count) {
-  const have = [...document.querySelectorAll("#plan-staff input")].map((field) => field.value || "");
+  const have = [...document.querySelectorAll("#plan-staff [name=plan_staff]")].map((field) => field.value || "");
   const room = 20 - have.length;
   if (room < 1) {
     alert(L("සහාය කාර්ය මණ්ඩලය 20කට වඩා එකතු කරන්න බැහැ.", "20 பேருக்கு மேல் சேர்க்க முடியாது.", "You cannot add more than 20 support staff."));
@@ -2500,7 +2714,7 @@ function annualPayload(form) {
   const data = Object.fromEntries(new FormData(form));
   const dates = [...form.querySelectorAll("#plan-dates input")].map((field) => field.value || "");
   const people = [...form.querySelectorAll("#plan-people select")].map((field) => field.value || "");
-  const staff = [...form.querySelectorAll("#plan-staff input")].map((field) => field.value || "");
+  const staff = [...form.querySelectorAll("#plan-staff [name=plan_staff]")].map((field) => field.value || "");
   for (let n = 1; n <= 10; n += 1) {
     data["atp_day" + n] = dates[n - 1] || "";
     data["atp_resourcep" + n] = people[n - 1] || "";
@@ -2510,25 +2724,28 @@ function annualPayload(form) {
   data.atp_moreresource = people.slice(10).map((item) => item.trim()).filter(Boolean).join("\n");
   data.atp_moresupport = staff.slice(5).map((item) => item.trim()).filter(Boolean).join("\n");
   data.atp_fileno = fileFull(data.atp_fileno);
+  data.atp_panelno = planFull(data.atp_panelno);
   delete data.plan_person;
   delete data.plan_staff;
   return data;
 }
 
-function annualControl(name, label, kind, row, extra = "") {
+function annualControl(name, label, kind, row, extra = "", required = false) {
   const value = kind === "date" ? planDateValue(row, name) : fieldText(row[name]);
   const wide = kind === "area" ? " wide" : "";
-  let control = `<input name="${esc(name)}" value="${esc(value)}">`;
-  if (kind === "area") control = `<textarea name="${esc(name)}">${esc(value)}</textarea>`;
+  const need = required ? " required" : "";
+  const star = required ? ` <em class="req">*</em>` : "";
+  let control = `<input name="${esc(name)}" value="${esc(value)}"${need}>`;
+  if (kind === "area") control = `<textarea name="${esc(name)}"${need}>${esc(value)}</textarea>`;
   if (kind === "date") {
-    const input = `<input type="date" name="${esc(name)}" data-plan-date data-original="${esc(value)}" value="${esc(value)}">`;
+    const input = `<input type="date" name="${esc(name)}" data-plan-date data-original="${esc(value)}" value="${esc(value)}"${need}>`;
     control = name === "atp_lastdateapply"
       ? `<span class="plan-add-row">${input}<button type="button" class="text-btn small" data-act="clear-apply-date">${esc(L("මකන්න", "அழி", "Clear"))}</button></span>`
       : input;
   }
-  if (kind === "funds" || kind === "yesno" || kind === "plantype") control = classicControl({ name, kind, label: () => "" }, row);
+  if (kind === "funds" || kind === "yesno" || kind === "plantype") control = classicControl({ name, kind, label: () => "", required }, row);
   if (kind === "people") control = extra;
-  return `<label class="classic-field${wide}"><span>${esc(label)}</span>${control}</label>`;
+  return `<label class="classic-field${wide}"><span>${esc(label)}${star}</span>${control}</label>`;
 }
 
 function personSelect(name, current, people) {
@@ -2539,12 +2756,17 @@ function personSelect(name, current, people) {
 }
 
 function annualFormFields(editing, publish = true) {
-  const text = (name, si, ta, en) => annualControl(name, L(si, ta, en), "text", editing);
+  const text = (name, si, ta, en, required = false) => annualControl(name, L(si, ta, en), "text", editing, "", required);
   const area = (name, si, ta, en) => annualControl(name, L(si, ta, en), "area", editing);
   const date = (name, si, ta, en) => annualControl(name, L(si, ta, en), "date", editing);
   const startTime = String(editing.atp_stime || "").trim() || "9.00 am";
   const endTime = String(editing.atp_etime || "").trim() || "4.15 pm";
-  const cashDesig = String(editing.atp_cashofficerdesig || "").trim() || "නියේජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)";
+  const team = trainingTeam();
+  const supervisorValue = String(editing.atp_supervisor || "").trim() || String(team.supervisor?.name || "").trim();
+  const cashName = String(editing.atp_cashofficername || "").trim()
+    || String(team.cash?.name || "").trim()
+    || String(team.dcs?.name || "").trim();
+  const cashDesig = String(editing.atp_cashofficerdesig || "").trim() || "නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)";
   const publishFields = publish ? `
             ${annualControl("atp_isaddatp", L("පුහුණු සැලැස්මට ඇතුලත් වේද?", "திட்டத்தில் சேர்க்கவா?", "Include in the training plan?"), "yesno", editing)}
             ${annualControl("atp_addhome", L("මෙම වැඩසටහන මුල් පිටුවට ඇතුලත් කිරීම", "முகப்பில் சேர்த்தல்", "Include this programme on the home page"), "yesno", editing)}
@@ -2554,8 +2776,8 @@ function annualFormFields(editing, publish = true) {
           <div class="annual-col">
             ${text("atp_trname", "පුහුණු වැඩ සටහන", "பயிற்சி", "Programme")}
             <label class="classic-field"><span>${esc(L("ලිපි ගොනු අංකය", "கோப்பு எண்", "File number"))}</span><span class="plan-add-row file-prefix"><b>${FILE_PREFIX}</b><input name="atp_fileno" value="${esc(fileRest(editing.atp_fileno))}"></span></label>
-            ${text("atp_panelno", "පුහුණු සැලසුමේ අංකය", "பயிற்சித் திட்ட எண்", "Training plan number")}
-            ${text("atp_supervisor", "පුහුණු වැඩ සටහන අධීක්ෂණය", "பயிற்சி மேற்பார்வை", "Programme supervision")}
+            <label class="classic-field"><span>${esc(L("පුහුණු සැලසුමේ අංකය", "பயிற்சித் திட்ட எண்", "Training plan number"))}</span><span class="plan-add-row file-prefix"><b>${PLAN_PREFIX}</b><input name="atp_panelno" value="${esc(planRest(editing.atp_panelno))}" placeholder="2026/01"></span></label>
+            <label class="classic-field"><span>${esc(L("අධීක්ෂණ නිලධාරියාගේ නම", "மேற்பார்வை அதிகாரி பெயர்", "Supervising officer's name"))}</span><input name="atp_supervisor" value="${esc(supervisorValue)}"></label>
             ${area("atp_purpose", "අරමුණ", "நோக்கம்", "Purpose")}
             ${area("atp_content", "අන්තර්ගතය", "உள்ளடக்கம்", "Content")}
             ${text("atp_targetgroup", "ඉලක්කගත කණ්ඩායම", "இலக்கு குழு", "Target group")}
@@ -2573,14 +2795,16 @@ function annualFormFields(editing, publish = true) {
           <div class="annual-col">
             <label class="classic-field"><span>${esc(L("එකතු කරන සම්පත් දායකයන් ගණන", "சேர்க்கும் வள ஆள்கள்", "Resource persons to add"))}</span><span class="plan-add-row"><input id="plan-people-count" type="number" min="1" max="100" value="1"><button type="button" class="pick-yes" data-act="add-plan-people">${esc(L("සම්පත් දායකයන් එකතු කරන්න", "வள ஆள்களைச் சேர்க்க", "Add resource persons"))}</button></span></label>
             <div id="plan-people"></div>
-            ${text("atp_supportstaff1", "පුහුණු වැඩ සටහන සම්බන්ධීකාරක (ජා.හැ.අංකය)", "ஒருங்கிணைப்பாளர் (அடையாள எண்)", "Coordinator (NIC)")}
+            ${text("atp_supportstaff1", "සම්බන්ධීකරණය (ජා.හැ.අංකය)", "ஒருங்கிணைப்பு (அடையாள எண்)", "Coordination (national ID)", true)}
+            ${text("atp_coordname", "සම්බන්ධීකරණ නිලධාරියාගේ නම", "ஒருங்கிணைப்பாளர் பெயர்", "Coordination officer's name")}
             <label class="classic-field"><span>${esc(L("එකතු කරන සහාය කාර්ය මණ්ඩලය ගණන", "சேர்க்கும் உதவி பணியாளர்", "Support staff to add"))}</span><span class="plan-add-row"><input id="plan-staff-count" type="number" min="1" max="20" value="1"><button type="button" class="pick-yes" data-act="add-plan-staff">${esc(L("සහාය කාර්ය මණ්ඩලය එකතු කරන්න", "உதவி பணியாளரைச் சேர்க்க", "Add support staff"))}</button></span></label>
             <div id="plan-staff"></div>
-            ${text("atp_cashofficername", "මුදල් භාර නිලධාරියාගේ නම", "பண அதிகாரி பெயர்", "Name of the cash officer")}
+            <label class="classic-field"><span>${esc(L("මුදල් භාර නිලධාරියාගේ නම", "பண அதிகாரி பெயர்", "Name of the cash officer"))}</span>${cashOfficerControl(cashName)}</label>
             <label class="classic-field"><span>${esc(L("මුදල් භාර නිලධාරියාගේ තනතුර", "பண அதிகாரி பதவி", "Designation of the cash officer"))}</span><input name="atp_cashofficerdesig" value="${esc(cashDesig)}"></label>
             ${area("atp_cashofficerotherdetails", "මුදල් භාර නිලධාරියාගේ වෙනත් විස්තර", "பண அதிகாரி பிற விவரம்", "Other details of the cash officer")}
             ${annualControl("atp_trtype", L("පුහුණු වැඩසටහනේ වර්ගය", "பயிற்சி வகை", "Type of training programme"), "plantype", editing)}
             ${publishFields}
+            ${area("atp_facilities", "පුහුණු පහසුකම්", "பயிற்சி வசதிகள்", "Training facilities")}
             ${area("atp_otherfacts", "වෙනත් කරුණු", "பிற விவரங்கள்", "Other facts")}
             ${area("atp_specialfacts", "විශේෂ කරුණු", "சிறப்பு விவரங்கள்", "Special facts")}
             ${annualControl("atp_showspecialfacts", L("විශේෂ කරුණු හා එම කරුණු ප්‍රදර්ශනය කිරීම", "சிறப்பு விவரங்களைக் காட்ட", "Show the special facts"), "yesno", editing)}
@@ -2601,9 +2825,7 @@ async function renderAnnual(work) {
       people = [];
     }
     planLecturers = people;
-    if (!state.options?.centres) {
-      try { state.options = Object.assign(state.options || {}, await api("options")); } catch (error) { /* centres stay empty */ }
-    }
+    try { state.options = Object.assign(state.options || {}, await api("options")); } catch (error) { /* centres/team stay empty */ }
     const savedDates = storedPlanDates(editing);
     const savedPeople = storedPlanPeople(editing);
     const savedStaff = storedPlanStaff(editing);
@@ -2618,19 +2840,24 @@ async function renderAnnual(work) {
     paintPlanDates(savedDates.length ? savedDates : [""]);
     paintPlanPeople(savedPeople);
     paintPlanStaff(savedStaff);
+    const coordId = document.querySelector("#annual-form [name=atp_supportstaff1]");
+    const coordName = document.querySelector("#annual-form [name=atp_coordname]");
+    if (coordId && coordName && coordId.value.trim() && !coordName.value.trim()) fillCoordinatorName(coordId);
     return;
   }
   const rows = list.items.filter((row) => inPlan(row.atp_isaddatp) && (String(row.atp_trname || "").trim() || state.user.role === "Administrator")).map((row, index) => {
     const named = String(row.atp_trname || "").trim() !== "";
-    const edit = state.user.role === "User" ? "" : `<a href="#console/cp_atp?edit=${esc(row.atp_id)}">edit</a>`;
+    const edit = state.user.role === "User" ? "" : `<a href="#console/cp_atp?edit=${esc(row.atp_id)}">${esc(L("වෙනස් කරන්න", "திருத்து", "Edit"))}</a>`;
     const remove = !named && state.user.role === "Administrator" ? ` <button class="text-btn small" type="button" data-act="annual-remove" data-id="${esc(row.atp_id)}">delete</button>` : "";
     return `<tr>
     <td>${index + 1}</td>
+    <td>${esc(row.atp_panelno || "")}</td>
     <td>${esc(showDate(row.atp_requestDate))}</td>
     <td>${esc(row.atp_trname)}</td>
     <td>${esc(row.atp_targetgroup)}</td>
     <td>${esc(row.atp_noofparticipants)}</td>
     <td>${esc(showDate(row.atp_day1))}</td>
+    <td class="wrap-cell">${esc(row.atp_coordname || "")}</td>
     <td>${edit}${remove}</td>
   </tr>`;
   }).join("");
@@ -2640,17 +2867,20 @@ async function renderAnnual(work) {
       <button type="button" data-act="export" data-table="cp_atp">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
       <label class="file-pick">${esc(L("Excel ඇතුළත් කරන්න", "Excel பதிவேற்றம்", "Upload Excel"))}<input type="file" data-import="cp_atp" accept=".xls,.xlsx,.csv"></label>
     </form>
+    <p class="pad-note">${esc(L("සැලසුම උඩුගත කරන්නේ පුහුණු කාර්ය මණ්ඩලයටයි. Excel එකේ සම්බන්ධීකරණය තීරුවට ජාතික හැඳුනුම්පත් අංකය දාන්න. නම හිස් නම් අංකයෙන් ගනී. සැලසුම වෙනස් කරනකොට ඒ නම ඉතිරි වෙනවා. නම වෙනස් කරන්නත් පුළුවන්.", "திட்டத்தைப் பதிவேற்ற பயிற்சிப் பணியாளருக்கே அனுமதி உண்டு. Excel இல் ஒருங்கிணைப்பு நெடுவரிசையில் அடையாள எண்ணை இடுங்கள். பெயர் வெறுமையாக இருந்தால் எண்ணிலிருந்து வரும். திட்டத்தை மாற்றும்போது அந்தப் பெயர் இருக்கும். பெயரை மாற்றவும் முடியும்.", "Training staff can upload the plan. Put the national ID in the coordination column. An empty name is filled from that ID. When the plan is edited, the name stays and can be changed."))}</p>
     <div class="table-wrap desig-list"><table>
       <thead><tr>
         <th>${esc(L("අනු අංකය", "இல.", "No."))}</th>
+        <th>${esc(L("පුහුණු සැලසුමේ අංකය", "பயிற்சித் திட்ட எண்", "Training plan number"))}</th>
         <th>${esc(L("දිනය", "திகதி", "Date"))}</th>
         <th>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</th>
         <th>${esc(L("ඉලක්ක කණ්ඩායම", "இலக்கு குழு", "Target group"))}</th>
         <th>${esc(L("සහභාගිවන්නන්", "பங்கேற்பாளர்", "Participants"))}</th>
         <th>${esc(L("ආරම්භක දිනය", "தொடக்க திகதி", "Starts"))}</th>
+        <th>${esc(L("සම්බන්ධීකරණය", "ஒருங்கிணைப்பு", "Coordination"))}</th>
         <th></th>
       </tr></thead>
-      <tbody>${rows || `<tr><td colspan="7">${esc(L("තොරතුරු කිසිවක් නොමැත.", "பதிவுகள் இல்லை.", "Nothing listed yet."))}</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="9">${esc(L("තොරතුරු කිසිවක් නොමැත.", "பதிவுகள் இல்லை.", "Nothing listed yet."))}</td></tr>`}</tbody>
     </table></div>`;
 }
 
@@ -2772,10 +3002,13 @@ function activeProgrammes(items, keep) {
 function syncApplicantTicks() {
   const boxes = [...document.querySelectorAll(".applicant-fit [data-act=pick-one]")];
   const all = document.querySelector(".applicant-fit [data-act=pick-all]");
-  if (!all) return;
   const picked = boxes.filter((box) => box.checked).length;
-  all.checked = boxes.length > 0 && picked === boxes.length;
-  all.indeterminate = picked > 0 && picked < boxes.length;
+  if (all) {
+    all.checked = boxes.length > 0 && picked === boxes.length;
+    all.indeterminate = picked > 0 && picked < boxes.length;
+  }
+  const count = document.querySelector("#pick-count");
+  if (count) count.textContent = L(`තෝරාගත් ගණන: ${picked}`, `தேர்ந்த எண்ணிக்கை: ${picked}`, `Selected: ${picked}`);
 }
 
 async function onPickChange(event) {
@@ -2792,6 +3025,10 @@ async function onPickChange(event) {
     return;
   }
   if (!(box instanceof HTMLInputElement)) return;
+  if (box.name === "atp_supportstaff1") {
+    fillCoordinatorName(box);
+    return;
+  }
   if (box.dataset.act !== "pick-one" && box.dataset.act !== "pick-all") return;
   if (state.module === "applications") {
     if (box.dataset.act === "pick-all") {
@@ -2857,7 +3094,7 @@ async function renderApplications(work) {
       <td class="wrap-cell">${esc(row.tapp_trname)}</td>
       <td>${esc(showDate(row.tapp_trstartdate))}</td>
       <td>${esc(row.tapp_officerNid)}</td>
-      <td class="wrap-cell">${esc(applicantName(row))}${letter}</td>
+      <td class="wrap-cell">${esc(applicantName(row))}${yearTrainingNote(row)}${letter}</td>
       <td class="wrap-cell">${esc(row.stf_desig || row.tratt_desig)}</td>
       <td class="wrap-cell">${esc(row.tapp_office)}</td>
       <td>${esc(row.stf_mobile || row.tratt_mobile)}</td>
@@ -2871,6 +3108,9 @@ async function renderApplications(work) {
   const pickHead = canPick
     ? `<input class="tick" type="checkbox" data-act="pick-all" aria-label="${esc(L("සියල්ල තෝරන්න", "அனைத்தையும் தேர்ந்தெடு", "Select all"))}">`
     : "";
+  const yearHint = atp && list.year
+    ? `<p class="pick-note">${esc(L(`${list.year} වසරේ සහභාගී වූ පුහුණු ගණන අඩු අය ඉහළින් පෙනේ. පුහුණු නොගත් අයට ප්‍රමුඛත්වය දෙන්න.`, `${list.year} ஆண்டில் குறைவாகப் பங்கேற்றவர் மேலே தெரிவர்.`, `People with fewer ${list.year} trainings appear first. Prefer those who have not attended yet.`))}</p>`
+    : "";
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("ඉල්ලීම් කළ අය", "விண்ணப்பதாரர்கள்", "Applicants"))}${programme ? ` — ${esc(programme.atp_trname)}` : ""}</h2>
     <form class="sheet-tools" id="pick-programme">
@@ -2881,7 +3121,9 @@ async function renderApplications(work) {
       <button type="submit">${esc(L("ඇතුළත් කරන්න", "சேர்க்க", "Include"))}</button>
       <span id="form-msg"></span>
     </form>
-    <p class="pick-note">${esc(L("හිසේ හරි ලකුණෙන් සියල්ල තෝරන්න. පේළියේ ලකුණෙන් එක් අයෙක් හෝ කිහිප දෙනෙක් තෝරන්න. ඊට පස්සේ ඇතුළත් කරන්න ඔබන්න. තෝරාගත් අය කොළ පාටින් පෙනේ. ඔවුන්ගේ නම යට කැඳවීමේ ලිපිය ගත හැක.", "குறியிட்டு சேர்க்க என்பதை அழுத்தவும். தேர்ந்தவர் பச்சை நிறத்தில் தெரிவர். பெயருக்குக் கீழ் அழைப்புக் கடிதம் கிடைக்கும்.", "Tick the people, then press Include. Selected people are shown in green. Their name has a call letter."))}</p>` : ""}
+    <p class="pick-note">${esc(L("හිසේ හරි ලකුණෙන් සියල්ල තෝරන්න. පේළියේ ලකුණෙන් එක් අයෙක් හෝ කිහිප දෙනෙක් තෝරන්න. ඊට පස්සේ ඇතුළත් කරන්න ඔබන්න. තෝරාගත් අය කොළ පාටින් පෙනේ. ඔවුන්ගේ නම යට කැඳවීමේ ලිපිය ගත හැක.", "குறியிட்டு சேர்க்க என்பதை அழுத்தவும். தேர்ந்தவர் பச்சை நிறத்தில் தெரிவர். பெயருக்குக் கீழ் அழைப்புக் கடிதம் கிடைக்கும்.", "Tick the people, then press Include. Selected people are shown in green. Their name has a call letter."))}</p>
+    <p class="pick-count" id="pick-count"></p>` : ""}
+    ${yearHint}
     <div class="table-wrap desig-list applicant-fit"><table>
       <colgroup>
         <col class="col-no"><col class="col-date"><col class="col-programme"><col class="col-date"><col class="col-nid">
@@ -2943,7 +3185,7 @@ async function renderAttendance(work) {
     <td>${index + 1}</td>
     <td class="wrap-cell">${esc(row.tapp_trname)}</td>
     <td>${esc(row.tapp_officerNid)}</td>
-    <td class="wrap-cell">${esc(applicantName(row))}<div><a class="text-btn small" href="#console/letter?atp=${esc(atp)}&nid=${esc(row.tapp_officerNid)}">${esc(L("කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"))}</a></div></td>
+    <td class="wrap-cell">${esc(applicantName(row))}${yearTrainingNote(row)}<div><a class="text-btn small" href="#console/letter?atp=${esc(atp)}&nid=${esc(row.tapp_officerNid)}">${esc(L("කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"))}</a></div></td>
     <td class="wrap-cell">${esc(row.tapp_office)}</td>
     <td class="wrap-cell">${esc(row.stf_desig || row.tratt_desig)}</td>
     <td>${esc(row.stf_mobile || row.tratt_mobile)}</td>
@@ -3061,32 +3303,40 @@ function bindProvisionSendForm(work, data) {
   const form = work.querySelector("#provision-send-form");
   const pick = form?.querySelector("[name=atp]");
   if (!form || !pick) return;
-  pick.addEventListener("change", () => {
+  const fill = () => {
     const plan = (data.plans || []).find((item) => String(item.id) === pick.value);
     if (!plan) return;
-    form.querySelector("[name=plan]").value = plan.planNo || "";
-    form.querySelector("[name=name]").value = plan.name || "";
-    if (plan.kind) form.querySelector("[name=kind]").value = plan.kind;
-  });
+    const planBox = form.querySelector("[name=plan]");
+    const nameBox = form.querySelector("[name=name]");
+    const kindBox = form.querySelector("[name=kind]");
+    if (planBox) planBox.value = plan.planNo || "";
+    if (nameBox) nameBox.value = plan.name || "";
+    if (kindBox && plan.kind) kindBox.value = plan.kind;
+  };
+  pick.addEventListener("change", fill);
+  if (pick.value) fill();
 }
 
 function provisionSendFormHtml(data) {
   const year = data.year;
   const row = data.item || {};
   const kinds = provisionSendKinds().map((item) => `<option value="${esc(item[0])}"${row.kind === item[0] ? " selected" : ""}>${esc(L(item[1], item[2], item[3]))}</option>`).join("");
-  const plans = [`<option value="">${esc(L("සැලසුමක් තෝරන්න", "திட்டத்தைத் தேர்ந்தெடுக்கவும்", "Choose a plan"))}</option>`]
-    .concat((data.plans || []).map((item) => `<option value="${esc(item.id)}"${String(row.atp) === String(item.id) ? " selected" : ""}>${esc(item.planNo || item.id)} — ${esc(item.name)}</option>`))
+  const plans = [`<option value="">${esc(L("සැලසුම් අංකය තෝරන්න — වැඩසටහනේ නම පෙනේ", "திட்ட எண்ணைத் தேர்ந்தெடுக்கவும்", "Choose a plan number — programme name appears"))}</option>`]
+    .concat((data.plans || []).map((item) => {
+      const label = item.label || `${item.shortNo || item.planNo || "—"} · ${item.name || ""}`;
+      return `<option value="${esc(item.id)}" title="${esc(label)}"${String(row.atp) === String(item.id) ? " selected" : ""}>${esc(label)}</option>`;
+    }))
     .join("");
   const offices = (state.options?.offices || []).map((item) => `<option value="${esc(item.of_name)}"></option>`).join("");
   return `
     <form class="classic-form old-plan" id="provision-send-form">
       <input type="hidden" name="year" value="${esc(year)}">
       <input type="hidden" name="id" value="${esc(row.id || "")}">
+      <label class="classic-field provision-plan-pick"><span>${esc(L("සැලසුම් අංකය", "திட்ட எண்", "Plan number"))}</span>
+        <select name="atp" size="8">${plans}</select>
+      </label>
       <div class="annual-sheet">
         <div class="annual-col">
-          <label class="classic-field"><span>${esc(L("සැලසුම් අංකය", "திட்ட எண்", "Plan number"))}</span>
-            <span class="plan-add-row"><select name="atp">${plans}</select></span>
-          </label>
           <label class="classic-field"><span>${esc(L("සැලසුම් අංකය (අතින්)", "திட்ட எண் (கைமுறை)", "Plan number (typed)"))}</span><input name="plan" value="${esc(row.plan || "")}"></label>
           <label class="classic-field"><span>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி நிகழ்ச்சி", "Training programme"))}</span><input name="name" value="${esc(row.name || "")}" required></label>
           <label class="classic-field"><span>${esc(L("මාරු කළ ආයතනය", "மாற்றிய நிறுவனம்", "Institution transferred to"))}</span><input name="office" list="provision-send-offices" value="${esc(row.office || "")}" required></label>
@@ -3550,20 +3800,20 @@ async function renderAdvSum(work) {
       <td class="wrap-cell">${esc(row.name)}</td>
       <td>${esc(showDate(row.end) || row.end || "")}</td>
       <td class="wrap-cell">${esc(row.file)}</td>
-      <td>${row.saved ? esc(L("සුරැකි", "சேமித்தது", "Saved")) : esc(L("ගණනය", "கணக்கு", "Calculated"))}</td>
+      <td>${row.active ? esc(L("ක්‍රියාකාරී", "செயலில்", "Active")) : (row.saved ? esc(L("සුරැකි", "சேமித்தது", "Saved")) : esc(L("ගණනය", "கணக்கு", "Calculated")))}</td>
     </tr>`).join("");
     work.innerHTML = `
       <h2 class="classic-title">${esc(L("අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"))}</h2>
-      <p class="pad-note">${esc(L("ඉවර වූ පුහුණු වැඩසටහන් ඉවර වූ දිනයේ සිට මාස 3ක් මෙහි පේනවා. පත්‍රය විවෘත කර PDF එක ගන්න. මුද්‍රණ ඉඩ අගල 1ක්.", "முடிந்த பயிற்சிகள் முடிந்த நாளிலிருந்து 3 மாதம் இங்கே தெரியும். படிவத்தைத் திறந்து PDF எடுக்கவும். அச்சு ஓரம் 1 அங்குலம்.", "Finished programmes stay here for 3 months from the day they ended. Open the sheet and take the PDF. The print margin is 1 inch."))}</p>
+      <p class="pad-note">${esc(L("ක්‍රියාකාරී පුහුණු වැඩසටහන් සහ ඉවර වූ දිනයේ සිට මාසයක් ඇතුළත ඒවා මෙහි පේනවා. පත්‍රය විවෘත කර PDF එක ගන්න. මුද්‍රණ ඉඩ අගල 1ක්.", "செயலில் உள்ள பயிற்சிகளும் முடிந்த நாளிலிருந்து ஒரு மாதத்துக்குள் உள்ளவையும் இங்கே தெரியும். படிவத்தைத் திறந்து PDF எடுக்கவும். அச்சு ஓரம் 1 அங்குலம்.", "Active programmes and those within one month of ending appear here. Open the sheet and take the PDF. The print margin is 1 inch."))}</p>
       <table>
         <thead><tr>
           <th></th>
           <th>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</th>
-          <th>${esc(L("ඉවර වූ දිනය", "முடிந்த நாள்", "Finished on"))}</th>
+          <th>${esc(L("ඉවර වන / වූ දිනය", "முடியும் / முடிந்த நாள்", "Ends / ended"))}</th>
           <th>${esc(L("ලිපිගොනු අංකය", "கோப்பு எண்", "File number"))}</th>
           <th>${esc(L("තත්ත්වය", "நிலை", "Status"))}</th>
         </tr></thead>
-        <tbody>${rows || `<tr><td colspan="5">${esc(L("මාස 3ක් ඇතුළත ඉවර වූ පුහුණු වැඩසටහන් නොමැත.", "3 மாதத்துக்குள் முடிந்த பயிற்சி இல்லை.", "No programmes finished within the last 3 months."))}</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="5">${esc(L("ක්‍රියාකාරී හෝ මාසයක් ඇතුළත ඉවර වූ පුහුණු වැඩසටහන් නොමැත.", "செயலில் அல்லது ஒரு மாதத்துக்குள் முடிந்த பயிற்சி இல்லை.", "No active programmes or programmes finished within the last month."))}</td></tr>`}</tbody>
       </table>`;
     return;
   }
@@ -3691,15 +3941,22 @@ function websiteProgrammeList(programmes) {
   </table>`;
 }
 
-function geminiBox(gemini) {
-  const email = gemini?.email || "";
-  const password = gemini?.password || "";
-  return `<div class="gemini-box">
-    <p>${esc(L("අලුත් මොඩියුලයක් ඕන නම් මෙම ඊමේල් එකෙන් Gemini එකට ඇතුළු වෙලා හදන්න. හදලා මෙතන දිනයකට පිටුවක් විදිහට දාලා සුරකින්න.", "புதிய தொகுதி வேண்டுமானால் இந்த மின்னஞ்சலில் Gemini இல் நுழைந்து உருவாக்கவும். பின்னர் இங்கே ஒரு நாளுக்கு ஒரு பக்கமாக சேமிக்கவும்.", "When a new module is needed, sign in to Gemini with this email and create it. Then save it here as one page for each day."))}</p>
-    <label class="classic-field"><span>${esc(L("ඊමේල්", "மின்னஞ்சல்", "Email"))}</span><input readonly value="${esc(email)}"></label>
-    <label class="classic-field"><span>${esc(L("මුරපදය", "கடவுச்சொல்", "Password"))}</span><input readonly value="${esc(password)}"></label>
-    <p><a class="btn" href="https://gemini.google.com/" target="_blank" rel="noopener">${esc(L("Gemini අරින්න", "Gemini திற", "Open Gemini"))}</a></p>
-  </div>`;
+function geminiKeyBox(ready) {
+  const admin = state.user?.role === "Administrator";
+  if (!admin) {
+    return ready
+      ? ""
+      : `<p class="pad-note">${esc(L("Gemini යතුර Admin විසින් සුරකිය යුතුයි. සුරැකුණු පසු ඔබටත් Gemini එකෙන් ගන්න පුළුවන්.", "Gemini திறவுகோலை Admin சேமிக்க வேண்டும். சேமித்த பின் நீங்களும் Gemini இலிருந்து பெறலாம்.", "An Admin must save the Gemini key. After it is saved, you can also get content from Gemini."))}</p>`;
+  }
+  return `<div id="gemini-key-box"${ready ? " hidden" : ""}>
+      <form class="classic-form" id="gemini-key-form">
+        <label class="classic-field"><span>${esc(L("Gemini API යතුර", "Gemini API திறவுகோல்", "Gemini API key"))}</span><input name="key" type="password" autocomplete="off" required></label>
+        <button type="submit">${esc(L("යතුර සුරකින්න", "திறவுகோலைச் சேமி", "Save the key"))}</button>
+        <div id="form-msg"></div>
+      </form>
+      <p class="pad-note">${esc(L("Google AI Studio එකෙන් යතුර අරගෙන එක පාරක් දාන්න. ඊට පස්සේ මොඩියුලය සහ පෙර/පසු ඇගයීම Gemini එකෙන් හැදෙනවා. යතුර වෙනස් කරන්න පුළුවන් Admin ට පමණයි.", "Google AI Studio இலிருந்து திறவுகோலை எடுத்து ஒரு முறை இடுங்கள். பின்னர் தொகுதியும் முன்/பின் மதிப்பீடும் Gemini இல் உருவாகும். திறவுகோலை மாற்ற Admin மட்டுமே முடியும்.", "Save a key from Google AI Studio once. After that, the module and the pre/post evaluation are made with Gemini. Only an Admin can change the key."))}</p>
+    </div>
+    ${ready ? `<p><button type="button" class="secondary" data-act="gemini-key-show">${esc(L("Gemini යතුර වෙනස් කරන්න", "Gemini திறவுகோலை மாற்று", "Change the Gemini key"))}</button></p>` : ""}`;
 }
 
 function sheetDate(value) {
@@ -3821,10 +4078,10 @@ function lectureBlock(plan) {
 
 function sheetSessionRow(row) {
   return `<tr class="sheet-row">
-    <td><input name="sessTime" value="${esc(row.time || "")}"></td>
-    <td><input name="sessName" value="${esc(row.session || "")}"></td>
-    <td class="lecturer-col"><input name="sessLecturer" value="${esc(row.lecturer || "")}"></td>
-    <td><textarea name="sessPoints">${esc(row.points || "")}</textarea></td>
+    <td><input name="sessTime" value="${esc(row.time || "")}" autocomplete="off"></td>
+    <td><input name="sessName" value="${esc(row.session || "")}" autocomplete="off"></td>
+    <td><textarea name="sessPoints" rows="3">${esc(row.points || "")}</textarea></td>
+    <td class="lecturer-col"><input name="sessLecturer" value="${esc(row.lecturer || "")}" autocomplete="off"></td>
     <td class="sheet-act"><button type="button" data-act="sheet-drop">${esc(L("ඉවත්", "நீக்கு", "Remove"))}</button></td>
   </tr>`;
 }
@@ -3846,6 +4103,21 @@ function namedPost(post, name) {
   const role = String(post || "").trim();
   const who = String(name || "").trim();
   if (role && who) return `${role} ${who}`;
+  return who || role;
+}
+
+function MODULE_SUPERVISOR_POST() {
+  return "සහකාර ප්‍රධාන ලේකම්";
+}
+
+function MODULE_LIAISON_POST() {
+  return "සංවර්ධන නිලධාරි";
+}
+
+function namedPersonRole(name, post) {
+  const who = String(name || "").trim();
+  const role = String(post || "").trim();
+  if (who && role) return `${who} (${role})`;
   return who || role;
 }
 
@@ -3874,17 +4146,17 @@ function formatDayCard(page, index, total, programme) {
       <thead><tr>
         <th>${esc(L("කාලය", "நேரம்", "Time"))}</th>
         <th>${esc(L("සැසිය", "அமர்வு", "Session"))}</th>
-        <th class="lecturer-col">${esc(L("දේශකයා", "விரிவுரையாளர்", "Lecturer"))}</th>
         <th>${esc(L("විෂය කරුණු සහ ක්‍රියාකාරකම්", "பாடத் தலைப்புகள் மற்றும் செயற்பாடுகள்", "Topics and activities"))}</th>
+        <th class="lecturer-col">${esc(L("දේශකයා", "விரிவுரையாளர்", "Lecturer"))}</th>
         <th></th>
       </tr></thead>
       <tbody>${sessions.map((row) => sheetSessionRow(row)).join("")}</tbody>
     </table>
     <p><button type="button" data-act="sheet-add">${esc(L("තව සැසියක්", "மேலும் ஒரு அமர்வு", "Add a session"))}</button></p>
     <ul class="sheet-foot">
-      <li>${esc(L("සමායෝජන සම්බන්ධීකරණය", "ஒருங்கிணைப்பு", "Coordination"))}: ${esc(namedPost(programme.coordinatorPost, programme.coordinator))}</li>
-      <li>${esc(L("සම්පත්දායක අධීක්ෂණය", "வளநபர் மேற்பார்வை", "Resource-person supervision"))}: ${esc(namedPost(programme.supervisorPost, programme.supervisor))}</li>
-      <li>${esc(L("සම්බන්ධීකරණය", "இணைப்பு", "Coordination"))}: ${esc(namedPost(liaison.post, liaison.name))}</li>
+      <li>${esc(L("සමායෝජන", "ஒருங்கிணைப்பு", "Coordination"))}: ${esc(namedPersonRole(programme.coordinator, programme.coordinatorPost))}</li>
+      <li>${esc(L("අධීක්ෂණය", "மேற்பார்வை", "Supervision"))}: ${esc(namedPersonRole(programme.supervisor, programme.supervisorPost || MODULE_SUPERVISOR_POST()))}</li>
+      <li>${esc(L("සම්බන්ධීකරණය", "இணைப்பு", "Liaison"))}: ${esc(namedPersonRole(liaison.name, liaison.post || MODULE_LIAISON_POST()))}</li>
     </ul>
     <p class="pad-note">${esc(L("පිටුව ", "பக்கம் ", "Page "))}${index + 1} / ${total}</p>
   </section>`;
@@ -3923,7 +4195,7 @@ function renderModuleFormat(work, list, current) {
     dates: (programme.dates && programme.dates.length ? programme.dates : sheet.dates) || [],
     liaison: programme.liaison || sheet.liaison || {},
     supervisor: programme.supervisor || sheet.supervisor || "",
-    supervisorPost: programme.supervisorPost || sheet.supervisorPost || "",
+    supervisorPost: MODULE_SUPERVISOR_POST(),
     coordinatorPost,
     people: programme.people || sheet.people || [],
     lecturers: programme.lecturers || sheet.lecturers || [],
@@ -3933,22 +4205,13 @@ function renderModuleFormat(work, list, current) {
   };
   const peopleJson = JSON.stringify(paper.people || []);
   const geminiReady = !!list.geminiReady;
-  const geminiKeyBox = `<div id="gemini-key-box"${geminiReady ? " hidden" : ""}>
-      <form class="classic-form" id="gemini-key-form">
-        <label class="classic-field"><span>${esc(L("Gemini API යතුර", "Gemini API திறவுகோல்", "Gemini API key"))}</span><input name="key" type="password" autocomplete="off" required></label>
-        <button type="submit">${esc(L("යතුර සුරකින්න", "திறவுகோலைச் சேமி", "Save the key"))}</button>
-        <div id="form-msg"></div>
-      </form>
-      <p class="pad-note">${esc(L("Google AI Studio එකෙන් යතුර අරගෙන එක පාරක් දාන්න. ඊට පස්සේ මාතෘකාවෙන් හෝ තියෙන මොඩියුලයකින් මේ ආකෘතිය හැදෙනවා.", "Google AI Studio இலிருந்து திறவுகோலை எடுத்து ஒரு முறை இடுங்கள். பின்னர் தலைப்பிலிருந்தோ உள்ள தொகுதியிலிருந்தோ இந்தப் படிவம் உருவாகும்.", "Take a key from Google AI Studio and save it once. After that, a topic or an existing module fills this form."))}</p>
-    </div>
-    ${geminiReady ? `<p><button type="button" class="secondary" data-act="gemini-key-show">${esc(L("Gemini යතුර වෙනස් කරන්න", "Gemini திறவுகோலை மாற்று", "Change the Gemini key"))}</button></p>` : ""}`;
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("මොඩියුලර් සැකසීම", "மட்டு அமைப்பு", "Modular setup"))}</h2>
-    <p class="pad-note">${esc(L("පුහුණුව තෝරලා මාතෘකාව දාලා Gemini එකෙන් ගන්න, නැත්නම් තියෙන මොඩියුලය උඩුගත කරන්න. එන දේවල් මේ ආකෘතියේ දින පිටුවලට වැටෙනවා.", "பயிற்சியைத் தேர்ந்தெடுத்து தலைப்பை இட்டு Gemini இலிருந்து பெறுங்கள், அல்லது உள்ள தொகுதியைப் பதிவேற்றுங்கள். வரும் உள்ளடக்கம் இந்தப் படிவத்தின் நாள் பக்கங்களில் அமையும்.", "Choose the programme, enter a topic and get it from Gemini, or upload an existing module. The contents land on these day pages."))}</p>
-    ${geminiKeyBox}
+    <p class="pad-note">${esc(L("මෙතන පෙනෙන්නේ තවම ආරම්භ නොවූ පුහුණු වැඩසටහන් පමණයි. පුහුණුව තෝරලා මාතෘකාව දාලා Gemini එකෙන් ගන්න, නැත්නම් තියෙන මොඩියුලය උඩුගත කරන්න. එන දේවල් මේ ආකෘතියේ දින පිටුවලට වැටෙනවා.", "இங்கே இன்னும் தொடங்காத பயிற்சிகள் மட்டும் தெரியும். பயிற்சியைத் தேர்ந்தெடுத்து தலைப்பை இட்டு Gemini இலிருந்து பெறுங்கள், அல்லது உள்ள தொகுதியைப் பதிவேற்றுங்கள். வரும் உள்ளடக்கம் இந்தப் படிவத்தின் நாள் பக்கங்களில் அமையும்.", "Only programmes that have not started yet appear here. Choose the programme, enter a topic and get it from Gemini, or upload an existing module. The contents land on these day pages."))}</p>
+    ${geminiKeyBox(geminiReady)}
     <label class="classic-field"><span>${esc(L("සොයන්න", "தேடு", "Search"))}</span><input id="format-find" placeholder="${esc(L("අකුරක් හෝ වචනයක්", "ஒரு எழுத்து அல்லது சொல்", "A letter or a word"))}"></label>
     <div id="format-hits" class="format-hits"></div>
-    ${title ? `<form class="classic-form module-sheet" id="module-format-form">
+    ${title ? `<form class="classic-form module-sheet" id="module-format-form" method="post" action="#" onsubmit="return false">
       <input type="hidden" name="id" value="${esc(current.id || "")}">
       <input type="hidden" name="atp" value="${esc(programme.id || current.atp || atp)}">
       <input type="hidden" name="title" value="${esc(title)}">
@@ -3957,7 +4220,7 @@ function renderModuleFormat(work, list, current) {
       <input type="hidden" name="coordinator" value="${esc(paper.coordinator)}">
       <input type="hidden" name="coordinatorPost" value="${esc(paper.coordinatorPost || "")}">
       <input type="hidden" name="supervisor" value="${esc(paper.supervisor)}">
-      <input type="hidden" name="supervisorPost" value="${esc(paper.supervisorPost || "")}">
+      <input type="hidden" name="supervisorPost" value="${esc(MODULE_SUPERVISOR_POST())}">
       <input type="hidden" name="liaisonName" value="${esc(paper.liaison.name || "")}">
       <input type="hidden" name="liaisonPost" value="${esc(paper.liaison.post || "")}">
       <input type="hidden" name="liaisonOffice" value="${esc(paper.liaison.office || "")}">
@@ -3971,6 +4234,7 @@ function renderModuleFormat(work, list, current) {
         <button type="button" data-act="module-gemini">${esc(L("Gemini එකෙන් ගන්න", "Gemini இலிருந்து பெறு", "Get it from Gemini"))}</button>
         <span id="module-source-name"></span>
       </div>
+      <p class="pad-note">${esc(L("Gemini එකෙන් ආවාට පස්සේ කාලය, සැසිය, දේශකයා සහ විෂය කරුණු මෙතනින් වෙනස් කරලා සුරකින්න පුළුවන්.", "Gemini இலிருந்து வந்த பின் நேரம், அமர்வு, விரிவுரையாளர் மற்றும் பாடத் தலைப்புகளை இங்கே திருத்திச் சேமிக்கலாம்.", "After Gemini fills the module, you can edit the time, session, lecturer and topics here, then save."))}</p>
       ${pages.map((page, index) => formatDayCard(page, index, pages.length, paper)).join("")}
       <button type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
       <button type="button" data-act="format-pdf">${esc(L("PDF එක ගන්න", "PDF எடு", "Save PDF"))}</button>
@@ -4057,11 +4321,12 @@ async function renderEvaluation(work) {
       <label class="classic-field"><span>${esc(L("පුහුණුව සොයන්න", "பயிற்சியைத் தேடு", "Find a programme"))}</span><input name="find" placeholder="${esc(L("පුහුණුවේ නම", "பயிற்சியின் பெயர்", "Programme name"))}"></label>
       <label class="classic-field"><span>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</span><select name="atp" size="6">${options}</select></label>
     </form>
-    ${atp ? `${geminiBox(data.gemini)}
-      <p class="pad-note">${esc(L("Gemini එකෙන් ප්‍රශ්න 10ක් හදාගන්න. එක එකට උත්තර 4යි. නිවැරදි උත්තරය සලකුණු කරන්න. එකම පුහුණුව ඊළඟ වතාවේ නම් පරණ ප්‍රශ්න ගේන්න පුළුවන්. පෙර ඇගයීම පුහුණුව පටන් ගන්න දවසේ. පසු ඇගයීම පුහුණුව ඉවර වූ පසු. සබැඳිය පුහුණු ලාභීන්ට දෙන්න.", "Gemini இல் 10 கேள்விகளை உருவாக்கவும். ஒவ்வொன்றுக்கும் 4 விடை. சரியான விடையைக் குறிக்கவும். அதே பயிற்சி மறுபடியும் நடந்தால் பழைய கேள்விகளைக் கொண்டுவரலாம். முன் மதிப்பீடு பயிற்சி தொடங்கும் நாளில். பின் மதிப்பீடு பயிற்சி முடிந்த பின். இணைப்பைப் பயிலுநர்களுக்குக் கொடுங்கள்.", "Make 10 questions in Gemini. Each has 4 answers. Mark the correct one. If the same programme is held again, the old questions can be brought in. Pre-evaluation is on the day the programme starts. Post-evaluation is after it ends. Give the link to the trainees."))}</p>
+    ${atp ? `${geminiKeyBox(!!data.geminiReady)}
+      <p class="pad-note">${esc(L("මෙතන පෙනෙන්නේ පුහුණුව අවසන් වී සතියක් ඇතුළත තියෙන වැඩසටහන්. Gemini එකෙන් ප්‍රශ්න 10ක් උත්තර සමඟ එනවා. බලලා සුරකින්න. පරණ සුරැකි ප්‍රශ්න අවුරුදු ගණනකට පසුවත් ගත හැකියි. පෙර ඇගයීම පුහුණුව පටන් ගන්න දවසේ. පසු ඇගයීම පුහුණුව ඉවර වූ පසු. සබැඳිය පුහුණු ලාභීන්ට දෙන්න.", "இங்கே பயிற்சி முடிந்து ஒரு வாரத்துக்குள் உள்ளவை தெரியும். Gemini இல் 10 கேள்விகளும் விடைகளும் வரும். பார்த்துச் சேமிக்கவும். பழைய சேமித்த கேள்விகளைப் பல ஆண்டுகளுக்குப் பிறகும் கொண்டுவரலாம். முன் மதிப்பீடு பயிற்சி தொடங்கும் நாளில். பின் மதிப்பீடு பயிற்சி முடிந்த பின். இணைப்பைப் பயிலுநர்களுக்குக் கொடுங்கள்.", "Programmes stay listed for one week after they end. Gemini brings 10 questions with answers. Review and save. Saved questions can be brought in even after many years. Pre-evaluation is on the start day. Post-evaluation is after it ends. Give the link to the trainees."))}</p>
       <form class="classic-form module-sheet" id="eval-form">
         <input type="hidden" name="atp" value="${esc(atp)}">
-        <p class="pad-note">${esc(L("කලින් හදපු ඒ පුහුණුව මෙතනින් තෝරලා ප්‍රශ්න ගේන්න ඔබන්න. ප්‍රශ්න 10ම මේ අලුත් පුහුණුවට එනවා. ඊට පස්සේ සුරකින්න.", "முன்பு உருவாக்கிய அதே பயிற்சியை இங்கே தேர்ந்தெடுத்து கேள்விகளைக் கொண்டுவரவும். 10 கேள்விகளும் இந்தப் புதிய பயிற்சிக்கு வரும். பின்னர் சேமிக்கவும்.", "Choose the earlier programme here and bring the questions. All 10 come into this new programme. Then save."))}</p>
+        <button type="button" data-act="eval-gemini">${esc(L("Gemini එකෙන් ප්‍රශ්න හදන්න", "Gemini இல் கேள்விகளை உருவாக்கு", "Make the questions with Gemini"))}</button>
+        <p class="pad-note">${esc(L("කලින් සුරකපු ඕනෑම අවුරුදු පුහුණුවක ප්‍රශ්න මෙතනින් තෝරලා ගේන්න. ප්‍රශ්න 10ම මේ අලුත් පුහුණුවට එනවා. ඊට පස්සේ සුරකින්න.", "முன்பு சேமித்த எந்த ஆண்டுப் பயிற்சியின் கேள்விகளையும் இங்கே தேர்ந்தெடுத்துக் கொண்டு வாருங்கள். 10 கேள்விகளும் இந்தப் புதிய பயிற்சிக்கு வரும். பின்னர் சேமிக்கவும்.", "Pick saved questions from any earlier year here. All 10 come into this new programme. Then save."))}</p>
         <label class="classic-field"><span>${esc(L("පරණ පුහුණුවක ප්‍රශ්න", "பழைய பயிற்சிக் கேள்விகள்", "Questions from an earlier programme"))}</span><select id="eval-import"><option value="">${esc(L("තෝරන්න", "தேர்வு", "Choose"))}</option>${importOptions}</select></label>
         <button type="button" data-act="eval-import">${esc(L("ප්‍රශ්න ගේන්න", "கேள்விகளைக் கொண்டுவா", "Bring the questions"))}</button>
         <div id="eval-questions">${evalQuestionsHtml(data.eval?.questions || [])}</div>
@@ -4160,7 +4425,7 @@ function drawSplitPage(sheet, officerName, year) {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, page.width, page.height);
     ctx.fillStyle = "#111";
-    const margin = 72;
+    const margin = reportMargin();
     const width = page.width - margin * 2;
     let y = margin + size;
     const write = (text, weight, px, gap) => {
@@ -4202,7 +4467,7 @@ function drawSplitPage(sheet, officerName, year) {
     extras.forEach(([label, key]) => {
       if ((sheet[key] || []).length) block(`${label} · දින ${sheet.days?.[key] || "0"}`, sheet[key], false);
     });
-    if (y < page.height - 48) return page;
+    if (y < page.height - margin) return page;
   }
   return page;
 }
@@ -4450,16 +4715,14 @@ async function paceDownload(pages, filename, wide) {
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = "#0c4da2";
-    ctx.fillRect(0, 0, width, 16);
-    let y = 72;
-    const margin = 64;
+    let y = reportMargin();
+    const margin = reportMargin();
     const textWidth = page.slices?.length ? width * 0.56 : width - margin * 2;
     const write = (text, weight, size, color) => {
       ctx.fillStyle = color || "#1b1b1b";
       ctx.font = `${weight} ${size}px ${font}`;
       paceWrap(ctx, text, textWidth).forEach((line) => {
-        if (y > height - 48) return;
+        if (y > height - margin) return;
         ctx.fillText(line, margin, y);
         y += size + 8;
       });
@@ -4472,7 +4735,7 @@ async function paceDownload(pages, filename, wide) {
       pie.width = 680;
       pie.height = 340;
       paintPieCanvas(pie, page.slices);
-      ctx.drawImage(pie, width - 720, 90, 680, 340);
+      ctx.drawImage(pie, Math.max(margin, width - margin - 680), margin, 680, 340);
     }
     if (page.bars?.labels?.length) {
       const bar = document.createElement("canvas");
@@ -4792,6 +5055,61 @@ function progressTable(categories, rows, items, hideEmpty) {
       <th>ලාභීන්</th><th>පැමිණි</th><th>ලාභී ප්‍රගතිය</th>
     </tr></thead><tbody>${body}</tbody></table></div>`;
 }
+function backupBytes(n) {
+  const value = Number(n) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function backupDownloadUrl(stamp, kind) {
+  return `api.php?action=backup-download&stamp=${encodeURIComponent(stamp)}&kind=${encodeURIComponent(kind)}`;
+}
+
+async function renderBackup(work) {
+  if (state.user?.role !== "Administrator") {
+    work.innerHTML = `<p class="pad-note">${esc(L("මෙය පරිපාලකට පමණයි.", "நிர்வாகிக்கு மட்டும்.", "Administrators only."))}</p>`;
+    return;
+  }
+  const data = await api("backup-list");
+  const rows = (data.items || []).map((item) => `<tr>
+      <td>${esc(item.stamp)}</td>
+      <td>${esc(showDate(String(item.created || "").slice(0, 10)) || item.created || "")}</td>
+      <td>${esc(showDate(String(item.keepUntil || "").slice(0, 10)) || item.keepUntil || "")}</td>
+      <td>${esc(item.reason || "")}</td>
+      <td>${esc(backupBytes(item.sqlBytes))}</td>
+      <td>${esc(backupBytes(item.jsonBytes))}</td>
+      <td class="wrap-cell">
+        ${item.hasSql ? `<a class="btn secondary" href="${esc(backupDownloadUrl(item.stamp, "sql"))}">SQL</a>` : ""}
+        ${item.hasJson ? `<a class="btn secondary" href="${esc(backupDownloadUrl(item.stamp, "json"))}">JSON</a>` : ""}
+      </td>
+    </tr>`).join("");
+  work.innerHTML = `<h2 class="classic-title">${esc(L("දත්ත සමුදා උපස්ථ", "தரவுத்தள காப்பு", "Database backup"))}</h2>
+    <p class="pad-note">${esc(L("සම්පූර්ණ දත්ත සමුදාය SQL සහ JSON ලෙස උපස්ථ වෙනවා. දත්ත ආරක්ෂාවට මෙය හැමදාම ප.ව. 4:00ට ස්වයංක්‍රීයව හැදෙනවා. කැමති වෙලාවක බාගත කරගන්න පුළුවන්.", "முழு தரவுத்தளம் SQL மற்றும் JSON ஆக காப்பு செய்யப்படும். பாதுகாப்புக்காக ஒவ்வொரு நாளும் மாலை 4:00 மணிக்கு தானாக உருவாகும். விரும்பும் நேரத்தில் பதிவிறக்கலாம்.", "The full database is backed up as SQL and JSON. For safety it is created automatically every day at 4:00 PM. You can download it whenever you want."))}</p>
+    <ul class="pad-note">
+      <li>${esc(data.rules?.daily || "")}</li>
+      <li>${esc(data.rules?.friday || "")}</li>
+      <li>${esc(L("Windows Task Scheduler: දිනපතා 16:00ට", "Windows Task Scheduler: தினசரி 16:00", "Windows Task Scheduler daily at 16:00"))} <code>php backup-cron.php</code></li>
+    </ul>
+    <p class="sheet-tools">
+      <button type="button" class="btn" data-act="backup-run">${esc(L("දැන් උපස්ථ කරන්න", "இப்போது காப்பு செய்", "Backup now"))}</button>
+      <button type="button" class="btn secondary" data-act="backup-refresh">${esc(L("නැවත පූරණය", "மீண்டும் ஏற்று", "Refresh"))}</button>
+    </p>
+    <div id="form-msg"></div>
+    <div class="table-wrap"><table class="progress-table">
+      <thead><tr>
+        <th>${esc(L("දිනය", "திகதி", "Date"))}</th>
+        <th>${esc(L("හැදුණු වේලාව", "உருவான நேரம்", "Created"))}</th>
+        <th>${esc(L("තබාගන්නා තෙක්", "வைத்திருக்கும் வரை", "Keep until"))}</th>
+        <th>${esc(L("වර්ගය", "வகை", "Kind"))}</th>
+        <th>SQL</th>
+        <th>JSON</th>
+        <th>${esc(L("බාගත කරන්න", "பதிவிறக்கம்", "Download"))}</th>
+      </tr></thead>
+      <tbody>${rows || `<tr><td colspan="7">${esc(L("තවම උපස්ථ නැත. «දැන් උපස්ථ කරන්න» ඔබන්න හෝ ප.ව. 4:00ට පස්සේ පද්ධතියට ඇතුළු වෙන්න.", "இன்னும் காப்பு இல்லை.", "No backups yet. Press Backup now, or open the system after 4:00 PM."))}</td></tr>`}</tbody>
+    </table></div>`;
+}
+
 async function renderPerson(work) {
   const year = state.query.get("year") || chosenYear();
   const tab = state.query.get("tab") === "detail" ? "detail" : "summary";
@@ -4887,9 +5205,21 @@ async function renderPerson(work) {
   }).join("");
   const yearOptions = yearChoices().map((value) => `<option value="${esc(value)}"${value === String(year) ? " selected" : ""}>${esc(value)}</option>`).join("");
   const people = officers.map((officer, index) => officerCard(officer, tab === "detail", index + 1)).join("") || `<p class="muted">නිලධාරීන් නැත.</p>`;
+  const matrixFrom = state.query.get("from") || `${year}-10-01`;
+  const matrixUntil = state.query.get("until") || `${year}-12-31`;
   work.innerHTML = `<h2 class="classic-title">එක් පුද්ගල වාර්තා</h2>
     <p class="pad-note">නිලධාරීන්ගේ ගණන්වලට මත්ද්‍රව්‍ය නිවාරණ හා උපදේශන පුහුණු සහ දෙමළ භාෂා පුහුණු ඇතුළත් නැහැ. ඒවා යට වෙනම වගු වල.</p>
     <form class="sheet-tools"><label>වර්ෂය <select id="person-year">${yearOptions}</select></label></form>
+    <section class="person-matrix-box">
+      <h3>සම්බන්ධීකරණ නිලධාරීන් අනුව අපේක්ෂිත පුහුණු</h3>
+      <p class="pad-note">දින පරාසය තෝරලා PDF ගන්න. ID අංකය තිබේ නම් ඒකෙන් සම්බන්ධීකරණ නිලධාරියා හොයාගෙන නම පෙන්වනවා. ID නැති වැඩසටහන් වෙනම පේළියක (ID නැත) පෙනෙනවා.</p>
+      <form class="sheet-tools" id="person-matrix-form">
+        <label>සිට <input type="date" id="person-from" value="${esc(matrixFrom)}"></label>
+        <label>දක්වා <input type="date" id="person-until" value="${esc(matrixUntil)}"></label>
+        <button type="button" class="btn" data-act="person-matrix-pdf">PDF පෙන්වන්න / බාගත කරන්න</button>
+      </form>
+      <div id="person-matrix-preview" class="table-wrap"></div>
+    </section>
     <p class="progress-tabs">
       <button type="button" class="btn${tab === "summary" ? "" : " secondary"}" data-act="person-tab" data-tab="summary">සාරාංශ ප්‍රගති වාර්තාව</button>
       <button type="button" class="btn${tab === "detail" ? "" : " secondary"}" data-act="person-tab" data-tab="detail">විස්තරාත්මක ප්‍රගති වාර්තාව</button>
@@ -4905,7 +5235,155 @@ async function renderPerson(work) {
     ${asideSection("drug")}
     ${asideSection("tamil")}`;
   paintPacePies(work);
+  loadPersonMatrixPreview().catch(() => {});
 }
+
+function personMatrixMoney(value) {
+  const n = advanceNumber(value);
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function personMatrixHtml(data) {
+  const categories = data.categories || [];
+  const officers = data.officers || [];
+  const head = categories.map((category) => `<th colspan="2">${esc(category.label)}</th>`).join("");
+  const sub = categories.map(() => `<th>සංඛ්‍යාව</th><th>වටිනාකම</th>`).join("");
+  const body = officers.map((officer) => {
+    const cells = categories.map((category) => {
+      const cell = officer.cells?.[category.id] || {};
+      return `<td class="num">${esc(cell.count || 0)}</td><td class="num">${esc(personMatrixMoney(cell.value))}</td>`;
+    }).join("");
+    return `<tr><td class="wrap-cell">${esc(officer.name || officer.short || "")}</td>${cells}<td class="num">${esc(officer.count || 0)}</td><td class="num">${esc(personMatrixMoney(officer.estimate))}</td></tr>`;
+  }).join("");
+  const foot = categories.map((category) => {
+    const cell = data.totals?.[category.id] || {};
+    return `<td class="num">${esc(cell.count || 0)}</td><td class="num">${esc(personMatrixMoney(cell.value))}</td>`;
+  }).join("");
+  return `<table class="person-matrix-table">
+    <thead>
+      <tr><th rowspan="2">සම්බන්ධීකරණ නිලධාරියාගේ නම</th>${head}<th colspan="2">එකතුව</th></tr>
+      <tr>${sub}<th>සංඛ්‍යාව</th><th>වටිනාකම</th></tr>
+    </thead>
+    <tbody>${body || `<tr><td colspan="${categories.length * 2 + 3}">මේ දින පරාසයේ වැඩසටහන් නැත.</td></tr>`}</tbody>
+    <tfoot><tr><td>එකතුව</td>${foot}<td class="num">${esc(data.countTotal || 0)}</td><td class="num">${esc(personMatrixMoney(data.estimateTotal))}</td></tr></tfoot>
+  </table>
+  <table class="person-matrix-summary">
+    <tr><td>ඇස්තමේන්තු මුදල - (${esc(data.monthLabel || "")})</td><td class="num">${esc(personMatrixMoney(data.estimateTotal))}</td></tr>
+    <tr><td>${esc(data.spentLabel || "වියදම")}</td><td class="num">${esc(personMatrixMoney(data.spentTotal))}</td></tr>
+    <tr><td>සම්පූර්ණ කර ගත යුතු මුදල</td><td class="num">${esc(personMatrixMoney(data.remaining))}</td></tr>
+  </table>`;
+}
+
+async function loadPersonMatrixPreview() {
+  const year = document.querySelector("#person-year")?.value || chosenYear();
+  const from = document.querySelector("#person-from")?.value || `${year}-10-01`;
+  const until = document.querySelector("#person-until")?.value || `${year}-12-31`;
+  const slot = document.querySelector("#person-matrix-preview");
+  if (!slot) return;
+  const data = await api("person-matrix", { query: { year, from, until } });
+  state.personMatrix = data;
+  slot.innerHTML = personMatrixHtml(data);
+}
+
+async function savePersonMatrixPdf() {
+  const year = document.querySelector("#person-year")?.value || chosenYear();
+  const from = document.querySelector("#person-from")?.value || `${year}-10-01`;
+  const until = document.querySelector("#person-until")?.value || `${year}-12-31`;
+  const data = await api("person-matrix", { query: { year, from, until } });
+  state.personMatrix = data;
+  const preview = document.querySelector("#person-matrix-preview");
+  if (preview) preview.innerHTML = personMatrixHtml(data);
+  await document.fonts.ready;
+  const categories = data.categories || [];
+  const officers = data.officers || [];
+  const pageW = 1754;
+  const pageH = 1240;
+  const margin = 28;
+  const canvas = document.createElement("canvas");
+  canvas.width = pageW;
+  canvas.height = pageH;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, pageW, pageH);
+  ctx.fillStyle = "#111111";
+  ctx.font = '700 22px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+  ctx.fillText(data.title || "", margin, margin + 22);
+  const colCount = categories.length + 2;
+  const nameW = 150;
+  const rest = pageW - margin * 2 - nameW;
+  const pairW = rest / colCount;
+  const countW = pairW * 0.32;
+  const valueW = pairW * 0.68;
+  const widths = [nameW];
+  for (let i = 0; i < categories.length; i++) widths.push(countW, valueW);
+  widths.push(countW, valueW);
+  const tableLeft = margin;
+  const tableTop = margin + 40;
+  const headerH = 54;
+  const rowH = Math.min(34, Math.max(22, Math.floor((pageH - tableTop - 130 - headerH) / Math.max(officers.length + 1, 1))));
+  const drawCell = (x, y, w, h, text, header, alignRight) => {
+    ctx.strokeStyle = "#222";
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = header ? "#f4f1e8" : "#fff";
+    ctx.fillRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.fillStyle = "#111";
+    ctx.font = `${header ? 700 : 400} 11px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+    let shown = String(text ?? "");
+    const max = w - 8;
+    while (shown.length > 1 && ctx.measureText(shown).width > max) shown = shown.slice(0, -1);
+    if (shown !== String(text ?? "")) shown = `${shown.slice(0, -1)}…`;
+    const tx = alignRight ? x + w - 4 - ctx.measureText(shown).width : x + 4;
+    ctx.fillText(shown, tx, y + Math.floor(h * 0.68));
+  };
+  // top header spanning pairs
+  let x = tableLeft;
+  drawCell(x, tableTop, nameW, headerH, "සම්බන්ධීකරණ නිලධාරියාගේ නම", true, false);
+  x += nameW;
+  categories.forEach((category) => {
+    drawCell(x, tableTop, countW + valueW, headerH / 2, category.label, true, false);
+    drawCell(x, tableTop + headerH / 2, countW, headerH / 2, "සංඛ්‍යාව", true, false);
+    drawCell(x + countW, tableTop + headerH / 2, valueW, headerH / 2, "වටිනාකම", true, false);
+    x += countW + valueW;
+  });
+  drawCell(x, tableTop, countW + valueW, headerH / 2, "එකතුව", true, false);
+  drawCell(x, tableTop + headerH / 2, countW, headerH / 2, "සංඛ්‍යාව", true, false);
+  drawCell(x + countW, tableTop + headerH / 2, valueW, headerH / 2, "වටිනාකම", true, false);
+  let y = tableTop + headerH;
+  const paintRow = (label, cells, totalCount, totalValue, header) => {
+    let cx = tableLeft;
+    drawCell(cx, y, nameW, rowH, label, header, false);
+    cx += nameW;
+    categories.forEach((category) => {
+      const cell = cells?.[category.id] || {};
+      drawCell(cx, y, countW, rowH, cell.count || 0, header, true);
+      cx += countW;
+      drawCell(cx, y, valueW, rowH, personMatrixMoney(cell.value), header, true);
+      cx += valueW;
+    });
+    drawCell(cx, y, countW, rowH, totalCount || 0, header, true);
+    cx += countW;
+    drawCell(cx, y, valueW, rowH, personMatrixMoney(totalValue), header, true);
+    y += rowH;
+  };
+  officers.forEach((officer) => paintRow(officer.name || officer.short, officer.cells, officer.count, officer.estimate, false));
+  paintRow("එකතුව", data.totals, data.countTotal, data.estimateTotal, true);
+  y += 16;
+  const summaryW = 720;
+  const summaryRows = [
+    [`ඇස්තමේන්තු මුදල - (${data.monthLabel || ""})`, personMatrixMoney(data.estimateTotal)],
+    [data.spentLabel || "වියදම", personMatrixMoney(data.spentTotal)],
+    ["සම්පූර්ණ කර ගත යුතු මුදල", personMatrixMoney(data.remaining)],
+  ];
+  summaryRows.forEach(([label, value]) => {
+    drawCell(tableLeft, y, summaryW * 0.72, 28, label, false, false);
+    drawCell(tableLeft + summaryW * 0.72, y, summaryW * 0.28, 28, value, false, true);
+    y += 28;
+  });
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.94));
+  const jpeg = new Uint8Array(await blob.arrayBuffer());
+  saveBlob(jpegPdfPages([{ jpeg, width: pageW, height: pageH }], "841.89", "595.28"), `ekapudgala-matrix-${from}_${until}.pdf`);
+}
+
 async function renderTotal(work) {
   const year = state.query?.get("year") || chosenYear();
   const data = await api("total", { query: { year } });
@@ -5005,9 +5483,14 @@ async function renderMessages(work) {
     <td>${esc(person.mobile || "")}</td>
   </tr>`).join("");
   const preview = data.preview || {};
-  work.innerHTML = `
-    <h2 class="classic-title">${esc(L("පණිවිඩ", "செய்திகள்", "Messages"))}</h2>
-    <p class="pad-note">${esc(L("ඊමේල් යන්නේ ", "மின்னஞ்சல் அனுப்புவது ", "Email is sent from "))}${esc(data.from || "")}${esc(L(" ගෙන්. තෝරාගත් නිලධාරීන්ටයි.", " இலிருந்து. தேர்ந்த அதிகாரிகளுக்கு.", ". It goes to the selected officers."))}</p>
+  const bday = data.birthdaySms || {};
+  const admin = state.user?.role === "Administrator";
+  const bdayNote = data.smsReady
+    ? (Number(bday.sent) > 0
+      ? L(`අද උපන්දින SMS ගියා ${bday.sent} කෙනෙකුට.`, `இன்று பிறந்தநாள் SMS ${bday.sent} பேருக்கு அனுப்பப்பட்டது.`, `Birthday SMS sent to ${bday.sent} people today.`)
+      : L("අද උපන්දින අයට SMS ස්වයංක්‍රීයව යයි (තවම නොගිය අයට).", "இன்றைய பிறந்தநாள் SMS தானாக அனுப்பப்படும்.", "Birthday SMS goes out automatically to people not yet sent today."))
+    : L("උපන්දින SMS සඳහා Admin විසින් SMS සැකසුම් සුරකිය යුතුයි.", "பிறந்தநாள் SMSக்கு Admin SMS அமைப்புகளைச் சேமிக்க வேண்டும்.", "An Admin must save the SMS settings for birthday SMS.");
+  const settingsHtml = admin ? `
     <form class="classic-form" id="gmail-app-form">
       <h2 class="classic-title">${esc(L("Gmail යවන මුරපදය", "Gmail அனுப்பும் கடவுச்சொல்", "Gmail sending password"))}</h2>
       <p class="pad-note">${data.gmailApp
@@ -5021,6 +5504,24 @@ async function renderMessages(work) {
       <button type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
       <div id="form-msg"></div>
     </form>
+    <form class="classic-form" id="sms-settings-form">
+      <h2 class="classic-title">${esc(L("Bulk SMS සැකසුම්", "Bulk SMS அமைப்புகள்", "Bulk SMS settings"))}</h2>
+      <p class="pad-note">${esc(L("Text.lk වගේ SMS API ටෝකනය සහ Sender ID දාන්න. තෝරාගත් නිලධාරීන්ට bulk SMS යවන්න පුළුවන්. උපන්දින පණිවිඩයත් මෙතනින් සංස්කරණය කරන්න.", "Text.lk போன்ற SMS API டோக்கனும் Sender IDயும் இடவும். தேர்ந்த அதிகாரிகளுக்கு bulk SMS அனுப்பலாம். பிறந்தநாள் செய்தியையும் இங்கே திருத்தவும்.", "Enter an SMS API token and sender ID (for example Text.lk). You can send bulk SMS to selected officers. Edit the birthday message here too."))}</p>
+      <label class="classic-field"><span>${esc(L("SMS API ටෝකනය", "SMS API டோக்கன்", "SMS API token"))}</span><input name="token" type="password" autocomplete="off" placeholder="${data.smsTokenSet ? esc(L("සුරැකිලා තියෙනවා — වෙනස් කරන්න නම් අලුත් එක දාන්න", "சேமிக்கப்பட்டுள்ளது — மாற்ற புதியதை இடவும்", "Saved — enter a new one to change")) : ""}"></label>
+      <label class="classic-field"><span>${esc(L("Sender ID", "Sender ID", "Sender ID"))}</span><input name="sender" value="${esc(data.smsSender || "")}" placeholder="MDTU"></label>
+      <label class="classic-field"><span>${esc(L("API URL", "API URL", "API URL"))}</span><input name="url" value="${esc(data.smsUrl || "https://app.text.lk/api/v3/sms/send")}"></label>
+      <label class="classic-field"><span>${esc(L("උපන්දින SMS පණිවිඩය", "பிறந்தநாள் SMS செய்தி", "Birthday SMS message"))}</span><textarea name="birthdayMsg" rows="4">${esc(data.birthdayMsg || "")}</textarea></label>
+      <p class="pad-note">${esc(L("{name} යන තැනට නිලධාරියාගේ නම යනවා. සුරැකූ පණිවිඩය අද උපන්දින අයට ස්වයංක්‍රීයව යයි.", "{name} இடத்தில் அதிகாரி பெயர் வரும். சேமித்த செய்தி இன்றைய பிறந்தநாள் உள்ளவர்களுக்குத் தானாக அனுப்பப்படும்.", "{name} becomes the officer's name. The saved message is sent automatically to today's birthdays."))}</p>
+      <p class="pad-note">${esc(bdayNote)}</p>
+      <button type="submit">${esc(L("SMS සැකසුම් සුරකින්න", "SMS அமைப்புகளைச் சேமி", "Save SMS settings"))}</button>
+      <div id="sms-msg"></div>
+    </form>` : `<p class="pad-note">${esc(L("Gmail / SMS සැකසුම් වෙනස් කරන්න පුළුවන් Admin ට පමණයි. Admin සුරැකූ පසු ඔබට ඊමේල් සහ SMS යවන්න පුළුවන්.", "Gmail / SMS அமைப்புகளை மாற்ற Admin மட்டுமே முடியும். Admin சேமித்த பின் நீங்கள் மின்னஞ்சலும் SMSம் அனுப்பலாம்.", "Only an Admin can change Gmail / SMS settings. After an Admin saves them, you can send email and SMS."))}</p>
+      <p class="pad-note">${esc(bdayNote)}</p>
+      <p class="pad-note">${esc(data.gmailApp ? L("Gmail App password සුරැකිලා තියෙනවා.", "Gmail App password சேமிக்கப்பட்டுள்ளது.", "The Gmail app password is saved.") : L("Gmail App password තවම සුරකිලා නැත.", "Gmail App password இன்னும் சேமிக்கப்படவில்லை.", "The Gmail app password is not saved yet."))}${esc(data.smsReady ? L(" SMS සැකසුම් සුරැකිලා තියෙනවා.", " SMS அமைப்புகள் சேமிக்கப்பட்டுள்ளன.", " SMS settings are saved.") : L(" SMS සැකසුම් තවම සුරකිලා නැත.", " SMS அமைப்புகள் இன்னும் சேமிக்கப்படவில்லை.", " SMS settings are not saved yet."))}</p>`;
+  work.innerHTML = `
+    <h2 class="classic-title">${esc(L("පණිවිඩ", "செய்திகள்", "Messages"))}</h2>
+    <p class="pad-note">${esc(L("ඊමේල් යන්නේ ", "மின்னஞ்சல் அனுப்புவது ", "Email is sent from "))}${esc(data.from || "")}${esc(L(" ගෙන්. තෝරාගත් නිලධාරීන්ටයි.", " இலிருந்து. தேர்ந்த அதிகாரிகளுக்கு.", ". It goes to the selected officers."))}</p>
+    ${settingsHtml}
     <p class="pad-note">${esc(L("WhatsApp Business දුරකථනයෙන් ලොග් වෙන්න පුළුවන්. WhatsApp Web අරින්න. දුරකථනයේ WhatsApp Business ඇප් එකෙන් QR එක ස්කෑන් කරන්න. ඊට පස්සේ යවන්න ඔබන්න. පණිවිඩය ලියලා තියෙනවා. WhatsApp Web එකේ යවන්න ඔබන්න.", "WhatsApp Business தொலைபேசியில் இருந்து உள்நுழையலாம். WhatsApp Web திறக்கவும். தொலைபேசியின் WhatsApp Business செயலியில் QR ஐ ஸ்கேன் செய்யுங்கள். பின்னர் அனுப்பு என்பதை அழுத்தவும். செய்தி எழுதப்பட்டிருக்கும். WhatsApp Web இல் அனුப்பு என்பதை அழுத்தவும்.", "You can sign in with the WhatsApp Business phone. Open WhatsApp Web. Scan the QR code in the WhatsApp Business app on the phone. Then press send. The message is already written. Press send in WhatsApp Web."))}</p>
     <p><a class="btn secondary" href="https://web.whatsapp.com/" target="_blank" rel="noopener">${esc(L("WhatsApp Web අරින්න", "WhatsApp Web திற", "Open WhatsApp Web"))}</a></p>
     <form class="classic-form" id="message-pick">
@@ -5038,13 +5539,19 @@ async function renderMessages(work) {
       <p>
         <button type="button" class="btn" data-act="message-send" data-kind="notice" data-channel="email">${esc(L("ඊමේල් යවන්න", "மின்னஞ்சல் அனுப்பு", "Send email"))}</button>
         <button type="button" class="btn secondary" data-act="message-send" data-kind="notice" data-channel="whatsapp">${esc(L("WhatsApp Web එකෙන් යවන්න", "WhatsApp Web வழியாக அனுப்பு", "Send with WhatsApp Web"))}</button>
+        <button type="button" class="btn" data-act="message-send" data-kind="notice" data-channel="sms">${esc(L("Bulk SMS යවන්න", "Bulk SMS அனுப்பு", "Send bulk SMS"))}</button>
       </p>
       <h2 class="classic-title">${esc(L("පසුදා එනවාද", "மறுநாள் வருகிறீர்களா", "Are you coming the next day"))}</h2>
       <pre class="notify-preview">${esc(preview.remind || "")}</pre>
       <p>
         <button type="button" class="btn" data-act="message-send" data-kind="remind" data-channel="email">${esc(L("ඊමේල් යවන්න", "மின்னஞ்சல் அனுப்பு", "Send email"))}</button>
         <button type="button" class="btn secondary" data-act="message-send" data-kind="remind" data-channel="whatsapp">${esc(L("WhatsApp Web එකෙන් යවන්න", "WhatsApp Web வழியாக அனுப்பு", "Send with WhatsApp Web"))}</button>
+        <button type="button" class="btn" data-act="message-send" data-kind="remind" data-channel="sms">${esc(L("Bulk SMS යවන්න", "Bulk SMS அனுப்பு", "Send bulk SMS"))}</button>
       </p>
+      <h2 class="classic-title">${esc(L("අභිරුචි Bulk SMS", "தனிப்பயன் Bulk SMS", "Custom bulk SMS"))}</h2>
+      <p class="pad-note">${esc(L("එකම පණිවිඩය තෝරාගත් සියල්ලන්ට යයි. {name} තිබ්බොත් නම යනවා.", "ஒரே செய்தி தேர்ந்த அனைவருக்கும் போகும். {name} இருந்தால் பெயர் வரும்.", "The same message goes to everyone selected. {name} becomes each person's name."))}</p>
+      <label class="classic-field"><span>${esc(L("SMS පණිවිඩය", "SMS செய்தி", "SMS message"))}</span><textarea id="bulk-sms-text" rows="4" placeholder="${esc(L("නමස්කාරයි {name}, ...", "வணக்கம் {name}, ...", "Hello {name}, ..."))}"></textarea></label>
+      <p><button type="button" class="btn" data-act="message-send" data-kind="custom" data-channel="sms">${esc(L("තෝරාගත් අයට SMS යවන්න", "தேர்ந்தவர்களுக்கு SMS அனுப்பு", "SMS the selected officers"))}</button></p>
       <div id="form-msg"></div>` : `<p class="pad-note">${esc(L("පුහුණු වැඩසටහනක් තෝරන්න.", "ஒரு பயிற்சியைத் தேர்ந்தெடுக்கவும்.", "Choose a programme."))}</p>`}`;
 }
 
@@ -5146,12 +5653,24 @@ async function renderEvalPresent(work) {
       </nav>
     </section>`;
   paintEvalLive(data, q, end);
+  const countAnswered = (live) => (live.people || []).filter((person) => (person.answers || []).some((item) => Number(item.no) === Number(q))).length;
+  let seenAnswers = end ? 0 : countAnswered(data);
   state.evalTimer = setInterval(() => {
     api("eval-live", { query: { id, kind, reveal: reveal ? "1" : "" } }).then((fresh) => {
       paintEvalLive(fresh, q, end);
       if (fresh.reveal && !end) {
         const current = (fresh.questions || [])[q - 1] || {};
         document.querySelectorAll(".eval-option").forEach((node) => node.classList.toggle("is-correct", node.dataset.letter === current.correct));
+      }
+      if (!end) {
+        const now = countAnswered(fresh);
+        if (seenAnswers === 0 && now > 0) {
+          clearInterval(state.evalTimer);
+          state.evalTimer = 0;
+          location.hash = evalBoardHref(id, kind, q >= 10 ? "end" : q + 1, reveal);
+          return;
+        }
+        seenAnswers = now;
       }
     }).catch(() => {});
   }, 2000);
@@ -5238,14 +5757,22 @@ function paintQuizQuestion(token, kind, nid, opened, status) {
     card.innerHTML = quizDoneHtml(kind, status);
     return;
   }
-  const buttons = ["A", "B", "C", "D"].map((letter) => `<button type="button" class="quiz-choice ${letter.toLowerCase()}" data-act="quiz-choice" data-letter="${letter}" data-no="${esc(question.no)}">${esc(EVAL_MARK[letter])} ${esc(question[letter.toLowerCase()] || "")}</button>`).join("");
+  const jump = Array.from({ length: 10 }, (_, index) => {
+    const no = index + 1;
+    const done = answered.has(no);
+    const current = Number(question.no) === no;
+    return `<span class="quiz-jump${current ? " is-on" : ""}${done ? " is-done" : ""}" aria-current="${current ? "true" : "false"}">${no}</span>`;
+  }).join("");
+  const buttons = ["A", "B", "C", "D"].map((letter) => `<button type="button" class="quiz-choice ${letter.toLowerCase()}" data-act="quiz-choice" data-letter="${letter}" data-no="${esc(question.no)}"><span class="quiz-mark">${esc(EVAL_MARK[letter])}</span><span class="quiz-text">${esc(question[letter.toLowerCase()] || "")}</span></button>`).join("");
   const heading = kind === "post" ? L("පසු ඇගයීම", "பின் மதிப்பீடு", "Post-evaluation") : L("පෙර ඇගයීම", "முன் மதிப்பீடு", "Pre-evaluation");
   card.innerHTML = `
     <p class="quiz-kicker">${esc(heading)}</p>
     <h2>${esc(opened.title || "")}</h2>
     <p class="quiz-progress">${esc(L("ප්‍රශ්නය", "கேள்வி", "Question"))} ${esc(question.no)} / 10</p>
+    <div class="quiz-jumps" aria-label="${esc(L("ප්‍රශ්න", "கேள்விகள்", "Questions"))}">${jump}</div>
     <h3>${esc(question.text || "")}</h3>
-    <div class="quiz-choices">${buttons}</div>`;
+    <div class="quiz-choices">${buttons}</div>
+    <p class="quiz-hint">${esc(L("උත්තරයක් තෝරන විට එය ඉස්මතු වේ.", "விடையைத் தேர்ந்தெடுக்கும்போது அது தனித்துக் காட்டப்படும்.", "The answer you tap is highlighted."))}</p>`;
   state.quizNow = { token, kind, nid, opened };
 }
 
@@ -5545,12 +6072,36 @@ function allowanceTabs(tab, atp) {
   </div>`;
 }
 
-function paintAllowance() {}
+function officePersonLabel(row) {
+  if (!row) return "";
+  const pick = row.querySelector("[name=officePick]")?.value || "";
+  const nid = (row.querySelector("[name=officeNid]")?.value || "").trim();
+  const name = (row.querySelector("[name=officeName]")?.value || "").trim();
+  const id = pick && pick !== "__type__" ? pick : nid;
+  if (name) return name;
+  if (!id) return "";
+  const found = officeChoicesFromPage().find((item) => String(item.nid || "").trim() === id);
+  return String(found?.name || id).trim();
+}
+
+function paintAllowance(form) {
+  if (!form) return;
+  const who = form.querySelector("[name=officeWho]");
+  if (!who) return;
+  const names = [...form.querySelectorAll(".office-person")]
+    .map((row) => officePersonLabel(row))
+    .filter(Boolean);
+  who.value = [...new Set(names)].join(" · ");
+}
 
 function paintOfficeAmount(form) {
   if (!form) return;
   const unit = advanceNumber(form.dataset.officeUnit);
-  const count = [...form.querySelectorAll("[name=officeNid]")].filter((field) => field.value.trim()).length;
+  const count = [...form.querySelectorAll(".office-person")].filter((row) => {
+    const pick = row.querySelector("[name=officePick]")?.value || "";
+    const nid = (row.querySelector("[name=officeNid]")?.value || "").trim();
+    return (pick && pick !== "__type__") || nid !== "";
+  }).length;
   const amount = form.querySelector("[name=office]");
   if (amount && unit > 0 && count > 0) amount.value = advanceMoney(unit * count);
   paintAllowance(form);
@@ -5721,7 +6272,7 @@ async function renderAllowance(work, atp) {
           ${advanceField(L("මුළු වියදම", "மொத்தச் செலவு", "Total expenditure"), `<output data-total>${esc(row.total || "0.00")}</output>`)}
         </div>
       </div>
-      <p class="pad-note">${esc(L("සම්පත්දායකයන්ගේ නම් මේ පුහුණුවෙන්. සමායෝජන දීමනාව නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)ගේ නම. අධීක්ෂණ දීමනාව වැඩසටහන අධීක්ෂණය කරන නිලධාරියා. සම්බන්ධිකරණ දීමනාව සම්බන්ධිකරණ නිලධාරියා. ගිණුම් අංශයේ නම වෙනස් කරන්න පුළුවන්. කාර්යාල සහයක දීමනාවේ නම 1 වන සහාය කාර්ය මණ්ඩලයගෙන්. අත්තිකාරමින් වියදම් වූ මුදල සහ මුළු වියදම ආහාර බිල් පියවීමෙන්.", "வள ஆள்களின் பெயர்கள் இந்தப் பயிற்சியிலிருந்து. ஒருங்கிணைப்புக் கொடுப்பனவு துணைப் பிரதம செயலாளரின் பெயர். மேற்பார்வைப் பயிற்சியை மேற்பார்வையிடும் அதிகாரி. இணைப்புக் கொடுப்பனவு ஒருங்கிணைப்பாளர். கணக்குப் பெயரை மாற்றலாம். அலுவலக உதவியாளர் அடையாள எண்ணிலிருந்து பெயர் வரும். முன்பணச் செலவும் மொத்தச் செலவும் உணவுப் பட்டியலிலிருந்து.", "Resource-person names are from this programme. The coordination allowance shows the Deputy Chief Secretary (Training). Supervision shows the officer who supervises the programme. Liaison shows the coordinating officer. The accounts name can be changed. An office assistant's name comes from the ID number. The amount spent from the advance and the total expenditure come from the food-bill settlement."))}</p>
+      <p class="pad-note">${esc(L("සම්පත්දායකයන්ගේ නම් මේ පුහුණුවෙන්. සමායෝජන දීමනාව නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)ගේ නම. අධීක්ෂණ දීමනාව වැඩසටහන අධීක්ෂණය කරන නිලධාරියා. සම්බන්ධිකරණ දීමනාව සම්බන්ධිකරණ නිලධාරියා. ගිණුම් අංශයේ නම වෙනස් කරන්න පුළුවන්. කාර්යාල සහයක දීමනාවේ නම පහත ලැයිස්තුවෙන් තෝරන සහායක නිලධාරීන්ගෙන්. අත්තිකාරමින් වියදම් වූ මුදල සහ මුළු වියදම ආහාර බිල් පියවීමෙන්.", "வள ஆள்களின் பெயர்கள் இந்தப் பயிற்சியிலிருந்து. ஒருங்கிணைப்புக் கொடுப்பனவு துணைப் பிரதம செயலாளரின் பெயர். மேற்பார்வைப் பயிற்சியை மேற்பார்வையிடும் அதிகாரி. இணைப்புக் கொடுப்பனவு ஒருங்கிணைப்பாளர். கணக்குப் பெயரை மாற்றலாம். அலுவலக உதவியாளர் பெயர் கீழ் பட்டியலில் தேர்ந்த உதவி அதிகாரிகளிலிருந்து. முன்பணச் செலவும் மொத்தச் செலவும் உணவுப் பட்டியலிலிருந்து.", "Resource-person names are from this programme. The coordination allowance shows the Deputy Chief Secretary (Training). Supervision shows the officer who supervises the programme. Liaison shows the coordinating officer. The accounts name can be changed. The office-assistant name comes from the support officers chosen in the list below. The amount spent from the advance and the total expenditure come from the food-bill settlement."))}</p>
       <button type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
       <div id="form-msg"></div>
     </form>`;
@@ -6025,7 +6576,7 @@ async function saveAttendedPdf() {
   await document.fonts.ready;
   const width = 1754;
   const pageH = 1240;
-  const margin = 28;
+  const margin = reportMargin();
   const tableW = width - margin * 2;
   const widths = [0.04, 0.08, 0.2, 0.1, 0.17, 0.14, 0.17, 0.1].map((part) => tableW * part);
   const fontSize = 13;
@@ -6054,7 +6605,7 @@ async function saveAttendedPdf() {
   while (first || cursor < bodyRows.length) {
     let used = (first ? titleHeight : 16) + headerRow.height;
     const slice = [];
-    while (cursor < bodyRows.length && used + bodyRows[cursor].height <= pageH - 20) {
+    while (cursor < bodyRows.length && used + bodyRows[cursor].height <= pageH - margin * 2) {
       slice.push(bodyRows[cursor]);
       used += bodyRows[cursor].height;
       cursor += 1;
@@ -6076,7 +6627,7 @@ async function saveAttendedPdf() {
     ctx.fillRect(0, 0, width, pageH);
     ctx.fillStyle = "#111111";
     ctx.textBaseline = "middle";
-    let y = 18;
+    let y = margin;
     if (pack.first) {
       ctx.font = '700 26px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
       ctx.textAlign = "center";
@@ -6172,7 +6723,7 @@ async function renderEstimate(work) {
     <td>${index + 1}</td>
     <td>${esc(showDate(row.day))}</td>
     <td class="wrap-cell">${esc(row.name)}</td>
-    <td class="wrap-cell">${esc(row.file)}</td>
+    <td class="wrap-cell">${esc(estimateFileNo(row.file))}</td>
     <td>${esc(row.total)}</td>
     <td><a href="#console/estimate?atp=${esc(row.id)}">${esc(L("විවෘත කරන්න", "திற", "Open"))}</a></td>
   </tr>`).join("");
@@ -6197,22 +6748,8 @@ async function renderEstimate(work) {
     <div id="paper"></div>`;
 }
 
-function addMonths(iso, months) {
-  const parts = String(iso || "").slice(0, 10).split("-").map(Number);
-  if (parts.length < 3 || !parts[0]) return "";
-  const date = new Date(parts[0], parts[1] - 1 + months, parts[2]);
-  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
-}
-
 function revisedEstimates(items) {
-  const today = localToday();
-  return (items || []).filter((row) => {
-    if (row.offweb) return false;
-    const end = showDate(row.end) || showDate(row.day);
-    if (!end) return true;
-    const until = addMonths(end, 3);
-    return until && until >= today;
-  }).sort((a, b) => {
+  return (items || []).filter((row) => !row.offweb).sort((a, b) => {
     const left = showDate(a.end) || showDate(a.day) || "0000-00-00";
     const right = showDate(b.end) || showDate(b.day) || "0000-00-00";
     if (left !== right) return right.localeCompare(left);
@@ -6225,7 +6762,7 @@ async function renderRevise(work) {
   const saved = await api("saved-estimates");
   const rows = revisedEstimates(saved.items).map((row, index) => `<tr>
     <td>${index + 1}</td>
-    <td class="wrap-cell">${esc(row.file)}</td>
+    <td class="wrap-cell">${esc(estimateFileNo(row.file))}</td>
     <td>${esc(showDate(row.day))}</td>
     <td>${esc(showDate(row.end))}</td>
     <td class="wrap-cell">${esc(row.name)}</td>
@@ -6267,16 +6804,14 @@ async function renderOffweb(work) {
     people = [];
   }
   planLecturers = people;
-  if (!state.options?.centres) {
-    try { state.options = Object.assign(state.options || {}, await api("options")); } catch (error) { /* centres stay empty */ }
-  }
+  try { state.options = Object.assign(state.options || {}, await api("options")); } catch (error) { /* centres/team stay empty */ }
   const saved = await api("offweb-list");
   const canEditCame = state.user && (state.user.role === "Administrator" || state.user.role === "Super User");
   const rows = (saved.items || []).map((row, index) => `<tr>
     <td>${index + 1}</td>
     <td>${esc(showDate(row.day))}</td>
     <td class="wrap-cell">${esc(row.name)}</td>
-    <td class="wrap-cell">${esc(row.file)}</td>
+    <td class="wrap-cell">${esc(estimateFileNo(row.file))}</td>
     <td class="wrap-cell">${esc(row.place)}</td>
     <td><a href="#console/offweb?atp=${esc(row.id)}">${esc(L("ඇස්තමේන්තුව", "மதிப்பீடு", "Estimate"))}</a></td>
     <td>${row.estimate ? `<a href="#console/finish?atp=${esc(row.id)}">${esc(L("පැමිණි නිලධාරීන් තහවුරු කරන්න", "வந்த அதிகாரிகளை உறுதி செய்", "Confirm the officers who attended"))}</a>` : ""}</td>
@@ -6565,8 +7100,9 @@ function applyEstimateSnapshot(form, saved) {
   (saved.lines || []).forEach((line) => {
     const input = form.querySelector(`[data-key="${line.key}"]`);
     if (!input) return;
-    input.dataset.formula = line.formula || "";
-    input.value = line.formula || "";
+    const formula = line.key === "file" ? estimateFileNo(line.formula || "") : (line.formula || "");
+    input.dataset.formula = formula;
+    input.value = formula;
     if (line.auto === "0" || line.auto === "1") input.dataset.auto = line.auto;
   });
   const dates = document.getElementById("estimate-dates");
@@ -6675,7 +7211,7 @@ function estimateSheetHtml(data) {
   const lecturerLines = lecturers.map((name, index) => estimateLecturerLine(index + 1, name, days ? `=800*${estimateFactor(days)}` : "")).join("");
   const sum = (label, key) => field(label, "", "sum", "", key);
   const left = [
-    field(L("මගේ අංකය", "என் இல.", "My number"), data.file, "text", "", "file"),
+    field(L("මගේ අංකය", "என் இல.", "My number"), estimateFileNo(data.file), "text", "", "file"),
     area(`1 ${L("පුහුණු වැඩ සටහනේ නම", "பயிற்சியின் பெயர்", "Programme name")}`, data.programme, "name"),
     field(`2 ${L("පුහුණුව ලබන්නේ කවුරුන්ද", "பயிற்சி பெறுவோர்", "Who is trained")}`, data.target, "text", "", "target"),
     `<div id="estimate-dates">${(dateValues.length ? dateValues : [""]).map((value, index) => estimateDateRow(value, index)).join("")}</div>`,
@@ -6737,6 +7273,7 @@ function signSheetHtml(data) {
     ${days.map(() => "<td class=\"sign-box\"></td>").join("")}
   </tr>`).join("");
   return `<article class="letter sign-sheet">
+    <p class="sheet-org"><span>${esc(t("unit"))}</span></p>
     <h2>${esc(L("සහභාගිවන්නන්ගේ අත්සන් ලේඛනය", "பங்கேற்பாளர் கையொப்பப் பட்டியல்", "Participants' sign sheet"))}</h2>
     <p>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))} - ${esc(plan.atp_trname || "")}</p>
     <p>${esc(L("ආරම්භක දිනය", "தொடக்க திகதி", "Start date"))} - ${esc(showDate(plan.atp_day1))} · ${esc(L("ස්ථානය", "இடம்", "Place"))} - ${esc(plan.atp_location || "")}</p>
@@ -6799,34 +7336,36 @@ function panelDays(data) {
   const real = (data.days || []).filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(String(day)));
   return real.length ? real : [""];
 }
+function panelWho(row) {
+  return [row?.name, row?.post].map((item) => String(item || "").trim()).filter(Boolean).join(", ");
+}
+
 function panelSheetHtml(data) {
   const days = panelDays(data);
   const heads = days.map((day) => `<th>${panelDayHead(day).split("\n").map((line) => esc(line)).join("<br>")}</th>`).join("");
-  const staff = (data.staff || []).map((row, index) => `<tr>
+  const people = (data.resources || []).length ? data.resources : [{ name: "", post: "" }];
+  const resources = people.map((row, index) => `<tr class="panel-resource">
     <td>${index + 1}</td>
-    <td class="wrap-cell">${esc(row.name || "")}</td>
-    <td class="wrap-cell">${esc(row.post || "")}</td>
+    <td><input class="panel-edit" data-field="name" value="${esc(row.name || "")}"></td>
+    <td><input class="panel-edit" data-field="post" value="${esc(row.post || "")}"></td>
     ${days.map(() => `<td class="sign-box"></td>`).join("")}
   </tr>`).join("");
-  const panel = (data.panel || []).map((row, index) => {
-    const who = [row.name, row.post].filter(Boolean).join(", ");
-    return `<tr>
-      <td>${String(index + 1).padStart(2, "0")}</td>
-      <td class="wrap-cell">${esc(who)}</td>
-      <td class="wrap-cell">${esc(row.role || "")}</td>
-      <td class="sign-box"></td>
-    </tr>`;
-  }).join("");
-  return `<article class="panel-sign">
-    <h2>වයඹ පළාත් සභාව</h2>
-    <h3>කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය</h3>
-    <h3>${esc(data.name || "")} පිළිබඳ පුහුණු වැඩසටහන</h3>
+  const panel = (data.panel || []).map((row, index) => `<tr class="panel-role">
+    <td>${String(index + 1).padStart(2, "0")}</td>
+    <td><input class="panel-edit" data-field="who" value="${esc(panelWho(row))}"></td>
+    <td><input class="panel-edit center" data-field="role" value="${esc(row.role || "")}"></td>
+    <td class="sign-box"></td>
+  </tr>`).join("");
+  return `<article class="panel-sign" data-name="${esc(data.name || "")}">
+    <h2>කළමනාකරණ සංවර්ධන පුහුණු ඒකකය</h2>
+    <h3>වයඹ පළාත් ප්‍රධාන ලේකම් කාර්යාලය, කුරුණෑගල</h3>
+    <h3>${esc(data.name || "")}</h3>
     <p class="panel-date">${esc(panelDateLine(days))}</p>
     <table>
       <thead><tr>
         <th>අනු අංකය</th><th>නම</th><th>තනතුර</th>${heads}
       </tr></thead>
-      <tbody>${staff || `<tr><td colspan="${3 + days.length}">තෝරාගත් නිලධාරීන් නොමැත.</td></tr>`}</tbody>
+      <tbody>${resources}</tbody>
     </table>
     <p class="panel-label">අත්සන් මණ්ඩලය</p>
     <table>
@@ -6839,16 +7378,11 @@ function panelSheetHtml(data) {
 }
 
 async function renderPanelSign(work) {
-  const [programmes, picked] = await Promise.all([
-    api("list", { query: { table: "cp_atp", limit: 1000, page: 1 } }),
-    api("selected-programmes"),
-  ]);
+  const programmes = await api("list", { query: { table: "cp_atp", limit: 1000, page: 1 } });
   const today = localToday();
-  const selected = new Set((picked.ids || []).map(String));
   const open = namedPlans(programmes.items || []).filter((item) => {
-    if (!selected.has(String(item.atp_id))) return false;
-    const end = programmeEnd(item);
-    return end && end >= today;
+    const end = programmeEndDay(item);
+    return end !== "" && end >= today;
   }).sort((a, b) => showDate(a.atp_day1).localeCompare(showDate(b.atp_day1)) || Number(a.atp_id) - Number(b.atp_id));
   const asked = state.query?.get("id") || "";
   const id = open.some((item) => String(item.atp_id) === String(asked)) ? asked : "";
@@ -6858,6 +7392,7 @@ async function renderPanelSign(work) {
       <label class="classic-field"><span>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"))}</span><select id="panel-programme" name="id">${programmeSelect(open, id)}</select></label>
       <button type="button" data-act="panel-pdf">${esc(L("PDF බාගත කරන්න", "PDF பதிவிறக்கம்", "Download PDF"))}</button>
     </form>
+    <p class="pad-note">${esc(L("වැඩසටහන තෝරනකොට දින, නම, සම්පත්දායකයින් සහ අත්සන් මණ්ඩලය පිරෙනවා. නමක් වෙනස් කරන්න ඕන නම් ලියන්න. PDF එකට ඒ විදිහටම යනවා.", "பயிற்சியைத் தேர்ந்தால் திகதி, பெயர், வள ஆள்கள் மற்றும் கையொப்பக் குழு நிரம்பும். பெயரை மாற்ற வேண்டும் என்றால் எழுதவும். PDF இலும் அப்படியே வரும்.", "Choosing a programme fills the dates, name, resource persons, and sign panel. Type over a name if it should change. The PDF uses what you see."))}</p>
     <div id="paper"></div>`;
   if (!id) return;
   try {
@@ -6942,6 +7477,69 @@ function staffFields() {
   ];
 }
 
+function staffUploadHeaders() {
+  return [
+    "National ID",
+    "Name",
+    "Date of birth",
+    "Gender",
+    "Designation",
+    "Office",
+    "Sub office",
+    "Mobile",
+    "Office telephone",
+    "Email",
+    "Designation type",
+    "Service",
+    "Class",
+    "First appointment",
+    "Present designation date",
+  ];
+}
+
+function staffUploadSample() {
+  return [
+    "901234567V",
+    "A. B. Perera",
+    "1990-05-12",
+    "පුරුෂ",
+    "සංවර්ධන නිලධාරී",
+    "ප්‍රධාන ලේකම් කාර්යාලය",
+    "",
+    "0712345678",
+    "0372220000",
+    "name@example.com",
+    "ස්ථිර",
+    "සංවර්ධන නිලධාරී සේවය",
+    "III",
+    "2015-01-01",
+    "2020-03-01",
+  ];
+}
+
+function saveStaffUploadTemplate() {
+  const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const csv = `\uFEFF${staffUploadHeaders().map(quote).join(",")}\r\n${staffUploadSample().map(quote).join(",")}\r\n`;
+  saveBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "karyamandala-lekhanaya-format.csv");
+}
+
+function staffUploadPanel() {
+  if (state.user?.role !== "Administrator") return "";
+  return `
+    <h2 class="classic-title">${esc(L("කාර්යමණ්ඩල ලේඛනය උඩුගත කරන්න", "பணியாளர் பதிவைப் பதிவேற்று", "Upload the staff register"))}</h2>
+    <p class="pad-note">${esc(L("මෙය පරිපාලකට පමණයි. පළමු පේළියේ තීරු මාතෘකා තියන්න. අනිවාර්ය: National ID, Name. දින YYYY-MM-DD හෝ DD-MM-YYYY. Gender: පුරුෂ / ස්ත්‍රී. එකම හැඳුනුම්පත තිබේ නම් යාවත්කාල වෙනවා. CSV වඩා හොඳයි (~66000 පේළි).", "நிர்வாகிக்கு மட்டும். முதல் வரி தலைப்புகள். கட்டாயம்: National ID, Name. திகதி YYYY-MM-DD அல்லது DD-MM-YYYY. Gender: පුරුෂ / ස්ත්‍රී. அதே அடையாளம் இருந்தால் புதுப்பிக்கும். CSV சிறந்தது (~66000 வரிகள்).", "Administrators only. First row must be headings. Required: National ID, Name. Dates as YYYY-MM-DD or DD-MM-YYYY. Gender: පුරුෂ / ස්ත්‍රී. Existing IDs are updated. Prefer CSV for ~66,000 rows."))}</p>
+    <p class="sheet-tools">
+      <button type="button" class="btn secondary" data-act="staff-template">${esc(L("ආකෘතිය බාගත කරන්න", "வார்ப்புரு பதிவிறக்கம்", "Download the template"))}</button>
+    </p>
+    <form class="classic-form" id="staff-upload-form">
+      <label class="classic-field"><span>${esc(L("CSV / Excel ගොනුව", "CSV / Excel கோப்பு", "CSV / Excel file"))}</span>
+        <input type="file" name="file" accept=".csv,.xls,.xlsx" required>
+      </label>
+      <button type="submit">${esc(L("උඩුගත කරන්න", "பதிவேற்று", "Upload"))}</button>
+      <div id="form-msg"></div>
+    </form>`;
+}
+
 function staffPhoto(row) {
   return row.stf_Photo_url ? `<img class="staff-photo" alt="" src="${esc(row.stf_Photo_url)}">` : "";
 }
@@ -6986,11 +7584,25 @@ async function renderBlacklist(work) {
 
 async function renderStaff(work) {
   if ((state.query?.get("tab") || "") === "blacklist") return renderBlacklist(work);
+  const tab = state.query?.get("tab") || "";
+  if (tab === "upload") {
+    if (state.user?.role !== "Administrator") {
+      work.innerHTML = `<p class="pad-note">${esc(L("මෙය පරිපාලකට පමණයි.", "நிர்வாகிக்கு மட்டும்.", "Administrators only."))}</p>`;
+      return;
+    }
+    work.innerHTML = `
+      <div class="desig-tabs">
+        <a href="#console/cp_staff">${esc(L("නිලධාරීන් ඇතුළත් කරන්න", "அதிகாரியைச் சேர்க்க", "Add an officer"))}</a>
+        <a href="#console/cp_staff?tab=all">${esc(L("සියලුම නිලධාරීන්", "அனைத்து அதிகாரிகள்", "All officers"))}</a>
+        <a class="on" href="#console/cp_staff?tab=upload">${esc(L("උඩුගත කරන්න", "பதிவேற்று", "Upload"))}</a>
+      </div>
+      ${staffUploadPanel()}`;
+    return;
+  }
   if (!state.options) state.options = await api("options");
   const list = await api("list", { query: { table: "cp_staff", limit: 50000, page: 1 } });
   const dropId = state.query?.get("drop") || "";
   const editId = state.query?.get("edit") || "";
-  const tab = state.query?.get("tab") || "";
   const dropping = list.items.find((row) => String(row.stf_ID) === String(dropId));
   if (dropping) {
     work.innerHTML = `
@@ -7013,6 +7625,7 @@ async function renderStaff(work) {
       <div class="desig-tabs">
         <a class="on" href="#console/cp_staff">${esc(editing ? L("නිලධාරියා වෙනස් කරන්න", "அதிகாரியைத் திருத்து", "Edit the officer") : L("නිලධාරීන් ඇතුළත් කරන්න", "அதிகாரியைச் சேர்க்க", "Add an officer"))}</a>
         <a href="#console/cp_staff?tab=all">${esc(L("සියලුම නිලධාරීන්", "அனைத்து அதிகாரிகள்", "All officers"))}</a>
+        ${state.user?.role === "Administrator" ? `<a href="#console/cp_staff?tab=upload">${esc(L("උඩුගත කරන්න", "பதிவேற்று", "Upload"))}</a>` : ""}
       </div>
       <form class="classic-form" id="classic-form" data-table="cp_staff">
         <input type="hidden" name="stf_ID" value="${esc(editing ? editing.stf_ID : "")}">
@@ -7055,6 +7668,7 @@ async function renderStaff(work) {
     <div class="desig-tabs">
       <a href="#console/cp_staff">${esc(L("නිලධාරීන් ඇතුළත් කරන්න", "அதிகாரியைச் சேர்க்க", "Add an officer"))}</a>
       <a class="${tab === "all" ? "on" : ""}" href="#console/cp_staff?tab=all">${esc(L("සියලුම නිලධාරීන්", "அனைத்து அதிகாரிகள்", "All officers"))}</a>
+      ${state.user?.role === "Administrator" ? `<a href="#console/cp_staff?tab=upload">${esc(L("උඩුගත කරන්න", "பதிவேற்று", "Upload"))}</a>` : ""}
     </div>
     <h2 class="classic-title">${esc(tab === "blacklist" ? L("අසාදු ලේඛනය", "தடைப் பட்டியல்", "Blacklist") : L("සියලුම නිලධාරීන්", "அனைத்து அதிகாரிகள்", "All officers"))}</h2>
     <form class="sheet-tools" id="staff-filters">
@@ -7159,8 +7773,25 @@ async function renderBirthdays(slot) {
     <td>${esc(person.stf_mobile)}</td>
     <td>${esc(person.stf_email)}</td>
   </tr>`).join("");
+  const bday = data.birthdaySms || {};
+  const smsNote = data.smsReady
+    ? (Number(bday.sent) > 0
+      ? L(`අද උපන්දින SMS ගියා ${bday.sent} කෙනෙකුට.`, `இன்று பிறந்தநாள் SMS ${bday.sent} பேருக்கு அனுப்பப்பட்டது.`, `Birthday SMS sent to ${bday.sent} people today.`)
+      : L("අද උපන්දින අයට සුරැකූ පණිවිඩය ස්වයංක්‍රීයව යයි.", "இன்றைய பிறந்தநாள் உள்ளவர்களுக்குச் சேமித்த செய்தி தானாக அனுப்பப்படும்.", "The saved message goes automatically to today's birthdays."))
+    : L("SMS සැකසුම් පණිවිඩ පිටුවෙන් සුරකින්න. ඊට පස්සේ උපන්දින SMS යයි.", "SMS அமைப்புகளை செய்திகள் பக்கத்தில் சேமிக்கவும். பிறகு பிறந்தநாள் SMS போகும்.", "Save SMS settings on the Messages page. Then birthday SMS will go out.");
+  const inConsole = !!(slot && slot.id === "work") && state.user?.role === "Administrator";
+  const smsForm = inConsole ? `
+    <form class="classic-form" id="birthday-sms-form">
+      <h2 class="classic-title">${esc(L("උපන්දින SMS පණිවිඩය", "பிறந்தநாள் SMS செய்தி", "Birthday SMS message"))}</h2>
+      <p class="pad-note">${esc(smsNote)}</p>
+      <p class="pad-note">${esc(L("{name} යන තැනට නම යනවා. සුරැකූ පණිවිඩය අද උපන්දින අයට SMS එකකින් යයි.", "{name} இடத்தில் பெயர் வரும். சேமித்த செய்தி இன்றைய பிறந்தநாள் உள்ளவர்களுக்கு SMS ஆக போகும்.", "{name} becomes the name. The saved message is sent by SMS to today's birthdays."))}</p>
+      <label class="classic-field"><span>${esc(L("පණිවිඩය", "செய்தி", "Message"))}</span><textarea name="birthdayMsg" rows="4">${esc(data.birthdayMsg || "")}</textarea></label>
+      <button type="submit">${esc(L("පණිවිඩය සුරකින්න", "செய்தியைச் சேமி", "Save the message"))}</button>
+      <div id="form-msg"></div>
+    </form>` : "";
   const html = `
     <h2 class="classic-title">${esc(L("අද දින උපන්දිනය සමරන නිලධාරීන්", "இன்று பிறந்தநாள் கொண்ட அதிகாரிகள்", "Officers celebrating a birthday today"))} · ${esc(data.today || "")}</h2>
+    ${smsForm}
     <div class="table-wrap desig-list"><table>
       <thead><tr>
         <th>${esc(L("අනු අංකය", "இல.", "No."))}</th>
@@ -7260,6 +7891,7 @@ function settlePayTable(rows, totals) {
     <td>${esc(row.liaise)}</td>
     <td>${esc(row.account)}</td>
     <td>${esc(row.office)}</td>
+    <td class="wrap-cell">${esc(row.officeWho || "")}</td>
     <td>${esc(row.total)}</td>
   </tr>`);
   const total = [
@@ -7271,6 +7903,7 @@ function settlePayTable(rows, totals) {
     settleStrong(totals.liaise),
     settleStrong(totals.account),
     settleStrong(totals.office),
+    "<td></td>",
     settleStrong(totals.total),
   ].join("");
   return settleMoneyTable([
@@ -7282,6 +7915,7 @@ function settlePayTable(rows, totals) {
     L("සම්බන්ධීකරණ දීමනා", "இணைப்புக் கொடுப்பனவு", "Liaison allowance"),
     L("ගිණුම් අංශය", "கணக்குப் பிரிவு", "Accounts section"),
     L("කාර්යාල සහයක දීමනා", "அலுவலக உதவியாளர் கொடுப்பனவு", "Office assistant allowance"),
+    L("ලැබූ සහායක නිලධාරියා", "பெற்ற உதவி அதிகாரி", "Support officer who received it"),
     L("එකතුව", "மொத்தம்", "Total"),
   ], body, total);
 }
@@ -7407,7 +8041,7 @@ async function renderSettle(work) {
     else if (view === "supervise") body = `<h2 class="classic-title">${esc(L("අධීක්ෂණ දීමනා", "மேற்பார்வைக் கொடுப்பனவு", "Supervision allowance"))}</h2>${settleRoleTable(data.supervise || { amount: "0.00", count: 0, rows: [] })}`;
     else if (view === "liaise") body = `<h2 class="classic-title">${esc(L("සම්බන්ධීකරණ දීමනා", "இணைப்புக் கொடுப்பனவு", "Liaison allowance"))}</h2>${settlePeopleTables(data.liaise || [], L("සම්බන්ධීකරණ දීමනා නැහැ.", "இணைப்புக் கொடுப்பனவு இல்லை.", "No liaison allowance."))}`;
     else if (view === "accounts") body = `<h2 class="classic-title">${esc(L("ගිණුම් අංශය සඳහා දීමනා", "கணக்குப் பிரிவுக் கொடுப்பனவு", "Accounts section allowance"))}</h2><p class="pad-note">${esc(L("ලැබූ මුදල වැඩසටහන අවසන් කිරීම පියවර 2 එකෙන්.", "பெற்ற தொகை நிகழ்ச்சியை முடித்தல் படி 2 இலிருந்து.", "The amount received comes from finish step 2."))}</p>${settleRoleTable(data.accounts || { amount: "0.00", count: 0, rows: [] })}`;
-    else if (view === "office") body = `<h2 class="classic-title">${esc(L("කාර්යාල සහයක දීමනා", "அலுவலக உதவியாளர் கொடுப்பனவு", "Office assistant allowance"))}</h2>${settlePeopleTables(data.office || [], L("කාර්යාල සහයක දීමනා නැහැ.", "அலுவலக உதவியாளர் கொடுப்பனவு இல்லை.", "No office-assistant allowance."))}`;
+    else if (view === "office") body = `<h2 class="classic-title">${esc(L("කාර්යාල සහයක දීමනා", "அலுவலக உதவியாளர் கொடுப்பனவு", "Office assistant allowance"))}</h2><p class="pad-note">${esc(L("කාර්යාල සහයක දීමනා ලැබූ සහායක කාර්ය මණ්ඩල නිලධාරියා අනුව විස්තර පෙනේ.", "அலுவலக உதவியாளர் கொடுப்பனவு பெற்ற உதவிப் பணியாளர் அடிப்படையில் விவரம் தெரியும்.", "Details are shown by the support-staff officer who received the office assistant allowance."))}</p>${settlePeopleTables(data.office || [], L("කාර්යාල සහයක දීමනා නැහැ.", "அலுவலக உதவியாளர் கொடுப்பனவு இல்லை.", "No office-assistant allowance."))}`;
     else if (view === "print") body = `<article class="food-report" id="pay-report">${settlePrintHtml(data)}</article>`;
     else body = `<h2 class="classic-title">${esc(L("සියලු වැඩසටහන් වල දීමනා", "அனைத்துப் பயிற்சிக் கொடுப்பனவு", "Allowances of every programme"))}</h2>${settlePayTable(data.programmes || [], data.payTotals || {})}`;
     work.innerHTML = `${settlePayTabs(view)}<h2 class="classic-title">${esc(L("දීමනා සියල්ල", "அனைத்துக் கொடுப்பனவு", "All allowances"))}</h2>${settlePdfButton()}${body}`;
@@ -7469,7 +8103,7 @@ async function saveSettlePdf() {
   if (document.fonts?.ready) await document.fonts.ready;
   const pageW = 1754;
   const pageH = 1240;
-  const margin = 36;
+  const margin = reportMargin();
   const inner = pageW - margin * 2;
   const fontName = '"Noto Sans Sinhala", "Source Sans 3", sans-serif';
   const canvases = [];
@@ -7483,13 +8117,11 @@ async function saveSettlePdf() {
     ctx = canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, pageW, pageH);
-    ctx.fillStyle = "#0c4da2";
-    ctx.fillRect(0, 0, pageW, 10);
-    y = 48;
+    y = margin;
     canvases.push(canvas);
   };
   const ensure = (need) => {
-    if (!canvas || y + need > pageH - 28) startPage();
+    if (!canvas || y + need > pageH - margin) startPage();
   };
   const writeLine = (text, size, weight, color) => {
     const source = String(text || "").trim();
@@ -7519,7 +8151,7 @@ async function saveSettlePdf() {
     const paintRow = (cells, header, repeatHead) => {
       const lines = cells.map((text, index) => cellLines(text, header || index === 0 && text === "එකතුව"));
       const height = Math.max(lineH + pad * 2, ...lines.map((item) => item.length * lineH + pad * 2));
-      if (y + height > pageH - 28) {
+      if (y + height > pageH - margin) {
         startPage();
         if (repeatHead) paintRow(heading, true, false);
       }
@@ -7748,6 +8380,7 @@ function tamilFigures(form) {
     name: tr.dataset.name || "",
     days: tr.dataset.days || "",
     place: tr.dataset.place || "",
+    coord: tr.dataset.coord || "",
     money: tr.querySelector("[name=money]")?.value || "",
     spent: tr.querySelector("[name=spent]")?.value || "",
     people: tr.querySelector("[name=people]")?.value || "",
@@ -7770,8 +8403,27 @@ function paintTamilSummary() {
   });
 }
 
+function aheadOmitIds(form) {
+  return String(form?.dataset.omit || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+async function saveAheadForm(form, extra = {}) {
+  const pack = tamilFigures(form);
+  const note = document.getElementById("tamil-note");
+  const body = {
+    year: chosenYear(),
+    rows: pack.rows.map((row) => ({ id: row.id, money: row.money, spent: row.spent, people: row.people })),
+    ...extra,
+  };
+  if (form.dataset.kind === "general") body.omit = aheadOmitIds(form);
+  await api(aheadSpec(form.dataset.kind).save, { method: "POST", body });
+  if (note) note.textContent = L("සුරකින ලදී", "சேமிக்கப்பட்டது", "Saved");
+}
+
 function tamilReportHtml(data, spec) {
   const rows = Array.isArray(data.rows) ? data.rows : [];
+  const canDrop = spec.kind === "general";
+  const omitted = canDrop && Array.isArray(data.omitted) ? data.omitted : [];
   const pack = {
     count: rows.length,
     spent: rows.reduce((sum, row) => sum + tamilNum(row.spent), 0),
@@ -7782,17 +8434,22 @@ function tamilReportHtml(data, spec) {
   };
   pack.left = pack.alloc - pack.spent;
   const body = rows.length
-    ? rows.map((row, index) => `<tr data-id="${esc(row.id)}" data-name="${esc(row.name)}" data-days="${esc(row.days)}" data-place="${esc(row.place)}">
+    ? rows.map((row, index) => `<tr data-id="${esc(row.id)}" data-name="${esc(row.name)}" data-days="${esc(row.days)}" data-place="${esc(row.place)}" data-coord="${esc(row.coord || "")}">
         <td>${index + 1}</td>
         <td class="left">${esc(row.name)}</td>
         <td class="left">${esc(row.days)}</td>
         <td class="left">${esc(row.place)}</td>
+        <td class="left">${esc(row.coord || "")}</td>
         <td><input name="money" value="${esc(row.money)}" inputmode="decimal"></td>
         <td><input name="spent" value="${esc(row.spent)}" inputmode="decimal"></td>
         <td><input name="people" value="${esc(row.people)}" inputmode="numeric"></td>
+        ${canDrop ? `<td class="no-print"><button class="text-btn" type="button" data-act="ahead-drop">${esc(L("මකන්න", "நீக்கு", "Remove"))}</button></td>` : ""}
       </tr>`).join("")
-    : `<tr><td class="left" colspan="7">${esc(spec.empty)}</td></tr>`;
-  return `<form id="ahead-form" data-kind="${esc(spec.kind)}" data-alloc-source="${esc(spec.allocSource || "rows")}" data-alloc="${esc(data.allocation || "")}">
+    : `<tr><td class="left" colspan="${canDrop ? 9 : 8}">${esc(spec.empty)}</td></tr>`;
+  const omittedHtml = omitted.length
+    ? `<details class="pad-note no-print"><summary>${esc(L("මෙම වාර්තාවෙන් ඉවත් කළ වැඩසටහන්", "இந்த அறிக்கையிலிருந்து நீக்கியவை", "Programmes left out of this report"))} (${omitted.length})</summary><ul class="ahead-omitted">${omitted.map((item) => `<li><span>${esc(item.name)}</span> <button class="text-btn" type="button" data-act="ahead-restore" data-id="${esc(item.id)}">${esc(L("නැවත එක් කරන්න", "மீண்டும் சேர்", "Put it back"))}</button></li>`).join("")}</ul></details>`
+    : "";
+  return `<form id="ahead-form" data-kind="${esc(spec.kind)}" data-alloc-source="${esc(spec.allocSource || "rows")}" data-alloc="${esc(data.allocation || "")}" data-omit="${esc(omitted.map((item) => item.id).join(","))}">
     <div class="tamil-tools no-print">
       <button class="btn" type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
       <button class="btn secondary" type="button" data-act="tamil-detail-pdf">${esc(L("විස්තර PDF", "விவரம் PDF", "Detail PDF"))}</button>
@@ -7801,6 +8458,8 @@ function tamilReportHtml(data, spec) {
       <button class="btn secondary" type="button" data-act="ahead-print">${esc(L("මුද්‍රණය කරන්න", "அச்சிடு", "Print"))}</button>
       <span class="tamil-note" id="tamil-note"></span>
     </div>
+    <p class="name-meta"><span>${esc(L("කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත", "முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு - வடமேல் மாகாணம்", "Management Development and Training Unit - North Western Province"))}</span><span>${esc(reportSpan(chosenYear()))}</span></p>
+    ${canDrop ? `<p class="pad-note no-print">${esc(L("අනවශ්‍ය පුහුණුවක් මකන්න පුළුවන්. ඒක මේ වාර්තාවෙන් ඉවත් වෙනවා. පුහුණුවම මකන්නේ නැහැ. වැඩසටහන් ගණන, පුහුණුලාභීන්, වියදම සහ ඉතිරි ප්‍රතිපාදන ඒ අනුව යාවත්කාලීන වෙනවා.", "தேவையில்லாத பயிற்சியை நீக்கலாம். அது இந்த அறிக்கையிலிருந்து மட்டும் விலகும். பயிற்சி அழியாது. நிகழ்ச்சி, பயனாளி, செலவு, மீதி அதற்கேற்ப புதுப்பிக்கும்.", "An unnecessary programme can be removed from this report. The programme itself stays. Programme count, trainees, expenditure and the remainder update from the rows that remain."))}</p>` : ""}
     <div class="tamil-summary">
       ${spec.cards.map(([key, label]) => `<div class="tamil-card"><span>${esc(label)}</span><b id="tamil-${key}">${esc(aheadCardValue(key, pack))}</b></div>`).join("")}
     </div>
@@ -7811,13 +8470,16 @@ function tamilReportHtml(data, spec) {
           <th class="left">${esc(L("වැඩසටහන", "நிகழ்ச்சி", "Programme"))}</th>
           <th class="left">${esc(L("දින", "நாட்கள்", "Days"))}</th>
           <th class="left">${esc(L("ස්ථානය", "இடம்", "Place"))}</th>
+          <th class="left">${esc(L("සම්බන්ධීකරණය", "ஒருங்கிணைப்பு", "Coordinator"))}</th>
           <th>${esc(L("ප්‍රතිපාදන", "ஒதுக்கீடு", "Provision"))}</th>
           <th>${esc(L("වියදම", "செலவு", "Expenditure"))}</th>
           <th>${esc(L("පුහුණුලාභීන්", "பயனாளிகள்", "Trainees"))}</th>
+          ${canDrop ? `<th class="no-print">${esc(L("මකන්න", "நீக்கு", "Remove"))}</th>` : ""}
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>
+    ${omittedHtml}
   </form>`;
 }
 
@@ -7825,12 +8487,36 @@ function tamilSummaryLines(pack, spec) {
   return spec.cards.map(([key, , label]) => `${label}: ${aheadCardValue(key, pack)}`);
 }
 
-function tamilTablePages({ pageW, pageH, margin, title, headers, widths, rows, alignRight, foot }) {
+function fitReportWidths(pageW, margin, widths) {
+  const inner = pageW - margin * 2;
+  const sum = widths.reduce((total, width) => total + width, 0);
+  if (sum <= inner + 0.5) return widths;
+  const scale = inner / sum;
+  const next = widths.map((width) => Math.floor(width * scale));
+  const used = next.reduce((total, width) => total + width, 0);
+  next[next.length - 1] += inner - used;
+  return next;
+}
+
+function tamilTablePages(options) {
+  if (options.onePage && options.fontSize == null) {
+    let fontSize = 24;
+    let pages = tamilTablePages({ ...options, onePage: false, fontSize });
+    while (pages.length > 1 && fontSize > 11) {
+      fontSize -= 1;
+      pages = tamilTablePages({ ...options, onePage: false, fontSize });
+    }
+    return pages;
+  }
+  let { pageW, pageH, margin, title, headers, widths, rows, alignRight, foot, fontSize } = options;
+  widths = fitReportWidths(pageW, margin, widths);
   const fontName = '"Noto Sans Sinhala", "Source Sans 3", sans-serif';
   const measure = document.createElement("canvas").getContext("2d");
-  const fontSize = 20;
-  const lineH = 28;
-  const pad = 10;
+  fontSize = fontSize || 20;
+  const lineH = Math.round(fontSize * 1.35);
+  const pad = Math.max(4, Math.round(fontSize * 0.35));
+  const titlePx = fontSize + 10;
+  const titleH = titlePx + 16;
   const wrap = (text, width, weight) => {
     measure.font = `${weight} ${fontSize}px ${fontName}`;
     return canvasWrap(measure, text, Math.max(20, width - pad * 2));
@@ -7849,7 +8535,6 @@ function tamilTablePages({ pageW, pageH, margin, title, headers, widths, rows, a
   const footH = footLines.reduce((sum, lines) => sum + lines.length * (lineH + 4), 0) + (footLines.length ? 24 : 0);
   const pages = [];
   let index = 0;
-  const titleH = 64;
   const paintFoot = (ctx, y) => {
     ctx.textAlign = "left";
     ctx.font = `600 ${fontSize}px ${fontName}`;
@@ -7871,7 +8556,7 @@ function tamilTablePages({ pageW, pageH, margin, title, headers, widths, rows, a
     ctx.fillStyle = "#08324a";
     ctx.textBaseline = "top";
     ctx.textAlign = "center";
-    ctx.font = `600 32px ${fontName}`;
+    ctx.font = `600 ${titlePx}px ${fontName}`;
     ctx.fillText(title, pageW / 2, margin);
     let y = margin + titleH;
     let x = margin;
@@ -7930,7 +8615,7 @@ function tamilTablePages({ pageW, pageH, margin, title, headers, widths, rows, a
       xctx.fillStyle = "#08324a";
       xctx.textBaseline = "top";
       xctx.textAlign = "center";
-      xctx.font = `600 32px ${fontName}`;
+      xctx.font = `600 ${titlePx}px ${fontName}`;
       xctx.fillText(title, pageW / 2, margin);
       paintFoot(xctx, margin + titleH);
       pages.push(extra);
@@ -7952,28 +8637,30 @@ function tamilSummaryCanvas(pack, year, spec) {
   ctx.fillStyle = "#08324a";
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
+  const margin = reportMargin();
+  const boxW = canvas.width - margin * 2;
   ctx.font = `600 36px ${fontName}`;
-  ctx.fillText(spec.title, canvas.width / 2, 80);
+  ctx.fillText(spec.title, canvas.width / 2, margin);
   ctx.font = `600 26px ${fontName}`;
-  ctx.fillText(`${year}  ·  සාරාංශය`, canvas.width / 2, 132);
-  const lines = spec.cards.map(([key, , label]) => [label, aheadCardValue(key, pack)]);
-  let y = 220;
+  ctx.fillText(spec.subtitle || reportSpan(year), canvas.width / 2, margin + 52);
+  const lines = spec.lines || spec.cards.map(([key, , label]) => [label, aheadCardValue(key, pack)]);
+  let y = margin + 110;
   lines.forEach(([label, value]) => {
     ctx.font = `400 22px ${fontName}`;
-    const wrapped = canvasWrap(ctx, label, 640);
+    const wrapped = canvasWrap(ctx, label, boxW - 280);
     const boxH = Math.max(110, 36 + wrapped.length * 30);
     ctx.fillStyle = "#c5eefe";
-    ctx.fillRect(120, y, 1000, boxH);
+    ctx.fillRect(margin, y, boxW, boxH);
     ctx.strokeStyle = "#5eb6d6";
     ctx.lineWidth = 2;
-    ctx.strokeRect(120, y, 1000, boxH);
+    ctx.strokeRect(margin, y, boxW, boxH);
     ctx.fillStyle = "#08324a";
     ctx.textAlign = "left";
     ctx.font = `400 22px ${fontName}`;
-    wrapped.forEach((line, index) => ctx.fillText(line, 148, y + 18 + index * 30));
+    wrapped.forEach((line, index) => ctx.fillText(line, margin + 28, y + 18 + index * 30));
     ctx.textAlign = "right";
     ctx.font = `600 36px ${fontName}`;
-    ctx.fillText(value, 1092, y + boxH - 50);
+    ctx.fillText(value, canvas.width - margin - 28, y + boxH - 50);
     y += boxH + 18;
   });
   return canvas;
@@ -7995,23 +8682,24 @@ async function tamilPdf(mode) {
     : tamilTablePages({
       pageW: 1754,
       pageH: 1240,
-      margin: 48,
-      title: `${spec.title}  ·  ${year}`,
-      headers: ["අංකය", "වැඩසටහන", "දින", "ස්ථානය", "ප්‍රතිපාදන", "වියදම", "පුහුණුලාභීන්"],
-      widths: [70, 548, 260, 280, 170, 170, 160],
+      margin: reportMargin(),
+      title: `${spec.title}  ·  ${reportSpan(year)}`,
+      headers: ["අංකය", "වැඩසටහන", "දින", "ස්ථානය", "සම්බන්ධීකරණය", "ප්‍රතිපාදන", "වියදම", "පුහුණුලාභීන්"],
+      widths: [64, 380, 200, 220, 200, 180, 180, 234],
       rows: pack.rows.length
         ? pack.rows.map((row, index) => [
           String(index + 1),
           row.name,
           row.days,
           row.place,
+          row.coord || "",
           progressMoney(tamilNum(row.money)),
           progressMoney(tamilNum(row.spent)),
           String(Math.round(tamilNum(row.people))),
         ])
-        : [["", spec.empty, "", "", "", "", ""]],
-      alignRight: [0, 4, 5, 6],
-      foot: tamilSummaryLines(pack, spec),
+        : [["", spec.empty, "", "", "", "", "", ""]],
+      alignRight: [0, 5, 6, 7],
+      foot: [reportSpan(year), ...tamilSummaryLines(pack, spec)],
     });
   const images = [];
   for (const page of canvases) {
@@ -8106,11 +8794,27 @@ function officeReportHtml(data) {
     line("", L("මුළු එකතුව", "மொத்தம்", "Grand total"), sheet.grand, "grand"),
   ].join("");
   const outside = data.outside || {};
+  const total = advanceNumber(data.totalProvision);
+  const spent = advanceNumber(data.spentTotal);
+  const left = total - spent;
+  const span = reportSpan(year);
   return `
+    <div class="tamil-tools no-print">
+      <button class="btn" type="submit" form="office-out">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
+      <button class="btn secondary" type="button" data-act="office-detail-pdf">${esc(L("විස්තර PDF", "விவரம் PDF", "Detail PDF"))}</button>
+      <button class="btn secondary" type="button" data-act="office-summary-pdf">${esc(L("සාරාංශ PDF", "சுருக்கம் PDF", "Summary PDF"))}</button>
+      <button class="btn secondary" type="button" data-act="office-csv">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
+      <button class="btn secondary" type="button" data-act="office-print">${esc(L("මුද්‍රණය කරන්න", "அச்சிடு", "Print"))}</button>
+    </div>
     <article class="letter office-sheet" id="office-sheet">
       <h2>${esc(L("ප්‍රගති වාර්තාව", "முன்னேற்ற அறிக்கை", "Progress report"))}</h2>
       <p class="name-meta"><span>${esc(L("කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත", "முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு - வடமேல் மாகாணம்", "Management Development and Training Unit - North Western Province"))}</span>
-        <span>${esc(year)}.01.01 ${esc(L("සිට", "முதல்", "to"))} ${esc(year)}.12.31 ${esc(L("දක්වා", "வரை", ""))}</span></p>
+        <span>${esc(span)}</span></p>
+      <div class="office-head-totals">
+        <div><span>${esc(L("මුළු ප්‍රතිපාදන ගණන", "மொத்த ஒதுக்கீடு", "Total provision"))}</span><b>${esc(officeMoney(total))}</b></div>
+        <div><span>${esc(L("වියදම", "செலவு", "Expenditure"))}</span><b>${esc(officeMoney(spent))}</b></div>
+        <div><span>${esc(L("ඉතිරි ප්‍රතිපාදන ප්‍රමාණය", "மீதமுள்ள ஒதுக்கீடு", "Remaining provision"))}</span><b>${esc(officeMoney(left))}</b></div>
+      </div>
       <p class="muted">${esc(L("භෞතික ඉලක්කය යනු වාර්ෂික සැලැස්මේ වැඩසටහන් ගණනයි. භෞතික ප්‍රගතිය යනු ඇත්තටම පැවැත්වූ වැඩසටහන් ගණනයි. ප්‍රතිපාදන තීරුව, ප්‍රතිපාදන මාරු කිරීම් වලින් පසු වත්මන් මුදලයි.", "பௌதிக இலக்கு என்பது ஆண்டுத் திட்ட நிகழ்ச்சிகள். பௌதிக முன்னேற்றம் என்பது நடத்தப்பட்டவை. ஒதுக்கீடு, மாற்றங்களுக்குப் பிந்தைய தொகை.", "Physical target is the programmes in the annual plan. Physical progress is the programmes actually held. The allocation column is the amount after transfers."))}</p>
       <div class="table-wrap"><table>
         <thead><tr>${head.map((cell) => `<th>${esc(cell)}</th>`).join("")}</tr></thead>
@@ -8131,23 +8835,28 @@ function officeReportHtml(data) {
       <label class="classic-field"><span>${esc(L("මාරු කළ ප්‍රතිපාදනය (රු.)", "மாற்றிய ஒதுக்கீடு (ரூ.)", "Amount transferred (Rs.)"))}</span><input name="amount" inputmode="decimal" value="${esc(outside.amount || "")}"></label>
       <label class="classic-field"><span>${esc(L("ඒ සඳහා වියදම (රු.)", "அதற்கான செலவு (ரூ.)", "Expenditure from it (Rs.)"))}</span><input name="spent" inputmode="decimal" value="${esc(outside.spent || "")}"></label>
       <label class="classic-field"><span>${esc(L("සටහන", "குறிப்பு", "Note"))}</span><input name="note" maxlength="500" value="${esc(outside.note || "")}"></label>
-      <button type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
       <div id="form-msg"></div>
-    </form>
-    <p class="scheduled-copy no-print">
-      <button type="button" data-act="office-print">${esc(L("මුද්‍රණය කරන්න", "அச்சிடு", "Print"))}</button>
-      <button type="button" data-act="office-csv">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
-    </p>`;
+    </form>`;
 }
 
 function saveOfficeCsv() {
-  const data = state.officeReport;
+  const data = officeView();
   if (!data) return;
   const sheet = officeSheet(data);
   const quote = (cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`;
   const head = ["No.", "Description", "Physical target", "Physical progress", "Percent", "Target officers", "Attended", "Percent", "Allocation", "Expenditure"];
   const push = (lines, no, label, row, people = true) => lines.push([no, label, ...officeFigures(row, people)]);
-  const lines = [head];
+  const year = data.year || chosenYear();
+  const total = advanceNumber(data.totalProvision);
+  const spent = advanceNumber(data.spentTotal);
+  const lines = [
+    [L("කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත", "முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு - வடமேல் மாகாணம்", "Management Development and Training Unit - North Western Province")],
+    [reportSpan(year)],
+    [L("මුළු ප්‍රතිපාදන ගණන", "மொத்த ஒதுக்கீடு", "Total provision"), officeMoney(total)],
+    [L("වියදම", "செலவு", "Expenditure"), officeMoney(spent)],
+    [L("ඉතිරි ප්‍රතිපාදන ප්‍රමාණය", "மீதமுள்ள ஒதுக்கீடு", "Remaining provision"), officeMoney(total - spent)],
+    head,
+  ];
   sheet.training.forEach((row) => push(lines, row.no, row.label, row));
   push(lines, "", L("උප එකතුව", "உப கூட்டல்", "Subtotal"), sheet.sub);
   push(lines, sheet.meeting.no, sheet.meeting.label, sheet.meeting);
@@ -8157,7 +8866,150 @@ function saveOfficeCsv() {
   saveBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `karyalaya-pragathi-${data.year}.csv`);
 }
 
-function printAheadSheet(selector) {
+function officeView() {
+  const data = state.officeReport;
+  if (!data) return null;
+  const copy = { ...data, outside: { ...(data.outside || {}) } };
+  const form = document.getElementById("office-out");
+  if (form) {
+    copy.outside.amount = form.elements.amount?.value ?? copy.outside.amount;
+    copy.outside.spent = form.elements.spent?.value ?? copy.outside.spent;
+    const previous = advanceNumber(data.outside?.spent);
+    const next = advanceNumber(copy.outside.spent);
+    copy.spentTotal = officeMoney(advanceNumber(data.spentTotal) - previous + next);
+    copy.leftProvision = officeMoney(advanceNumber(data.totalProvision) - advanceNumber(copy.spentTotal));
+  }
+  return copy;
+}
+
+function officePdfRows(sheet) {
+  const line = (no, label, row, people = true) => [String(no), label, ...officeFigures(row, people)];
+  return [
+    ...sheet.training.map((row) => line(row.no, row.label, row)),
+    line("", L("උප එකතුව", "உப கூட்டல்", "Subtotal"), sheet.sub),
+    line(sheet.meeting.no, sheet.meeting.label, sheet.meeting),
+    line("", L("වෙනත් ආයතන වෙත මාරු කළ ප්‍රතිපාදන", "பிற நிறுவனங்களுக்கு மாற்றிய ஒதுக்கீடு", "Transferred to other institutions"), sheet.outside, false),
+    line("", L("මුළු එකතුව", "மொத்தம்", "Grand total"), sheet.grand),
+  ];
+}
+
+async function officePdf(mode) {
+  const data = officeView();
+  if (!data) return;
+  if (document.fonts?.load) {
+    await document.fonts.load("600 32px 'Noto Sans Sinhala'").catch(() => {});
+    await document.fonts.load("400 26px 'Noto Sans Sinhala'").catch(() => {});
+  }
+  if (document.fonts?.ready) await document.fonts.ready;
+  const year = data.year || chosenYear();
+  const sheet = officeSheet(data);
+  const total = advanceNumber(data.totalProvision);
+  const spent = advanceNumber(data.spentTotal);
+  const span = reportSpan(year);
+  const unit = "කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත";
+  const canvases = mode === "summary"
+    ? [tamilSummaryCanvas(null, year, {
+      title: "කාර්යාල ප්‍රගතිය",
+      subtitle: `${unit}  ·  ${span}`,
+      lines: [
+        ["මුළු ප්‍රතිපාදන ගණන", officeMoney(total)],
+        ["වියදම", officeMoney(spent)],
+        ["ඉතිරි ප්‍රතිපාදන ප්‍රමාණය", officeMoney(total - spent)],
+        ["භෞතික ඉලක්කය (වැඩසටහන්)", String(sheet.physical.plan)],
+        ["භෞතික ප්‍රගතිය (වැඩසටහන්)", String(sheet.physical.held)],
+        ["භෞතික ප්‍රගති ප්‍රතිශතය", `${officePct(sheet.physical.held, sheet.physical.plan)}%`],
+        ["මුළු එකතුවේ ප්‍රතිපාදන", officeMoney(sheet.grand.alloc)],
+        ["මුළු එකතුවේ වියදම", officeMoney(sheet.grand.spent)],
+      ],
+    })]
+    : tamilTablePages({
+      pageW: 1754,
+      pageH: 1240,
+      margin: reportMargin(),
+      onePage: true,
+      title: `කාර්යාල ප්‍රගතිය  ·  ${year}`,
+      headers: ["අංකය", "විස්තරය", "භෞතික ඉලක්කය", "භෞතික ප්‍රගතිය", "%", "ඉලක්කගත සේවක", "සහභාගී වූ", "%", "ප්‍රතිපාදන", "වියදම"],
+      widths: [40, 420, 140, 140, 78, 130, 130, 78, 149, 149],
+      rows: officePdfRows(sheet),
+      alignRight: [0, 2, 3, 4, 5, 6, 7, 8, 9],
+      foot: [
+        unit,
+        span,
+        `මුළු ප්‍රතිපාදන ගණන: ${officeMoney(total)}`,
+        `වියදම: ${officeMoney(spent)}`,
+        `ඉතිරි ප්‍රතිපාදන ප්‍රමාණය: ${officeMoney(total - spent)}`,
+      ],
+    });
+  const images = [];
+  for (const page of canvases) {
+    const blob = await new Promise((resolve) => page.toBlob(resolve, "image/jpeg", 0.92));
+    images.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), width: page.width, height: page.height });
+  }
+  const landscape = mode !== "summary";
+  saveBlob(
+    jpegPdfPages(images, landscape ? "841.89" : "595.28", landscape ? "595.28" : "841.89"),
+    `karyalaya-${mode === "summary" ? "saranshaya" : "visthara"}-${year}.pdf`
+  );
+}
+
+async function comparePdf(mode) {
+  const data = state.compareReport;
+  if (!data) return;
+  if (document.fonts?.load) {
+    await document.fonts.load("600 32px 'Noto Sans Sinhala'").catch(() => {});
+    await document.fonts.load("400 26px 'Noto Sans Sinhala'").catch(() => {});
+  }
+  if (document.fonts?.ready) await document.fonts.ready;
+  const sheet = compareSheet(data);
+  const span = `${sheet.years[0] || ""} - ${sheet.years[sheet.years.length - 1] || ""}`;
+  const unit = "කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත";
+  const headers = ["අංකය", "විස්තරය", ...sheet.years.map(String)];
+  const widths = compareWidths(sheet.years.length);
+  const alignRight = headers.map((_, index) => index).filter((index) => index !== 1);
+  const cell = (row, year, money) => {
+    const item = (sheet.byYear[year]?.items || []).find((entry) => entry.id === row.id) || {};
+    return money ? `${officeMoney(item.spent)} / ${officeMoney(item.alloc)}` : `${item.held || 0} / ${item.plan || 0}`;
+  };
+  const table = (title, money, foot) => tamilTablePages({
+    pageW: 1754,
+    pageH: 1240,
+    margin: reportMargin(),
+    title,
+    headers,
+    widths,
+    rows: sheet.rows.map((row) => [row.no, row.label, ...sheet.years.map((year) => cell(row, year, money))]),
+    alignRight,
+    foot,
+  });
+  const canvases = mode === "summary"
+    ? [tamilSummaryCanvas(null, data.year, {
+      title: "වාර්ෂික ප්‍රගති සංසන්දනය",
+      subtitle: `${unit}  ·  ${span}`,
+      lines: sheet.years.flatMap((year) => {
+        const pack = compareYearTotals(sheet, year);
+        return [
+          [`${year} භෞතික ප්‍රගතිය (පැවැත්වූ / සැලැස්ම)`, `${pack.held} / ${pack.plan} (${officePct(pack.held, pack.plan)}%)`],
+          [`${year} මූල්‍ය ප්‍රගතිය (වියදම / ප්‍රතිපාදන)`, `${officeMoney(pack.spent)} / ${officeMoney(pack.alloc)}`],
+        ];
+      }),
+    })]
+    : [
+      ...table(`වාර්ෂික සංසන්දනය · භෞතික ප්‍රගතිය · ${span}`, false, [unit, "පැවැත්වූ / සැලැස්ම"]),
+      ...table(`වාර්ෂික සංසන්දනය · මූල්‍ය ප්‍රගතිය · ${span}`, true, [unit, "වියදම / ප්‍රතිපාදන"]),
+    ];
+  const images = [];
+  for (const page of canvases) {
+    const blob = await new Promise((resolve) => page.toBlob(resolve, "image/jpeg", 0.92));
+    images.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), width: page.width, height: page.height });
+  }
+  const landscape = mode !== "summary";
+  saveBlob(
+    jpegPdfPages(images, landscape ? "841.89" : "595.28", landscape ? "595.28" : "841.89"),
+    `varshika-sansandanaya-${mode === "summary" ? "saranshaya" : "visthara"}-${data.year || chosenYear()}.pdf`
+  );
+}
+
+function printAheadSheet(selector, landscape = false) {
   const source = document.querySelector(selector);
   if (!source) return;
   let sheet = document.getElementById("ahead-official");
@@ -8174,9 +9026,11 @@ function printAheadSheet(selector) {
     span.textContent = field.value;
     field.replaceWith(span);
   });
-  document.body.classList.add("printing-ahead");
+  document.body.classList.add(landscape ? "printing-compare" : "printing-ahead");
+  if (landscape) sheet.classList.add("compare-print");
   const done = () => {
-    document.body.classList.remove("printing-ahead");
+    document.body.classList.remove("printing-ahead", "printing-compare");
+    sheet.classList.remove("compare-print");
     sheet.innerHTML = "";
   };
   window.addEventListener("afterprint", done, { once: true });
@@ -8189,9 +9043,9 @@ function saveAheadCsv() {
   const spec = aheadSpec(form.dataset.kind);
   const pack = tamilFigures(form);
   const quote = (cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`;
-  const lines = [["No.", "Programme", "Days", "Place", "Provision", "Expenditure", "Trainees"]];
+  const lines = [["No.", "Programme", "Days", "Place", "Coordinator", "Provision", "Expenditure", "Trainees"]];
   pack.rows.forEach((row, index) => {
-    lines.push([index + 1, row.name, row.days, row.place, row.money, row.spent, row.people]);
+    lines.push([index + 1, row.name, row.days, row.place, row.coord || "", row.money, row.spent, row.people]);
   });
   lines.push(["", "Total", "", "", progressMoney(pack.alloc), progressMoney(pack.spent), String(Math.round(pack.people))]);
   saveBlob(new Blob([`\uFEFF${lines.map((line) => line.map(quote).join(",")).join("\r\n")}\r\n`], { type: "text/csv;charset=utf-8" }), `${spec.file}-${chosenYear()}.csv`);
@@ -8212,6 +9066,25 @@ function compareSheet(data) {
   return { years, byYear, rows };
 }
 
+function compareYearTotals(sheet, year) {
+  const items = sheet.byYear[year]?.items || [];
+  return sheet.rows.reduce((box, row) => {
+    const item = items.find((entry) => entry.id === row.id) || {};
+    box.plan += Number(item.plan) || 0;
+    box.held += Number(item.held) || 0;
+    box.alloc += advanceNumber(item.alloc);
+    box.spent += advanceNumber(item.spent);
+    return box;
+  }, { plan: 0, held: 0, alloc: 0, spent: 0 });
+}
+
+function compareWidths(count) {
+  const years = Math.max(count, 1);
+  const fixed = 56 + 402;
+  const each = (1658 - fixed) / years;
+  return [56, 402, ...Array.from({ length: years }, () => each)];
+}
+
 function compareReportHtml(data) {
   const sheet = compareSheet(data);
   const yearHead = sheet.years.map((year) => `<th>${esc(year)}</th>`).join("");
@@ -8230,7 +9103,13 @@ function compareReportHtml(data) {
     return `<tr><td>${esc(row.no)}</td><td class="wrap-cell">${esc(row.label)}</td>${cells}</tr>`;
   }).join("");
   return `
-    <article class="letter office-sheet" id="compare-sheet">
+    <div class="tamil-tools no-print">
+      <button class="btn secondary" type="button" data-act="compare-detail-pdf">${esc(L("විස්තර PDF", "விவரம் PDF", "Detail PDF"))}</button>
+      <button class="btn secondary" type="button" data-act="compare-summary-pdf">${esc(L("සාරාංශ PDF", "சுருக்கம் PDF", "Summary PDF"))}</button>
+      <button class="btn secondary" type="button" data-act="compare-csv">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
+      <button class="btn secondary" type="button" data-act="compare-print">${esc(L("මුද්‍රණය කරන්න", "அச்சிடு", "Print"))}</button>
+    </div>
+    <article class="letter office-sheet compare-sheet" id="compare-sheet">
       <h2>${esc(L("වාර්ෂික ප්‍රගති සංසන්දනය", "ஆண்டு முன்னேற்ற ஒப்பீடு", "Yearly progress comparison"))}</h2>
       <p class="name-meta"><span>${esc(L("කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත", "முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு - வடமேல் மாகாணம்", "Management Development and Training Unit - North Western Province"))}</span>
         <span>${esc(sheet.years[0] || "")} - ${esc(sheet.years[sheet.years.length - 1] || "")}</span></p>
@@ -8244,11 +9123,7 @@ function compareReportHtml(data) {
         <thead><tr><th>${esc(L("අංකය", "இல.", "No."))}</th><th>${esc(L("විස්තරය", "விவரம்", "Description"))}</th>${yearHead}</tr></thead>
         <tbody>${money}</tbody>
       </table></div>
-    </article>
-    <p class="scheduled-copy no-print">
-      <button type="button" data-act="compare-print">${esc(L("මුද්‍රණය කරන්න", "அச்சிடு", "Print"))}</button>
-      <button type="button" data-act="compare-csv">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
-    </p>`;
+    </article>`;
 }
 
 function saveCompareCsv() {
@@ -8256,7 +9131,12 @@ function saveCompareCsv() {
   if (!data) return;
   const sheet = compareSheet(data);
   const quote = (cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`;
-  const lines = [["Physical held / plan", "Description", ...sheet.years]];
+  const span = `${sheet.years[0] || ""} - ${sheet.years[sheet.years.length - 1] || ""}`;
+  const lines = [
+    [L("කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත", "முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு - வடமேல் மாகாணம்", "Management Development and Training Unit - North Western Province")],
+    [span],
+    [L("භෞතික ප්‍රගතිය (පැවැත්වූ / සැලැස්ම)", "பௌதிக முன்னேற்றம் (நடத்தியவை / திட்டம்)", "Physical progress (held / plan)"), L("විස්තරය", "விவரம்", "Description"), ...sheet.years],
+  ];
   sheet.rows.forEach((row) => {
     lines.push([row.no, row.label, ...sheet.years.map((year) => {
       const item = (sheet.byYear[year]?.items || []).find((entry) => entry.id === row.id) || {};
@@ -8264,7 +9144,7 @@ function saveCompareCsv() {
     })]);
   });
   lines.push([]);
-  lines.push(["Financial spent / allocation", "Description", ...sheet.years]);
+  lines.push([L("මූල්‍ය ප්‍රගතිය (වියදම / ප්‍රතිපාදන)", "நிதி முன்னேற்றம் (செலவு / ஒதுக்கீடு)", "Financial progress (spent / allocation)"), L("විස්තරය", "விவரம்", "Description"), ...sheet.years]);
   sheet.rows.forEach((row) => {
     lines.push([row.no, row.label, ...sheet.years.map((year) => {
       const item = (sheet.byYear[year]?.items || []).find((entry) => entry.id === row.id) || {};
@@ -8304,6 +9184,269 @@ async function renderAhead(work) {
   const data = await api(spec.action, { query: { year } });
   if (state.module !== "ahead" || (state.query?.get("tab") || "office") !== current) return;
   work.innerHTML = `${bar}<h1>${esc(title)}</h1>${tamilReportHtml(data, spec)}`;
+}
+
+function coordFraction(done, plan, percent) {
+  return `${done || 0} / ${plan || 0} (${percent ? percent + "%" : "–"})`;
+}
+
+function coordMoneyFraction(spent, plan, percent) {
+  return `${progressMoney(spent)} / ${progressMoney(plan)} (${percent ? percent + "%" : "–"})`;
+}
+
+function coordProgrammeCell(item) {
+  return `${item.held ? "පැවැත්වූ" : "සැලසුම"} · ${item.programmePercent ? item.programmePercent + "%" : "–"}`;
+}
+
+function coordGroupHtml(title, items, totals) {
+  const list = items || [];
+  const box = totals || {};
+  const body = list.map((item) => `<tr>
+    <td class="wrap-cell">${esc(item.name)}</td>
+    <td>${esc(showDate(item.day))}</td>
+    <td>${esc(coordProgrammeCell(item))}</td>
+    <td>${esc(coordMoneyFraction(item.spentMoney, item.planMoney, item.moneyPercent))}</td>
+    <td>${esc(coordFraction(item.camePeople, item.planPeople, item.peoplePercent))}</td>
+  </tr>`).join("");
+  const total = list.length ? `<tr>
+    <td colspan="2"><b>එකතුව</b></td>
+    <td><b>${esc(coordFraction(box.heldCount, box.planCount, box.programmePercent))}</b></td>
+    <td><b>${esc(coordMoneyFraction(box.spentMoney, box.planMoney, box.moneyPercent))}</b></td>
+    <td><b>${esc(coordFraction(box.camePeople, box.planPeople, box.peoplePercent))}</b></td>
+  </tr>` : `<tr><td colspan="5">මේ වර්ගයේ වැඩසටහන් නැත.</td></tr>`;
+  return `<h4>${esc(title)} — ${esc(list.length)}</h4>
+    <div class="table-wrap desig-list"><table>
+      <thead><tr>
+        <th>පුහුණු වැඩසටහන</th>
+        <th>දිනය</th>
+        <th>පුහුණු වැඩසටහන ප්‍රගතිය</th>
+        <th>මුල්‍ය ප්‍රගතිය</th>
+        <th>පුහුණු ලාභීන්ගේ ප්‍රගතිය</th>
+      </tr></thead>
+      <tbody>${body}${total}</tbody>
+    </table></div>`;
+}
+
+function coordOfficerKey(officer) {
+  return String(officer?.key || officer?.nid || officer?.name || "");
+}
+
+function coordChosenOfficer(data) {
+  const officers = data?.officers || [];
+  return officers.find((officer) => coordOfficerKey(officer) === state.coordPick) || officers[0] || null;
+}
+
+function coordNameIsId(officer) {
+  const bare = String(officer?.name || "").replace(/\s+/g, "").toUpperCase();
+  return /^\d{9}[VX]?$/.test(bare) || /^\d{12}$/.test(bare);
+}
+
+function coordDisplayName(officer) {
+  if (!officer?.name || coordNameIsId(officer)) return "සම්බන්ධීකරණය නොමැත";
+  return officer.name;
+}
+
+function coordOptionLabel(officer) {
+  return coordDisplayName(officer);
+}
+
+function coordOfficerHtml(officer) {
+  const groups = [
+    ["පොදු පුහුණු", officer.general, officer.generalTotal],
+    ["දෙපාර්තමේන්තු පුහුණු", officer.department, officer.departmentTotal],
+    ["විශේෂ පුහුණු", officer.special, officer.specialTotal],
+  ];
+  if ((officer.other || []).length) groups.push(["අනෙක් පුහුණු", officer.other, officer.otherTotal]);
+  const tables = groups
+    .filter(([, items]) => (items || []).length)
+    .map(([title, items, totals]) => coordGroupHtml(title, items, totals))
+    .join("");
+  return `<header class="coord-person">
+      <h3>${esc(coordDisplayName(officer))}</h3>
+      ${officer.nid ? `<p class="pad-note">ජාතික හැඳුනුම්පත් අංකය ${esc(officer.nid)}</p>` : ""}
+    </header>
+    <div class="office-head-totals">
+      <div><span>පොදු පුහුණු ඉලක්කය</span><b>${esc(officer.generalCount || 0)}</b></div>
+      <div><span>දෙපාර්තමේන්තු පුහුණු</span><b>${esc(officer.departmentCount || 0)}</b></div>
+      <div><span>විශේෂ පුහුණු</span><b>${esc(officer.specialCount || 0)}</b></div>
+    </div>
+    ${tables || `<p class="pad-note">මේ නිලධාරියාට මේ වර්ෂයේ වැඩසටහන් නැත.</p>`}`;
+}
+
+async function renderCoordReport(work) {
+  const data = await api("coord-progress", { query: { year: chosenYear() } });
+  state.coordReport = data;
+  const officers = data.officers || [];
+  if (!officers.some((officer) => coordOfficerKey(officer) === state.coordPick)) {
+    state.coordPick = coordOfficerKey(officers[0] || {});
+  }
+  const officer = coordChosenOfficer(data);
+  const options = officers.map((item) => {
+    const key = coordOfficerKey(item);
+    const selected = officer && coordOfficerKey(officer) === key ? "selected" : "";
+    return `<option value="${esc(key)}" ${selected}>${esc(coordOptionLabel(item, officers))}</option>`;
+  }).join("");
+  const picker = officers.length
+    ? `<form class="coord-pick" id="coord-pick">
+        <label>${esc(L("සම්බන්ධීකරණ නිලධාරියා", "ஒருங்கிணைப்பாளர்", "Coordination officer"))}
+          <select id="coord-officer">${options}</select>
+        </label>
+      </form>`
+    : "";
+  work.innerHTML = `
+    <h2 class="classic-title">${esc(L("සම්බන්ධීකරණ නිලධාරීන්ගේ වාර්ෂික ප්‍රගතිය", "ஒருங்கிணைப்பாளர் ஆண்டு முன்னேற்றம்", "Coordinator progress for the year"))} — ${esc(data.year)}</h2>
+    <p class="pad-note">${esc(L("එකම ජාතික හැඳුනුම්පත් අංකය එකම සම්බන්ධීකරණ නිලධාරියා. නම තෝරාගත් විට ඒ නිලධාරියාගේ පොදු, දෙපාර්තමේන්තු සහ විශේෂ පුහුණු ප්‍රගතිය පමණක් පෙනෙනවා. එක් එක් පුහුණුවට වැඩසටහන, මුල්‍ය සහ පුහුණු ලාභීන්ගේ ප්‍රගතිය තියෙනවා. PDF සහ Excel තෝරාගත් නිලධාරියාටයි.", "ஒரே அடையாள எண் ஒரே ஒருங்கிணைப்பாளர். பெயரைத் தேர்ந்தால் அவரின் பொது, திணைக்களம், சிறப்பு முன்னேற்றம் மட்டும் தெரியும். ஒவ்வொரு பயிற்சிக்கும் நிகழ்ச்சி, நிதி, பயிலுநர் முன்னேற்றம் உள்ளது. PDF மற்றும் Excel தேர்ந்த பெயருக்கே.", "The same national identity number is one coordination officer. Choosing a name shows only that officer's general, departmental and special progress. Each programme shows programme, financial and trainee progress. PDF and Excel follow the selected officer."))}</p>
+    ${picker}
+    <p class="letter-actions">
+      <button type="button" data-act="coord-pdf">${esc(L("PDF බාගත කරන්න", "PDF பதிவிறக்கம்", "Download PDF"))}</button>
+      <button type="button" data-act="coord-excel">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
+    </p>
+    <div id="coord-sheet">${officer ? coordOfficerHtml(officer) : `<p class="pad-note">මේ වර්ෂයේ සම්බන්ධීකරණ වැඩසටහන් නැත.</p>`}</div>`;
+}
+
+function saveCoordExcel() {
+  const data = state.coordReport;
+  if (!data) return;
+  const cell = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const row = (values) => `<tr>${values.map((value) => `<td>${cell(value)}</td>`).join("")}</tr>`;
+  const head = ["පුහුණු වැඩසටහන", "දිනය", "පුහුණු වැඩසටහන ප්‍රගතිය", "මුල්‍ය ප්‍රගතිය", "පුහුණු ලාභීන්ගේ ප්‍රගතිය"];
+  const lines = [];
+  const groups = [
+    ["පොදු පුහුණු", "general", "generalTotal"],
+    ["දෙපාර්තමේන්තු පුහුණු", "department", "departmentTotal"],
+    ["විශේෂ පුහුණු", "special", "specialTotal"],
+    ["අනෙක් පුහුණු", "other", "otherTotal"],
+  ];
+  const officer = coordChosenOfficer(data);
+  if (!officer) {
+    lines.push(row(["මේ වර්ෂයේ සම්බන්ධීකරණ වැඩසටහන් නැත"]));
+  } else {
+    lines.push(row([coordDisplayName(officer)]));
+    if (officer.nid) lines.push(row([`ජාතික හැඳුනුම්පත් අංකය ${officer.nid}`]));
+    lines.push(row([`පොදු පුහුණු ඉලක්කය ${officer.generalCount || 0}`, `දෙපාර්තමේන්තු පුහුණු ${officer.departmentCount || 0}`, `විශේෂ පුහුණු ${officer.specialCount || 0}`]));
+    groups.forEach(([label, key, totalKey]) => {
+      const items = officer[key] || [];
+      if (!items.length) return;
+      const box = officer[totalKey] || {};
+      lines.push(row([`${label} — ${items.length}`]));
+      lines.push(row(head));
+      items.forEach((item) => {
+        lines.push(row([
+          item.name,
+          showDate(item.day),
+          coordProgrammeCell(item),
+          coordMoneyFraction(item.spentMoney, item.planMoney, item.moneyPercent),
+          coordFraction(item.camePeople, item.planPeople, item.peoplePercent),
+        ]));
+      });
+      lines.push(row([
+        "එකතුව",
+        "",
+        coordFraction(box.heldCount, box.planCount, box.programmePercent),
+        coordMoneyFraction(box.spentMoney, box.planMoney, box.moneyPercent),
+        coordFraction(box.camePeople, box.planPeople, box.peoplePercent),
+      ]));
+    });
+  }
+  const html = `<html><head><meta charset="utf-8"></head><body><table>${lines.join("")}</table></body></html>`;
+  saveBlob(new Blob([html], { type: "application/vnd.ms-excel" }), `sambandikarana-pragathi-${data.year}.xls`);
+}
+
+async function saveCoordPdf() {
+  const data = state.coordReport;
+  if (!data) return;
+  await document.fonts.ready;
+  const pageW = 1754;
+  const pageH = 1240;
+  const margin = reportMargin();
+  const headers = ["පුහුණු වැඩසටහන", "දිනය", "වැඩසටහන ප්‍රගතිය", "මුල්‍ය ප්‍රගතිය", "ලාභී ප්‍රගතිය"];
+  const weights = [0.34, 0.12, 0.16, 0.2, 0.18];
+  const tableW = pageW - margin * 2;
+  const widths = weights.map((part) => tableW * part);
+  const rowH = 34;
+  const paint = (title, records) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = pageW;
+    canvas.height = pageH;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, pageW, pageH);
+    ctx.fillStyle = "#111111";
+    ctx.font = '700 26px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+    ctx.fillText(title, margin, margin + 26);
+    let y = margin + 44;
+    const drawRow = (values, header) => {
+      ctx.font = `${header ? 700 : 400} 15px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+      let x = margin;
+      values.forEach((value, index) => {
+        const colW = widths[index];
+        ctx.strokeStyle = "#222222";
+        ctx.strokeRect(x, y, colW, rowH);
+        ctx.fillStyle = header ? "#f3e6c4" : "#ffffff";
+        ctx.fillRect(x + 1, y + 1, colW - 2, rowH - 2);
+        ctx.fillStyle = "#111111";
+        const text = String(value ?? "");
+        const max = colW - 12;
+        let shown = text;
+        while (shown.length > 1 && ctx.measureText(shown).width > max) shown = shown.slice(0, -1);
+        if (shown !== text) shown = shown.slice(0, -1) + "…";
+        ctx.fillText(shown, x + 6, y + 22);
+        x += colW;
+      });
+      y += rowH;
+    };
+    drawRow(headers, true);
+    records.forEach((record) => drawRow(record, false));
+    return canvas;
+  };
+  const pages = [];
+  const officer = coordChosenOfficer(data);
+  const groups = [
+    ["පොදු පුහුණු", "general", "generalTotal"],
+    ["දෙපාර්තමේන්තු පුහුණු", "department", "departmentTotal"],
+    ["විශේෂ පුහුණු", "special", "specialTotal"],
+    ["අනෙක් පුහුණු", "other", "otherTotal"],
+  ];
+  if (!officer) {
+    pages.push(paint(`${data.year} සම්බන්ධීකරණ ප්‍රගතිය`, [["මේ වර්ෂයේ වැඩසටහන් නැත", "", "", "", ""]]));
+  } else {
+    const who = `${data.year} ${coordDisplayName(officer)}${officer.nid ? " · " + officer.nid : ""}`;
+    const counts = `පොදු ${officer.generalCount || 0} · දෙපාර්තමේන්තු ${officer.departmentCount || 0} · විශේෂ ${officer.specialCount || 0}`;
+    const filled = groups.filter(([, key]) => (officer[key] || []).length);
+    if (!filled.length) {
+      pages.push(paint(who, [["මේ නිලධාරියාට මේ වර්ෂයේ වැඩසටහන් නැත", "", "", "", ""]]));
+    }
+    filled.forEach(([label, key, totalKey]) => {
+      const items = officer[key] || [];
+      const box = officer[totalKey] || {};
+      const title = `${who} · ${label} ${items.length} · ${counts}`;
+      const records = items.map((item) => [
+        item.name,
+        showDate(item.day),
+        coordProgrammeCell(item),
+        coordMoneyFraction(item.spentMoney, item.planMoney, item.moneyPercent),
+        coordFraction(item.camePeople, item.planPeople, item.peoplePercent),
+      ]);
+      records.push([
+        "එකතුව",
+        "",
+        coordFraction(box.heldCount, box.planCount, box.programmePercent),
+        coordMoneyFraction(box.spentMoney, box.planMoney, box.moneyPercent),
+        coordFraction(box.camePeople, box.planPeople, box.peoplePercent),
+      ]);
+      const room = Math.max(1, Math.floor((pageH - margin - (margin + 44)) / rowH));
+      for (let start = 0; start < records.length; start += room) {
+        const slice = records.slice(start, start + room);
+        pages.push(paint(start ? `${title} (${Math.floor(start / room) + 1})` : title, slice));
+      }
+    });
+  }
+  const images = [];
+  for (const page of pages) {
+    const blob = await new Promise((resolve) => page.toBlob(resolve, "image/jpeg", 0.92));
+    images.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), width: page.width, height: page.height });
+  }
+  saveBlob(jpegPdfPages(images, "841.89", "595.28"), `sambandikarana-pragathi-${data.year}.pdf`);
 }
 
 function renderReports(work) {
@@ -8351,12 +9494,41 @@ function reportTable(data) {
 }
 
 function downloadPlanTemplate() {
-  const header = ["පුහුණු වැඩසටහන", "දින ගණන", "සේවක සංඛ්‍යාව", "ස්ථානය", "ඉලක්කගත කණ්ඩායම", "ප්‍රතිපාදන"];
-  const csv = `\uFEFF${header.map((cell) => `"${cell}"`).join(",")}\r\n`;
+  const year = document.querySelector("#next-plan [name=year], #plan-upload [name=year]")?.value || chosenYear();
+  const quote = (cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`;
+  const header = [
+    "පුහුණු වැඩසටහන",
+    "පුහුණු වැඩසටහනේ වර්ගය",
+    "ඉලක්කගත කණ්ඩායම",
+    "වැඩමුළු ගණන",
+    "එක් වැඩමුළුවකට දින ගණන",
+    "සහභාගී කරගන්නා නිලධාරීන් ගණන",
+    "ස්ථානය",
+    "මූල්‍ය ප්‍රභවය",
+    "එක් වැඩමුළුවක් සඳහා වෙන් කල මුදල (රුපියල්)",
+    "ආරම්භක දිනය",
+    "සම්බන්ධීකරණය (ජා.හැ.අංකය)",
+    "සම්බන්ධීකරණ නිලධාරියාගේ නම",
+  ];
+  const sample = [
+    "උදාහරණය — මෙම පේළිය ඉවත් කරන්න",
+    "පොදු පුහුණු",
+    "සියලු නිලධාරීන්",
+    "1",
+    "1",
+    "30",
+    "",
+    "",
+    "0",
+    `${year}-01-01`,
+    "",
+    "",
+  ];
+  const csv = `\uFEFF${quote(`${year} වාර්ෂික පුහුණු සැලැස්ම`)}\r\n${header.map(quote).join(",")}\r\n${sample.map(quote).join(",")}\r\n`;
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "selasma-akurthiya.csv";
+  link.download = `varshika-selasma-${year}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
 }
@@ -8381,6 +9553,16 @@ function exportPhoneSheet() {
 async function onClick(event) {
   const act = event.target.closest("[data-act]")?.dataset;
   if (!act) return;
+  if (act.act === "pwd-eye") {
+    event.preventDefault();
+    const wrap = event.target.closest(".pwd-wrap");
+    const input = wrap?.querySelector("input");
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    event.target.closest(".pwd-eye")?.setAttribute("aria-pressed", show ? "true" : "false");
+    return;
+  }
   if (act.act === "pace-jump") {
     event.preventDefault();
     document.getElementById(act.jump)?.scrollIntoView({ block: "start" });
@@ -8476,7 +9658,34 @@ async function onClick(event) {
     event.preventDefault();
     const year = document.querySelector("#person-year")?.value || chosenYear();
     rememberYear(year);
-    location.hash = `#console/person?year=${encodeURIComponent(year)}&tab=${encodeURIComponent(act.tab || "summary")}`;
+    const from = document.querySelector("#person-from")?.value || "";
+    const until = document.querySelector("#person-until")?.value || "";
+    const q = new URLSearchParams({ year, tab: act.tab || "summary" });
+    if (from) q.set("from", from);
+    if (until) q.set("until", until);
+    location.hash = `#console/person?${q.toString()}`;
+    return;
+  }
+  if (act.act === "person-matrix-pdf") {
+    event.preventDefault();
+    savePersonMatrixPdf().catch((error) => alert(error.message));
+    return;
+  }
+  if (act.act === "backup-run") {
+    event.preventDefault();
+    const slot = document.querySelector("#form-msg");
+    if (slot) slot.innerHTML = `<div class="muted">${esc(L("උපස්ථ වෙමින්…", "காப்பு ஆகிறது…", "Backing up…"))}</div>`;
+    api("backup-run", { method: "POST", body: {} })
+      .then(() => renderBackup(document.querySelector("#work")))
+      .catch((error) => {
+        if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
+        else alert(error.message);
+      });
+    return;
+  }
+  if (act.act === "backup-refresh") {
+    event.preventDefault();
+    renderBackup(document.querySelector("#work")).catch((error) => alert(error.message));
     return;
   }
   if (act.act === "lang") {
@@ -8497,6 +9706,16 @@ async function onClick(event) {
     localStorage.setItem("mdtu-theme", state.theme);
     applyChrome();
   }
+  if (act.act === "coord-pdf") {
+    event.preventDefault();
+    saveCoordPdf().catch((error) => alert(error.message));
+    return;
+  }
+  if (act.act === "coord-excel") {
+    event.preventDefault();
+    saveCoordExcel();
+    return;
+  }
   if (act.act === "letter-pdf" || act.act === "letter-image") {
     event.preventDefault();
     saveLetter(act.act === "letter-pdf" ? "pdf" : "image").catch((error) => alert(error.message));
@@ -8515,6 +9734,10 @@ async function onClick(event) {
   }
   if (act.act === "gemini-key-show") {
     event.preventDefault();
+    if (state.user?.role !== "Administrator") {
+      alert(L("Gemini යතුර වෙනස් කරන්න පුළුවන් Admin ට පමණයි.", "Gemini திறவுகோலை மாற்ற Admin மட்டுமே முடியும்.", "Only an Admin can change the Gemini key."));
+      return;
+    }
     const box = document.querySelector("#gemini-key-box");
     if (box) box.hidden = false;
   }
@@ -8543,19 +9766,30 @@ async function onClick(event) {
     body.append("dates", JSON.stringify([...form.querySelectorAll(".format-day")].map((block) => block.dataset.date || "")));
     if (file) body.append("file", file);
     const button = event.target.closest("button");
-    if (button) button.disabled = true;
+    if (button?.dataset.busy === "1") return;
+    if (button) {
+      button.dataset.busy = "1";
+      button.disabled = true;
+    }
     const slot = form.querySelector("#form-msg");
-    if (slot) slot.innerHTML = `<div class="ok">${esc(L("Gemini එකෙන් ගෙන එනවා...", "Gemini இலிருந்து கொண்டு வருகிறது...", "Getting it from Gemini..."))}</div>`;
+    if (slot) slot.innerHTML = `<div class="ok">${esc(L("කරුණාකර රැඳී සිටින්න… Gemini එකෙන් ගෙන එනවා.", "தயவுசெய்து காத்திருக்கவும்… Gemini இலிருந்து கொண்டு வருகிறது.", "Please wait… Getting it from Gemini."))}</div>`;
     try {
       const saved = await api("module-gemini", { method: "POST", form: body });
       const placed = applyModuleDays(form, saved.days);
       if (!placed) throw new Error(L("Gemini එකෙන් සැසි ලැබුණේ නැහැ.", "Gemini இலிருந்து அமர்வுகள் வரவில்லை.", "Gemini did not return sessions."));
-      if (slot) slot.innerHTML = `<div class="ok">${esc(L("මොඩියුලය මේ ආකෘතියට දැම්මා. බලලා සුරකින්න.", "தொகுதி இந்தப் படிவத்தில் இடப்பட்டது. பார்த்துச் சேமிக்கவும்.", "The module was placed in this form. Review it and save."))}</div>`;
+      form.querySelectorAll(".sheet-row input, .sheet-row textarea").forEach((field) => {
+        field.readOnly = false;
+        field.disabled = false;
+      });
+      if (slot) slot.innerHTML = `<div class="ok">${esc(L("මොඩියුලය මේ ආකෘතියට දැම්මා. අවශ්‍ය නම් වෙනස් කරලා සුරකින්න.", "தொகுதி இந்தப் படிவத்தில் இடப்பட்டது. தேவைப்பட்டால் திருத்திச் சேமிக்கவும்.", "The module was placed in this form. Edit if needed, then save."))}</div>`;
     } catch (error) {
-      if (slot) slot.innerHTML = "";
-      alert(error.message);
+      if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
+      else alert(error.message);
     } finally {
-      if (button) button.disabled = false;
+      if (button) {
+        delete button.dataset.busy;
+        button.disabled = false;
+      }
     }
   }
   if (act.act === "sheet-add") {
@@ -8632,13 +9866,28 @@ async function onClick(event) {
       openWhatsAppWeb(act.kind);
       return;
     }
-    api("messages-send", { method: "POST", body: { atp, kind: act.kind, channel: act.channel } }).then((saved) => {
+    if (state.messageBusy) return;
+    state.messageBusy = true;
+    const buttons = [...document.querySelectorAll('[data-act="message-send"]')];
+    buttons.forEach((node) => { node.disabled = true; });
+    const waiting = act.channel === "sms"
+      ? L("කරුණාකර රැඳී සිටින්න… SMS යවනවා.", "தயவுசெய்து காத்திருக்கவும்… SMS அனுப்புகிறது.", "Please wait… Sending SMS.")
+      : L("කරුණාකර රැඳී සිටින්න… ඊමේල් යවනවා.", "தயவுசெய்து காத்திருக்கவும்… மின்னஞ்சல் அனுப்புகிறது.", "Please wait… Sending email.");
+    if (slot) slot.innerHTML = `<div class="ok">${esc(waiting)}</div>`;
+    const body = { atp, kind: act.kind, channel: act.channel };
+    if (act.kind === "custom") {
+      body.text = $("#bulk-sms-text")?.value || "";
+    }
+    api("messages-send", { method: "POST", body }).then((saved) => {
       if (slot) {
         slot.innerHTML = `<div class="ok">${esc(L("ගියා ", "அனுப்பியது ", "Sent "))}${esc(saved.sent)}. ${esc(L("නැති අය ", "இல்லாதவர்கள் ", "Missing "))}${esc(saved.skipped)}. ${esc(L("ගියේ නැත ", "போகவில்லை ", "Failed "))}${esc(saved.failed)}.</div>`;
       }
     }).catch((error) => {
       if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
       else alert(error.message);
+    }).finally(() => {
+      state.messageBusy = false;
+      buttons.forEach((node) => { node.disabled = false; });
     });
   }
   if (act.act === "eval-full") {
@@ -8650,6 +9899,37 @@ async function onClick(event) {
     document.body.classList.add("printing-eval");
     window.print();
     window.addEventListener("afterprint", () => document.body.classList.remove("printing-eval"), { once: true });
+  }
+  if (act.act === "eval-gemini") {
+    event.preventDefault();
+    const form = document.querySelector("#eval-form");
+    const atp = form?.querySelector("[name=atp]")?.value || state.query?.get("atp") || "";
+    if (!atp) {
+      alert(L("පුහුණුවක් තෝරන්න.", "ஒரு பயிற்சியைத் தேர்ந்தெடுக்கவும்.", "Choose a programme."));
+      return;
+    }
+    const button = event.target.closest("button");
+    if (button?.dataset.busy === "1") return;
+    if (button) {
+      button.dataset.busy = "1";
+      button.disabled = true;
+    }
+    const slot = form?.querySelector("#form-msg");
+    if (slot) slot.innerHTML = `<div class="ok">${esc(L("කරුණාකර රැඳී සිටින්න… Gemini එකෙන් ප්‍රශ්න ගෙන එනවා.", "தயவுசெய்து காத்திருக்கவும்… Gemini இலிருந்து கேள்விகளைக் கொண்டு வருகிறது.", "Please wait… Getting the questions from Gemini."))}</div>`;
+    api("eval-gemini", { method: "POST", body: { atp } }).then((saved) => {
+      const box = $("#eval-questions");
+      const questions = saved.questions || [];
+      if (box) box.innerHTML = evalQuestionsHtml(questions);
+      if (slot) slot.innerHTML = `<div class="ok">${esc(L("ප්‍රශ්න 10 ආවා. බලලා සුරකින්න.", "10 கேள்விகள் வந்தன. பார்த்துச் சேமிக்கவும்.", "Ten questions are here. Review them and save."))}</div>`;
+    }).catch((error) => {
+      if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
+      else alert(error.message);
+    }).finally(() => {
+      if (button) {
+        delete button.dataset.busy;
+        button.disabled = false;
+      }
+    });
   }
   if (act.act === "eval-import") {
     event.preventDefault();
@@ -8672,15 +9952,29 @@ async function onClick(event) {
     event.preventDefault();
     const now = state.quizNow || {};
     const button = event.target.closest("[data-letter]");
-    if (!now.token || !now.nid || !button) return;
-    button.disabled = true;
-    api("eval-answer", {
-      method: "POST",
-      body: { token: now.token, kind: now.kind, nid: now.nid, no: button.dataset.no, choice: button.dataset.letter },
-    }).then(() => api("eval-state", { query: { token: now.token, kind: now.kind, nid: now.nid } })).then((status) => {
+    const card = button?.closest("#quiz-card") || $("#quiz-card");
+    if (!now.token || !now.nid || !button || button.dataset.busy === "1") return;
+    button.dataset.busy = "1";
+    card?.querySelectorAll(".quiz-choice").forEach((node) => {
+      node.disabled = true;
+      node.classList.toggle("is-picked", node === button);
+      node.classList.toggle("is-dimmed", node !== button);
+    });
+    const wait = new Promise((resolve) => setTimeout(resolve, 420));
+    Promise.all([
+      wait,
+      api("eval-answer", {
+        method: "POST",
+        body: { token: now.token, kind: now.kind, nid: now.nid, no: button.dataset.no, choice: button.dataset.letter },
+      }).then(() => api("eval-state", { query: { token: now.token, kind: now.kind, nid: now.nid } })),
+    ]).then(([, status]) => {
       paintQuizQuestion(now.token, now.kind, now.nid, now.opened, status);
     }).catch((error) => {
-      button.disabled = false;
+      button.dataset.busy = "0";
+      card?.querySelectorAll(".quiz-choice").forEach((node) => {
+        node.disabled = false;
+        node.classList.remove("is-picked", "is-dimmed");
+      });
       alert(error.message);
     });
   }
@@ -8882,6 +10176,10 @@ async function onClick(event) {
     location.hash = "#console/cp_staff?tab=all";
     route();
   }
+  if (act.act === "staff-template") {
+    event.preventDefault();
+    saveStaffUploadTemplate();
+  }
   if (act.act === "officer-add") {
     try {
       await api("save", { method: "POST", body: { table: "cp_trainingofficers", data: { tro_nid: act.nid } } });
@@ -8923,8 +10221,10 @@ async function onClick(event) {
   if (act.act === "office-add") {
     event.preventDefault();
     const list = document.getElementById("office-ids");
+    const form = document.getElementById("allowance-form");
     if (!list || list.querySelectorAll(".food-line").length >= 20) return;
     list.insertAdjacentHTML("beforeend", officePersonRow({ nid: "", name: "" }, officeChoicesFromPage()));
+    paintOfficeAmount(form);
   }
   if (act.act === "office-drop") {
     event.preventDefault();
@@ -9055,10 +10355,62 @@ async function onClick(event) {
   if (act.act === "attended-csv") saveAttendedCsv();
   if (act.act === "office-csv") saveOfficeCsv();
   if (act.act === "office-print") printAheadSheet("#office-sheet");
+  if (act.act === "office-detail-pdf" || act.act === "office-summary-pdf") {
+    event.preventDefault();
+    officePdf(act.act === "office-summary-pdf" ? "summary" : "detail").catch((error) => alert(error.message));
+    return;
+  }
+  if (act.act === "ahead-drop") {
+    event.preventDefault();
+    const form = document.getElementById("ahead-form");
+    const tr = event.target.closest("tr[data-id]");
+    if (!form || !tr || form.dataset.kind !== "general") return;
+    const name = tr.dataset.name || "";
+    if (!confirm(L(
+      `${name} මෙම වාර්තාවෙන් ඉවත් කරන්නද? පුහුණුව මකන්නේ නැහැ. ගණන් යාවත්කාලීන වෙනවා.`,
+      `${name} இந்த அறிக்கையிலிருந்து நீக்கவா? பயிற்சி அழியாது. கணக்கு புதுப்பிக்கும்.`,
+      `Leave ${name} out of this report? The programme stays. The figures will update.`
+    ))) return;
+    const omit = new Set(aheadOmitIds(form));
+    omit.add(String(tr.dataset.id || ""));
+    form.dataset.omit = [...omit].join(",");
+    tr.remove();
+    form.querySelectorAll("tbody tr[data-id]").forEach((row, index) => {
+      const cell = row.querySelector("td");
+      if (cell) cell.textContent = String(index + 1);
+    });
+    paintTamilSummary();
+    try {
+      await saveAheadForm(form);
+      route();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  if (act.act === "ahead-restore") {
+    event.preventDefault();
+    const form = document.getElementById("ahead-form");
+    const id = String(act.id || "");
+    if (!form || !id) return;
+    form.dataset.omit = aheadOmitIds(form).filter((item) => item !== id).join(",");
+    try {
+      await saveAheadForm(form, { restore: [id] });
+      route();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
   if (act.act === "ahead-csv") saveAheadCsv();
   if (act.act === "ahead-print") printAheadSheet("#ahead-form");
   if (act.act === "compare-csv") saveCompareCsv();
-  if (act.act === "compare-print") printAheadSheet("#compare-sheet");
+  if (act.act === "compare-print") printAheadSheet("#compare-sheet", true);
+  if (act.act === "compare-detail-pdf" || act.act === "compare-summary-pdf") {
+    event.preventDefault();
+    comparePdf(act.act === "compare-summary-pdf" ? "summary" : "detail").catch((error) => alert(error.message));
+    return;
+  }
   if (act.act === "attended-clear") location.hash = `#console/attended?year=${chosenYear()}`;
   if (act.act === "build-sign") {
     const id = document.querySelector("#sign-form [name=id]")?.value || "";
@@ -9126,7 +10478,7 @@ function openLogin() {
         <h2>${esc(t("signin"))}</h2>
         <div id="form-msg"></div>
         <label>${esc(t("username"))}<input name="username" autocomplete="username" required></label>
-        <label>${esc(t("password"))}<input name="password" type="password" autocomplete="current-password" required></label>
+        <label>${esc(t("password"))}<span class="pwd-wrap"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="pwd-eye" data-act="pwd-eye" aria-label="${esc(L("මුරපදය පෙන්වන්න", "கடவுச்சொல்லைக் காட்டு", "Show the password"))}">${passwordEye()}</button></span></label>
         <p><button class="btn" type="submit">${esc(t("enter"))}</button> <button class="btn secondary" type="button" data-act="close">Close</button></p>
       </form>
     </div>`);
@@ -9177,17 +10529,9 @@ async function onSubmit(event) {
   }
   if (form.id === "ahead-form") {
     event.preventDefault();
-    const pack = tamilFigures(form);
     const note = document.getElementById("tamil-note");
     try {
-      await api(aheadSpec(form.dataset.kind).save, {
-        method: "POST",
-        body: {
-          year: chosenYear(),
-          rows: pack.rows.map((row) => ({ id: row.id, money: row.money, spent: row.spent, people: row.people })),
-        },
-      });
-      if (note) note.textContent = L("සුරකින ලදී", "சேமிக்கப்பட்டது", "Saved");
+      await saveAheadForm(form);
     } catch (error) {
       if (note) note.textContent = "";
       alert(error.message);
@@ -9368,7 +10712,11 @@ async function onSubmit(event) {
   if (form.id === "annual-form") {
     event.preventDefault();
     await submitMessage(form, async () => {
-      await api("save", { method: "POST", body: { table: "cp_atp", data: annualPayload(form) } });
+      const data = annualPayload(form);
+      if (!String(data.atp_supportstaff1 || "").trim()) {
+        throw new Error(L("සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි.", "ஒருங்கிணைப்பு (அடையாள எண்) கட்டாயம்.", "Coordination (national ID) is required."));
+      }
+      await api("save", { method: "POST", body: { table: "cp_atp", data } });
       location.hash = "#console/cp_atp?tab=all";
       route();
     });
@@ -9432,6 +10780,9 @@ async function onSubmit(event) {
     await submitMessage(form, async () => {
       const data = Object.fromEntries(new FormData(form));
       if (!$("#apply-name")?.value) throw new Error(L("හැඳුනුම්පතට නිලධාරියෙකු හමු වුණේ නැහැ.", "அந்த அடையாள எண்ணுக்கு அதிகாரி இல்லை.", "No officer was found for that ID."));
+      if (!String(data.priority || "").trim()) {
+        throw new Error(L("ප්‍රමුඛතාව අනිවාර්යයි. තෝරන්න.", "முன்னுரிமை கட்டாயம். தேர்வு செய்யவும்.", "Priority is required. Please select one."));
+      }
       if (state.applyPerson?.blacklisted === "Yes") {
         throw new Error(L(
           `මේ නිලධාරියා අසාදු ලේඛනයේ ඉන්නවා. ${showDate(state.applyPerson.blacklistUntil)} දක්වා කිසිම පුහුණුවකට අයදුම් කළ නොහැක.`,
@@ -9444,6 +10795,31 @@ async function onSubmit(event) {
       state.applyPerson = null;
       paintApplyPick($("#work"), L("සාර්ථකව අයදුම් කළා.", "விண்ணப்பம் வெற்றிகரமாகச் சேர்க்கப்பட்டது.", "The application was saved."));
     });
+  }
+  if (form.id === "staff-upload-form") {
+    event.preventDefault();
+    const slot = form.querySelector("#form-msg");
+    const file = form.querySelector("[name=file]")?.files?.[0];
+    if (!file) {
+      if (slot) slot.innerHTML = `<div class="error">${esc(L("ගොනුව තෝරන්න.", "கோப்பைத் தேர்வு செய்.", "Choose a file."))}</div>`;
+      return;
+    }
+    const body = new FormData();
+    body.append("file", file);
+    if (slot) slot.innerHTML = `<div class="ok">${esc(L("උඩුගත වෙමින්… විනාඩි කිහිපයක් ගත විය හැක.", "பதிவேறுகிறது… சில நிமிடங்கள் ஆகலாம்.", "Uploading… this may take a few minutes."))}</div>`;
+    try {
+      const saved = await api("staff-upload", { method: "POST", form: body });
+      if (slot) {
+        slot.innerHTML = `<div class="ok">${esc(L(
+          `සාර්ථකයි. අලුත් ${saved.inserted || 0}, යාවත්කාල ${saved.updated || 0}, මඟ හැරුණු ${saved.skipped || 0}.`,
+          `வெற்றி. புதிய ${saved.inserted || 0}, புதுப்பிப்பு ${saved.updated || 0}, தவிர்க்கப்பட்ட ${saved.skipped || 0}.`,
+          `Done. New ${saved.inserted || 0}, updated ${saved.updated || 0}, skipped ${saved.skipped || 0}.`
+        ))}</div>`;
+      }
+      form.reset();
+    } catch (error) {
+      if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
+    }
   }
   if (form.id === "include-picked") {
     event.preventDefault();
@@ -9588,6 +10964,33 @@ async function onSubmit(event) {
       if (input) input.value = "";
     });
   }
+  if (form.id === "sms-settings-form") {
+    event.preventDefault();
+    const packed = Object.fromEntries(new FormData(form).entries());
+    await submitMessage(form, async () => {
+      const body = {
+        sender: packed.sender || "",
+        url: packed.url || "",
+        birthdayMsg: packed.birthdayMsg || "",
+      };
+      if (String(packed.token || "").trim()) body.token = packed.token;
+      await api("messages-sms", { method: "POST", body });
+      const slot = form.querySelector("#sms-msg") || form.querySelector("#form-msg");
+      if (slot) slot.innerHTML = `<div class="ok">${esc(L("SMS සැකසුම් සුරැකුවා. උපන්දින පණිවිඩයත් සුරැකුණා.", "SMS அமைப்புகள் சேமிக்கப்பட்டன. பிறந்தநாள் செய்தியும் சேமிக்கப்பட்டது.", "SMS settings saved. The birthday message was saved too."))}</div>`;
+      const token = form.querySelector("[name=token]");
+      if (token) token.value = "";
+      if (token) token.placeholder = L("සුරැකිලා තියෙනවා — වෙනස් කරන්න නම් අලුත් එක දාන්න", "சேமிக்கப்பட்டுள்ளது — மாற்ற புதியதை இடவும்", "Saved — enter a new one to change");
+    });
+  }
+  if (form.id === "birthday-sms-form") {
+    event.preventDefault();
+    const birthdayMsg = String(new FormData(form).get("birthdayMsg") || "");
+    await submitMessage(form, async () => {
+      await api("messages-sms", { method: "POST", body: { birthdayMsg } });
+      const slot = form.querySelector("#form-msg");
+      if (slot) slot.innerHTML = `<div class="ok">${esc(L("උපන්දින පණිවිඩය සුරැකුවා. අද තවම නොගිය අයට මේ පණිවිඩය යයි.", "பிறந்தநாள் செய்தி சேமிக்கப்பட்டது. இன்று இன்னும் அனுப்பாதவர்களுக்கு இது போகும்.", "Birthday message saved. It will go to people not yet sent today."))}</div>`;
+    });
+  }
   if (form.id === "eval-form") {
     event.preventDefault();
     await submitMessage(form, async () => {
@@ -9616,13 +11019,19 @@ async function onSubmit(event) {
   }
   if (form.id === "module-format-form") {
     event.preventDefault();
+    event.stopPropagation();
     await submitMessage(form, async () => {
       const packed = sheetPayload(form);
       const saved = await api("module-save", {
         method: "POST",
-        body: { id: packed.id, title: packed.title, atp: packed.atp, days: packed.days },
+        body: {
+          id: packed.id,
+          title: packed.title,
+          atp: packed.atp,
+          days: packed.days,
+        },
       });
-      const next = `#console/modular?id=${encodeURIComponent(saved.id)}`;
+      const next = `#console/modular?tab=format&id=${encodeURIComponent(saved.id)}`;
       if (location.hash === next) route();
       else location.hash = next;
     });
@@ -9733,10 +11142,21 @@ async function onSubmit(event) {
   }
   if (form.id === "allowance-form") {
     event.preventDefault();
+    paintAllowance(form);
     const data = Object.fromEntries(new FormData(form));
-    const nids = [...form.querySelectorAll("[name=officeNid]")];
-    const names = [...form.querySelectorAll("[name=officeName]")];
-    data.officePeople = nids.map((field, index) => ({ nid: field.value, name: names[index]?.value || "" }));
+    data.officePeople = [...form.querySelectorAll(".office-person")].map((row) => {
+      const pick = row.querySelector("[name=officePick]")?.value || "";
+      let nid = (row.querySelector("[name=officeNid]")?.value || "").trim();
+      let name = (row.querySelector("[name=officeName]")?.value || "").trim();
+      if (pick && pick !== "__type__") {
+        nid = pick;
+        if (!name) {
+          const found = officeChoicesFromPage().find((item) => String(item.nid || "").trim() === pick);
+          name = String(found?.name || "").trim();
+        }
+      }
+      return { nid, name };
+    }).filter((person) => person.nid || person.name);
     await submitMessage(form, async () => {
       await api("allowance-save", { method: "POST", body: data });
       location.hash = `#console/finish2?pay=${encodeURIComponent(data.atp || "")}&tab=report`;
@@ -9809,6 +11229,9 @@ async function onSubmit(event) {
       if (!String(data.atp_trname || "").trim()) {
         throw new Error(L("පුහුණු වැඩසටහනේ නම දෙන්න.", "பயிற்சியின் பெயரை எழுதவும்.", "Enter the programme name."));
       }
+      if (!String(data.atp_supportstaff1 || "").trim()) {
+        throw new Error(L("සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි.", "ஒருங்கிணைப்பு (அடையாள எண்) கட்டாயம்.", "Coordination (national ID) is required."));
+      }
       data.atp_offweb = YES;
       data.atp_addhome = NO;
       data.atp_isaddatp = NO;
@@ -9861,6 +11284,20 @@ function localToday() {
   return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
 }
 
+function reportMargin() {
+  return 150;
+}
+
+function reportSpan(year) {
+  const y = String(year || chosenYear());
+  const today = localToday();
+  const start = `${y}-01-01`;
+  const end = `${y}-12-31`;
+  const until = today >= start && today <= end ? today : end;
+  const dot = (iso) => iso.replaceAll("-", ".");
+  return `${dot(start)} ${L("සිට", "முதல்", "to")} ${dot(until)} ${L("දක්වා", "வரை", "")}`;
+}
+
 function programmeEnd(item) {
   const days = [];
   for (let n = 1; n <= 10; n += 1) {
@@ -9897,6 +11334,51 @@ function honorific(sex) {
   return "මයා/මිය";
 }
 
+function letterVerifyUrl(token) {
+  return `${location.origin}${location.pathname}#verify/${token}`;
+}
+
+function paintLetterQr(article) {
+  const node = article.querySelector(".letter-qr-img");
+  const token = article.dataset.token || "";
+  if (!node || !token || typeof QRCode !== "function") return;
+  node.innerHTML = "";
+  new QRCode(node, {
+    text: letterVerifyUrl(token),
+    width: 88,
+    height: 88,
+    correctLevel: QRCode.CorrectLevel.M,
+  });
+}
+
+async function renderLetterVerify(view) {
+  const token = state.module || "";
+  const data = await api("letter-check", { query: { token } });
+  if (!data.genuine) {
+    view.innerHTML = `<section class="wrap section letter-check">
+      <h1>${esc(L("කැඳවීමේ ලිපිය සැබෑ නැත", "அழைப்புக் கடிதம் உண்மையானது அல்ல", "This call letter is not genuine"))}</h1>
+      <p class="letter-check-no">${esc(L("මෙම කේතයෙන් වයඹ පළාත් කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය නිකුත් කළ කැඳවීමේ ලිපියක් හමු නොවුණා.", "இந்தக் குறியீட்டில் வடமேல் மாகாண முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சி அலகு வழங்கிய அழைப்புக் கடிதம் இல்லை.", "No call letter issued by the Management Development and Training Unit was found for this code."))}</p>
+    </section>`;
+    return;
+  }
+  const days = (data.days || []).map((day) => showDate(day) || day).filter(Boolean).join(", ");
+  const row = (label, value) => `<dt>${esc(label)}</dt><dd>${esc(value || "—")}</dd>`;
+  view.innerHTML = `<section class="wrap section letter-check">
+    <h1>${esc(L("කැඳවීමේ ලිපිය සත්‍ය ලිපියකි.", "அழைப்புக் கடிதம் உண்மையான கடிதம்.", "This call letter is a genuine letter."))}</h1>
+    <p class="letter-check-yes">${esc(L("මෙම ලිපිය වයඹ පළාත් කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය විසින් නිකුත් කර ඇත.", "இந்தக் கடிதம் வடமேல் மாகாண முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சி அலகால் வழங்கப்பட்டது.", "This letter was issued by the Management Development and Training Unit of the North Western Province."))}</p>
+    <dl>
+      ${row(L("ගොනු අංකය", "கோப்பு இல.", "File number"), data.file)}
+      ${row(L("නිලධාරියා", "அதிகாரி", "Officer"), data.name)}
+      ${row(L("තනතුර", "பதவி", "Designation"), data.designation)}
+      ${row(L("කාර්යාලය", "அலுவலகம்", "Office"), data.office)}
+      ${row(L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme"), data.programme)}
+      ${row(L("දිනය", "திகதி", "Date"), days)}
+      ${row(L("වේලාව", "நேரம்", "Time"), data.time)}
+      ${row(L("ස්ථානය", "இடம்", "Place"), data.place)}
+    </dl>
+  </section>`;
+}
+
 function showLetter(data) {
   const paper = $("#paper");
   if (!paper) return;
@@ -9905,6 +11387,8 @@ function showLetter(data) {
     <button class="btn secondary" type="button" data-act="letter-image">${esc(L("ඡායාරූපයක් ලෙස", "படமாக", "Save image"))}</button>
     <span class="muted">${esc(L("A4 පිටුව. ලිපි ශීර්ෂයත් එක්ක.", "A4 பக்கம். தலைப்புச் சேரும்.", "A4 page, including the letterhead."))}</span>
   </p>` + letterHtml(data);
+  const article = paper.querySelector(".letter.nomination");
+  if (article) paintLetterQr(article);
 }
 
 function letterHtml(data) {
@@ -9918,30 +11402,41 @@ function letterHtml(data) {
   const target = String(plan.atp_targetgroup || "").trim();
   const days = (letter.days || []).filter(Boolean).map((day) => showDate(day) || day).join(", ");
   const place = String(plan.atp_location || "").trim();
-  const facilities = String(plan.atp_otherfacts || "").trim();
+  const facilities = letterFacilities(plan);
   const count = plan.atp_noofparticipants || "";
   const fileNo = plan.atp_fileno || "";
-  const letterDate = localToday();
+  const letterDate = letterOnDate(localToday());
   const dateLabel = "ලිපිය මුද්‍රණය කරන දිනය";
   const signName = letter.signName || "එස්.එම්.පෙත්තාවඩු මහත්මිය";
   const sign = letter.signUrl ? `<img class="letter-sign-img" src="${esc(letter.signUrl)}" alt="">` : "";
-  return `<article class="letter nomination" data-file="${esc(fileNo)}" data-date="${esc(letterDate)}" data-datelabel="${esc(dateLabel)}">
+  const through = letterThrough(letter.headPost);
+  const token = String(letter.token || "");
+  const qr = token ? `<div class="letter-qr"><div class="letter-qr-img"></div><p>${esc(L("කැඳවීමේ ලිපියේ තොරතුරු සනාථ කිරීමට කේතය scan කරන්න.", "அழைப்புக் கடிதத்தின் விவரங்களை உறுதிப்படுத்த குறியீட்டை ஸ்கேன் செய்யவும்.", "Scan the code to confirm the details of this call letter."))}</p></div>` : "";
+  return `<article class="letter nomination" data-file="${esc(fileNo)}" data-date="${esc(letterDate)}" data-datelabel="${esc(dateLabel)}" data-token="${esc(token)}">
     <div class="letter-head-wrap">
-      <img class="letter-head" src="images/letterheadtop.jpg" alt="">
+      <img class="letter-head" src="images/cso-head.png" alt="">
       <span class="letter-myno">${esc(fileNo)}</span>
-      <span class="letter-ondate"><b>${esc(dateLabel)}</b><br>${esc(letterDate)}</span>
+      <span class="letter-ondate">${esc(letterDate)}</span>
     </div>
-    <p>ලේකම් මගින්,</p>
+    <p>${esc(through)},</p>
     <p class="who">${esc(name)} ${esc(honorific(officer.stf_sex))}</p>
     <p class="who">${esc(office)}</p>
     <p class="letter-title">${esc(programme)} පිළිබඳ පුහුණු වැඩමුළුව</p>
     <p class="letter-body">වයඹ පළාත් ප්‍රධාන ලේකම් කාර්යාලයීය කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකයේ මෙහෙයවීමෙන් වයඹ පළාත් රාජ්‍ය සේවයේ ${esc(target ? target + " " : "")}නිලධාරින් සඳහා ${esc(programme)} පිළිබඳ පුහුණු වැඩමුළුවක් පැවැත්වීමට අවශ්‍ය කටයුතු සංවිධානය කර ඇත.</p>
-    <p class="letter-facts">දිනය/දිනයන් - ${esc(days)}<br>වේලාව - ${esc(plan.atp_stime || "")} සිට ${esc(plan.atp_etime || "")} දක්වා<br>පුහුණුව පවත්වන ස්ථානය - ${esc(place)}<br>පුහුණු පහසුකම් - ${esc(facilities)}</p>
+    <ul class="letter-facts">
+      <li>දිනය/දිනයන් - ${esc(days)}</li>
+      <li>වේලාව - ${esc(plan.atp_stime || "")} සිට ${esc(plan.atp_etime || "")} දක්වා</li>
+      <li>පුහුණුව පවත්වන ස්ථානය - ${esc(place)}</li>
+      <li>පුහුණු පහසුකම් - ${esc(facilities)}</li>
+      <li>සම්බන්ධීකරණ - ${esc(letterCoordinatorLine(letter, plan))}</li>
+    </ul>
+    ${letterSpecialHtml(plan)}
     <p class="letter-body">මෙම පුහුණු වැඩමුළුව සඳහා ඔබ අමාත්‍යංශය / දෙපාර්තමේන්තුව / ආයතනයේ ඉහත නම් සඳහන් නිලධාරියා / නිලධාරිණිය තෝරාගෙන ඇති බැවින් අදාල දිනයන්හි නියමිත වේලාවට වැඩමුළුව සඳහා සහභාගී කරවන මෙන් කාරුණිකව දන්වමි.</p>
     <p class="letter-body">සැ.යු. වැඩමුළුව සඳහා පැමිණීම අනිවාර්ය වන අතර නොවැලැක්විය හැකි හේතුවක් මත වැඩමුළුව සඳහා නොපැමිණෙන්නේ නම් ඒ බව සම්බන්ධීකරණ නිලධාරියා වෙත දැනුවත් කළ යුතු වේ. නොදන්වා නොපැමිණීම ඔබව අසාදු ලේඛනගත කිරීමට හේතු වේ.</p>
     <p class="sign">${sign}${esc(signName)},<br>නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු),<br>වයඹ ප්‍රධාන ලේකම් වෙනුවට.</p>
     <p class="letter-copy">පිටපත - අධ්‍යක්ෂ ${esc(place)} - නිලධාරින් ${esc(count)} දෙනෙකු සඳහා අවශ්‍ය පුහුණු පහසුකම් සැපයීම සඳහා</p>
-    <img class="letter-foot" src="images/letterheadfooter.jpg" alt="">
+    ${qr}
+    <img class="letter-foot" src="images/cso-foot.png" alt="">
   </article>`;
 }
 
@@ -9950,11 +11445,25 @@ async function renderSignatory(work) {
   const titles = ["මහතා", "මහත්මිය", "මෙනවිය"];
   const title = titles.includes(data.title) ? data.title : "මහත්මිය";
   const options = titles.map((item) => `<option value="${esc(item)}"${item === title ? " selected" : ""}>${esc(item)}</option>`).join("");
+  const supportHint = (data.team?.support || []).map((item) => {
+    const nid = String(item.nid || "").trim();
+    const name = String(item.name || "").trim();
+    if (!nid) return "";
+    return name && name !== nid ? `${name} (${nid})` : nid;
+  }).filter(Boolean).join(" · ");
+  const cashValue = String(data.cash || data.cashName || "").trim();
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)", "துணைப் பிரதம செயலாளர் (பயிற்சி)", "Deputy Chief Secretary (Training)"))}</h2>
+    <p class="pad-note">${esc(L("මෙහි අධීක්ෂණ නිලධාරියා, සහායක කාර්ය මණ්ඩලයේ ජා.හැ.අංක තුන සහ මුදල් භාර නිලධාරියා සුරකින්න. මුදල් භාර නිලධාරියා හිස්ව තියලා නම ලියා සුරකින්න. ඒ නම නැවත වෙනස් කරනකම් භාවිතා වෙයි. පුහුණු වැඩසටහන වෙනස් කරන විට ඒවා තෝරන්න / පෙනේ.", "இங்கே மேற்பார்வை அதிகாரி, உதவிப் பணியாளர் மூன்று அடையாள எண்கள் மற்றும் பண அதிகாரியைச் சேமிக்கவும். பண அதிகாரி காலியாக இருந்து பெயரை எழுதிச் சேமிக்கவும். மாற்றும் வரை அந்தப் பெயர் பயன்படும்.", "Save the supervising officer, three support-staff ID numbers and the cash officer here. Leave cash officer empty, type a name and save. That name is used until you change it. They can be chosen when a programme is edited."))}</p>
     <form class="classic-form" id="signatory-form">
       <label class="classic-field"><span>${esc(L("මහතා / මහත්මිය / මෙනවිය", "திருமான் / திருமதி / செல்வி", "Mr / Mrs / Miss"))}</span><select name="title" required>${options}</select></label>
-      <label class="classic-field"><span>${esc(L("නම", "பெயர்", "Name"))}</span><input name="name" value="${esc(data.name || "")}" required></label>
+      <label class="classic-field"><span>${esc(L("නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු) නම", "துணைப் பிரதம செயலாளர் (பயிற்சி) பெயர்", "Deputy Chief Secretary (Training) name"))}</span><input name="name" value="${esc(data.name || "")}" required></label>
+      <label class="classic-field"><span>${esc(L("අධීක්ෂණ නිලධාරියාගේ නම", "மேற்பார்வை அதிகாரி பெயர்", "Supervising officer's name"))}</span><input name="supervisor" value="${esc(data.supervisor || "")}"></label>
+      <label class="classic-field"><span>${esc(L("සහායක කාර්ය මණ්ඩලය 1 (ජා.හැ.අංකය)", "உதவிப் பணியாளர் 1 (அடையாள எண்)", "Support staff 1 (national ID)"))}</span><input name="support1" value="${esc(data.support1 || "")}"></label>
+      <label class="classic-field"><span>${esc(L("සහායක කාර්ය මණ්ඩලය 2 (ජා.හැ.අංකය)", "உதவிப் பணியாளர் 2 (அடையாள எண்)", "Support staff 2 (national ID)"))}</span><input name="support2" value="${esc(data.support2 || "")}"></label>
+      <label class="classic-field"><span>${esc(L("සහායක කාර්ය මණ්ඩලය 3 (ජා.හැ.අංකය)", "உதவிப் பணியாளர் 3 (அடையாள எண்)", "Support staff 3 (national ID)"))}</span><input name="support3" value="${esc(data.support3 || "")}"></label>
+      ${supportHint ? `<p class="pad-note">${esc(supportHint)}</p>` : ""}
+      <label class="classic-field"><span>${esc(L("මුදල් භාර නිලධාරියා", "பண அதிகாரி", "Cash officer"))}</span><input name="cash" value="${esc(cashValue)}" placeholder="${esc(L("නම ලියන්න", "பெயரை எழுதவும்", "Enter the name"))}"></label>
       <label class="classic-field"><span>${esc(L("ඩිජිටල් අත්සන", "டிஜிட்டல் கையொப்பம்", "Digital signature"))}</span>
         <input type="hidden" name="sign" value="${esc(data.file || "")}">
         <input type="file" accept=".jpg,.jpeg,.png,.gif,.webp" data-upload="sign" data-folder="sign">
@@ -10016,6 +11525,8 @@ async function drawLetterCanvas() {
   const article = document.querySelector("#paper .letter.nomination");
   if (!article) throw new Error(L("පළමුව ලිපිය අරින්න.", "முதலில் கடிதத்தைத் திறக்கவும்.", "Open the letter first."));
   await document.fonts.ready;
+  await document.fonts.load('400 22px "Noto Sans Sinhala"').catch(() => {});
+  await document.fonts.load('700 24px "Noto Sans Sinhala"').catch(() => {});
   const signImage = article.querySelector(".letter-sign-img");
   if (signImage && !signImage.complete) {
     await new Promise((resolve) => {
@@ -10023,126 +11534,189 @@ async function drawLetterCanvas() {
       signImage.onerror = resolve;
     });
   }
-  const head = await loadLetterImage("images/letterheadtop.jpg");
-  const foot = await loadLetterImage("images/letterheadfooter.jpg");
-  const width = 1240;
-  const margin = Math.round(width / 8.27);
-  const scratch = document.createElement("canvas");
-  scratch.width = width;
-  scratch.height = 4200;
-  const ctx = scratch.getContext("2d");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, scratch.height);
-  ctx.fillStyle = "#111111";
-  ctx.textBaseline = "top";
-  let y = margin;
-  const headW = width - margin * 2;
-  const headH = Math.round(headW * head.height / head.width);
-  ctx.drawImage(head, margin, y, headW, headH);
-  ctx.font = '400 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
-  ctx.textAlign = "left";
-  ctx.fillText(article.dataset.file || "", margin + headW * 0.22, y + headH * 0.86);
-  const dateLabel = article.dataset.datelabel || "ලිපිය මුද්‍රණය කරන දිනය";
-  const dateText = article.dataset.date || "";
-  ctx.font = '700 15px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
-  const dateBoxW = Math.max(ctx.measureText(dateLabel).width, ctx.measureText(dateText).width) + 18;
-  const dateBoxX = margin + headW * 0.99 - dateBoxW;
-  const dateBoxY = y + headH * 0.70;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(dateBoxX, dateBoxY, dateBoxW, 48);
-  ctx.fillStyle = "#111111";
-  ctx.textAlign = "right";
-  ctx.fillText(dateLabel, margin + headW * 0.98, dateBoxY + 2);
-  ctx.font = '600 16px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
-  ctx.fillText(dateText, margin + headW * 0.98, dateBoxY + 24);
-  ctx.textAlign = "left";
-  y += headH + 28;
-  const drawJustified = (text, x, maxWidth, lineH) => {
-    String(text || "").split("\n").forEach((paragraph) => {
-      const words = paragraph.trim().split(/\s+/).filter(Boolean);
-      if (!words.length) {
-        y += lineH;
-        return;
-      }
-      const lines = [];
-      let line = [];
-      words.forEach((word) => {
-        const trial = [...line, word].join(" ");
-        if (ctx.measureText(trial).width > maxWidth && line.length) {
-          lines.push(line);
-          line = [word];
-        } else {
-          line.push(word);
-        }
-      });
-      if (line.length) lines.push(line);
-      lines.forEach((parts, index) => {
-        const last = index === lines.length - 1 || parts.length < 2;
-        if (last) {
-          ctx.fillText(parts.join(" "), x, y);
-        } else {
-          const wordsWidth = parts.reduce((sum, word) => sum + ctx.measureText(word).width, 0);
-          const gap = (maxWidth - wordsWidth) / (parts.length - 1);
-          let cursor = x;
-          parts.forEach((word) => {
-            ctx.fillText(word, cursor, y);
-            cursor += ctx.measureText(word).width + gap;
-          });
-        }
-        y += lineH;
-      });
-    });
-  };
-  const blocks = [...article.children].filter((node) => !node.classList.contains("letter-head-wrap") && !node.classList.contains("letter-foot"));
-  blocks.forEach((block) => {
-    const title = block.classList.contains("letter-title");
-    const who = block.classList.contains("who");
-    const sign = block.classList.contains("sign");
-    const body = block.classList.contains("letter-body");
-    const size = title ? 28 : 22;
-    ctx.font = `${title || who ? "700" : "400"} ${size}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
-    const lineH = Math.round(size * 1.55);
-    const left = sign ? width - margin - 420 : margin;
-    const maxWidth = sign ? 420 : width - margin * 2;
-    if (sign) {
-      const image = block.querySelector(".letter-sign-img");
-      if (image && image.complete && image.naturalWidth) {
-        const signH = 78;
-        const signW = Math.min(220, signH * image.naturalWidth / image.naturalHeight);
-        ctx.drawImage(image, width - margin - signW, y, signW, signH);
-        y += signH + 6;
-      }
-    }
-    const text = block.innerText.trim();
-    if (body) {
-      drawJustified(text, margin, maxWidth, lineH);
-      y += 10;
-      return;
-    }
-    ctx.textAlign = title ? "center" : "left";
-    wrapLetterLines(ctx, text, title ? width - margin * 2 : maxWidth).forEach((line) => {
-      ctx.fillText(line, title ? width / 2 : left, y);
-      y += lineH;
-    });
-    ctx.textAlign = "left";
-    y += title ? 14 : 8;
-  });
-  const footH = Math.round(headW * foot.height / foot.width);
-  y += 12;
-  ctx.drawImage(foot, margin, y, headW, footH);
-  y += footH + margin;
+  const head = await loadLetterImage("images/cso-head.png");
+  const foot = await loadLetterImage("images/cso-foot.png");
   const pageW = 1240;
   const pageH = 1754;
+  const margin = Math.round(pageW / 8.27);
+  const headH = Math.round(pageW * head.height / Math.max(1, head.width));
+  const footH = Math.round(pageW * foot.height / Math.max(1, foot.width));
+  const contentTop = headH + 12;
+  const room = Math.max(160, pageH - footH - 12 - contentTop);
+  const blocks = [...article.children].filter((node) => !node.classList.contains("letter-head-wrap") && !node.classList.contains("letter-foot"));
+  const paintBody = (ctx, factor) => {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, pageW, 5000);
+    ctx.fillStyle = "#111111";
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    let y = 0;
+    const sz = (n) => Math.max(12, Math.round(n * factor));
+    const drawJustified = (text, x, maxWidth, lineH) => {
+      String(text || "").split("\n").forEach((paragraph) => {
+        const words = paragraph.trim().split(/\s+/).filter(Boolean);
+        if (!words.length) {
+          y += lineH;
+          return;
+        }
+        const lines = [];
+        let line = [];
+        words.forEach((word) => {
+          const trial = [...line, word].join(" ");
+          if (ctx.measureText(trial).width > maxWidth && line.length) {
+            lines.push(line);
+            line = [word];
+          } else {
+            line.push(word);
+          }
+        });
+        if (line.length) lines.push(line);
+        lines.forEach((parts, index) => {
+          const last = index === lines.length - 1 || parts.length < 2;
+          if (last) {
+            ctx.fillText(parts.join(" "), x, y);
+          } else {
+            const wordsWidth = parts.reduce((sum, word) => sum + ctx.measureText(word).width, 0);
+            const gap = (maxWidth - wordsWidth) / (parts.length - 1);
+            let cursor = x;
+            parts.forEach((word) => {
+              ctx.fillText(word, cursor, y);
+              cursor += ctx.measureText(word).width + gap;
+            });
+          }
+          y += lineH;
+        });
+      });
+    };
+    blocks.forEach((block) => {
+      const title = block.classList.contains("letter-title");
+      const who = block.classList.contains("who");
+      const sign = block.classList.contains("sign");
+      const body = block.classList.contains("letter-body");
+      const size = title ? sz(24) : sign ? sz(20) : who ? sz(22) : sz(21);
+      ctx.font = `${title || who ? "700" : "400"} ${size}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+      const lineH = Math.round(size * (body || title ? 1.65 : sign ? 1.55 : 1.5));
+      const left = margin;
+      const maxWidth = sign ? Math.round(460 * factor) : pageW - margin * 2;
+      if (block.classList.contains("letter-copy")) y += Math.round(28 * factor);
+      if (sign) {
+        y += Math.round(16 * factor);
+        const image = block.querySelector(".letter-sign-img");
+        if (image && image.complete && image.naturalWidth) {
+          const signH = Math.round(108 * factor);
+          const signW = Math.min(Math.round(300 * factor), signH * image.naturalWidth / image.naturalHeight);
+          ctx.drawImage(image, left, y, signW, signH);
+          y += signH + Math.round(10 * factor);
+        }
+      }
+      if (block.classList.contains("letter-refs")) {
+        const cols = [...block.children];
+        const gap = Math.round(16 * factor);
+        const colW = (pageW - margin * 2 - gap * (cols.length - 1)) / Math.max(1, cols.length);
+        ctx.font = `600 ${sz(18)}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+        const refH = Math.round(sz(18) * 1.4);
+        let tall = 0;
+        cols.forEach((col, index) => {
+          const lines = col.innerText.split("\n").map((line) => line.trim()).filter(Boolean);
+          lines.forEach((line, lineNo) => ctx.fillText(line, margin + index * (colW + gap), y + lineNo * refH));
+          tall = Math.max(tall, lines.length * refH);
+        });
+        y += tall + Math.round(12 * factor);
+        ctx.strokeStyle = "#222222";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(margin, y);
+        ctx.lineTo(pageW - margin, y);
+        ctx.stroke();
+        y += Math.round(16 * factor);
+        return;
+      }
+      if (block.classList.contains("letter-qr")) {
+        y += Math.round(10 * factor);
+        const source = block.querySelector("canvas") || block.querySelector("img");
+        const qrSize = Math.round(118 * factor);
+        if (source) ctx.drawImage(source, margin, y, qrSize, qrSize);
+        ctx.font = `400 ${sz(17)}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+        const caption = (block.querySelector("p")?.innerText || "").trim();
+        const textX = margin + qrSize + Math.round(16 * factor);
+        const lines = wrapLetterLines(ctx, caption, Math.max(80, pageW - margin - textX));
+        const step = Math.round(sz(17) * 1.45);
+        const textTop = y + Math.max(0, (qrSize - lines.length * step) / 2);
+        lines.forEach((line, index) => ctx.fillText(line, textX, textTop + index * step));
+        y += qrSize + Math.round(12 * factor);
+        return;
+      }
+      if (block.classList.contains("letter-facts")) {
+        y += Math.round(6 * factor);
+        ctx.font = `400 ${sz(21)}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+        const factH = Math.round(sz(21) * 1.65);
+        [...block.querySelectorAll("li")].forEach((item) => {
+          const fact = "★  " + item.innerText.trim();
+          wrapLetterLines(ctx, fact, pageW - margin * 2).forEach((line, index) => {
+            ctx.fillText(line, margin + (index ? Math.round(26 * factor) : 0), y);
+            y += factH;
+          });
+          y += Math.round(4 * factor);
+        });
+        y += Math.round(10 * factor);
+        return;
+      }
+      const text = block.innerText.trim();
+      if (body) {
+        drawJustified(text, margin, maxWidth, lineH);
+        y += Math.round(12 * factor);
+        return;
+      }
+      ctx.textAlign = title ? "center" : "left";
+      wrapLetterLines(ctx, text, title ? pageW - margin * 2 : maxWidth).forEach((line) => {
+        ctx.fillText(line, title ? pageW / 2 : left, y);
+        if (title && line) {
+          const titleWidth = ctx.measureText(line).width;
+          const titleX = pageW / 2 - titleWidth / 2;
+          ctx.strokeStyle = "#111111";
+          ctx.lineWidth = Math.max(1.2, 1.6 * factor);
+          ctx.beginPath();
+          ctx.moveTo(titleX, y + lineH - Math.round(7 * factor));
+          ctx.lineTo(titleX + titleWidth, y + lineH - Math.round(7 * factor));
+          ctx.stroke();
+        }
+        y += lineH;
+      });
+      ctx.textAlign = "left";
+      if (title) y += Math.round(14 * factor);
+      else if (who) y += Math.round(4 * factor);
+      else if (sign) y += Math.round(10 * factor);
+      else y += Math.round(8 * factor);
+    });
+    return y;
+  };
+  let factor = 1;
+  const scratch = document.createElement("canvas");
+  scratch.width = pageW;
+  scratch.height = 5000;
+  const ctx = scratch.getContext("2d");
+  let contentH = paintBody(ctx, factor);
+  if (contentH > room) {
+    for (let step = 0; step < 12 && contentH > room; step += 1) {
+      factor = Math.max(0.82, factor - 0.03);
+      contentH = paintBody(ctx, factor);
+    }
+  }
   const page = document.createElement("canvas");
   page.width = pageW;
   page.height = pageH;
   const out = page.getContext("2d");
   out.fillStyle = "#ffffff";
   out.fillRect(0, 0, pageW, pageH);
-  const scale = Math.min(1, pageH / y);
-  const drawW = pageW * scale;
-  const drawH = y * scale;
-  out.drawImage(scratch, 0, 0, pageW, y, (pageW - drawW) / 2, 0, drawW, drawH);
+  out.drawImage(head, 0, 0, pageW, headH);
+  out.font = '700 22px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+  out.fillStyle = "#111111";
+  out.textAlign = "left";
+  out.textBaseline = "top";
+  out.fillText(article.dataset.file || "", pageW * 0.196, headH * 0.828);
+  out.fillText(article.dataset.date || "", pageW * 0.822, headH * 0.817);
+  out.drawImage(scratch, 0, 0, pageW, contentH, 0, contentTop, pageW, contentH);
+  out.drawImage(foot, 0, pageH - footH, pageW, footH);
   return page;
 }
 
@@ -10199,7 +11773,7 @@ async function saveNameListPdf() {
   ];
   const width = 1240;
   const pageH = 1754;
-  const margin = 28;
+  const margin = reportMargin();
   const tableW = width - margin * 2;
   const weights = [0.07, 0.15, 0.16, 0.14, 0.16, 0.13, 0.09, 0.1];
   const widths = weights.map((part) => tableW * part);
@@ -10236,7 +11810,7 @@ async function saveNameListPdf() {
   let cursor = 0;
   let first = true;
   while (first || cursor < bodyRows.length) {
-    const limit = pageH - 20;
+    const limit = pageH - margin * 2;
     let used = (first ? titleHeight : 16) + headerRow.height;
     const slice = [];
     while (cursor < bodyRows.length && used + bodyRows[cursor].height <= limit) {
@@ -10262,7 +11836,7 @@ async function saveNameListPdf() {
     ctx.fillRect(0, 0, width, pageH);
     ctx.fillStyle = "#111111";
     ctx.textBaseline = "middle";
-    let y = 18;
+    let y = margin;
     if (pack.first) {
       ctx.font = '700 26px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
       ctx.textAlign = "center";
@@ -10401,12 +11975,14 @@ async function saveSignPdf() {
       ...days.map(() => ""),
     ], false))
     : [layoutRow([L("තෝරාගත් නිලධාරීන් නොමැත.", "தேர்ந்த அதிகாரிகள் இல்லை.", "No selected officers."), ...headers.slice(1).map(() => "")], false)];
+  measure.font = '700 24px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+  const unitLines = canvasWrap(measure, t("unit"), tableW);
   measure.font = '700 26px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
   const titleLines = canvasWrap(measure, L("සහභාගිවන්නන්ගේ අත්සන් ලේඛනය", "பங்கேற்பாளர் கையொப்பப் பட்டியல்", "Participants' sign sheet"), tableW);
   measure.font = '600 18px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
   const programmeLines = canvasWrap(measure, `${L("පුහුණු වැඩසටහන", "பயிற்சி", "Programme")} - ${plan.atp_trname || ""}`, tableW);
   const placeLines = canvasWrap(measure, `${L("ආරම්භක දිනය", "தொடக்க திகதி", "Start date")} - ${showDate(plan.atp_day1)}   ${L("ස්ථානය", "இடம்", "Place")} - ${plan.atp_location || ""}`, tableW);
-  const titleHeight = 18 + titleLines.length * 32 + programmeLines.length * 24 + placeLines.length * 24 + 8;
+  const titleHeight = 18 + unitLines.length * 30 + titleLines.length * 32 + programmeLines.length * 24 + placeLines.length * 24 + 8;
   const packs = [];
   let cursor = 0;
   let first = true;
@@ -10440,6 +12016,11 @@ async function saveSignPdf() {
     ctx.textBaseline = "middle";
     let y = margin;
     if (pack.first) {
+      ctx.font = '700 24px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
+      unitLines.forEach((line) => {
+        ctx.fillText(line, width / 2, y + 14);
+        y += 30;
+      });
       ctx.font = '700 26px "Noto Sans Sinhala", "Source Sans 3", sans-serif';
       titleLines.forEach((line) => {
         ctx.fillText(line, width / 2, y + 16);
@@ -10487,9 +12068,24 @@ async function saveSignPdf() {
   saveBlob(jpegPdfPages(images, "841.89", "595.28"), `athsan-lekanaya-${localToday()}.pdf`);
 }
 
+function panelSheetData() {
+  const base = state.panelsign || {};
+  const article = document.querySelector("#paper .panel-sign");
+  if (!article) return base;
+  const resources = [...article.querySelectorAll("tr.panel-resource")].map((row) => ({
+    name: row.querySelector("[data-field=name]")?.value || "",
+    post: row.querySelector("[data-field=post]")?.value || "",
+  }));
+  const panel = [...article.querySelectorAll("tr.panel-role")].map((row) => ({
+    who: row.querySelector("[data-field=who]")?.value || "",
+    role: row.querySelector("[data-field=role]")?.value || "",
+  }));
+  return { ...base, name: article.dataset.name || base.name, resources, panel };
+}
+
 async function savePanelPdf() {
-  const data = state.panelsign;
-  if (!data?.name && !data?.panel) {
+  const data = panelSheetData();
+  if (!data?.name && !(data?.panel || []).length) {
     alert(L("පළමුව පුහුණු වැඩසටහන තෝරන්න.", "முதலில் பயிற்சியைத் தேர்ந்தெடுக்கவும்.", "Choose a programme first."));
     return;
   }
@@ -10512,18 +12108,18 @@ async function savePanelPdf() {
   const titleSize = 22;
   const subSize = 18;
   const titles = [
-    measureLines("වයඹ පළාත් සභාව", titleSize, 700, innerW),
-    measureLines("කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය", subSize, 700, innerW),
-    measureLines(`${data.name || ""} පිළිබඳ පුහුණු වැඩසටහන`, subSize, 700, innerW),
+    measureLines("කළමනාකරණ සංවර්ධන පුහුණු ඒකකය", titleSize, 700, innerW),
+    measureLines("වයඹ පළාත් ප්‍රධාන ලේකම් කාර්යාලය, කුරුණෑගල", subSize, 700, innerW),
+    measureLines(data.name || "", subSize, 700, innerW),
     measureLines(panelDateLine(days), subSize, 700, innerW),
   ];
   let headH = 8;
   titles.forEach((lines, index) => { headH += lines.length * ((index === 0 ? titleSize : subSize) + 6); });
   headH += 16;
   const captionH = 54;
-  const staffRows = Math.max(1, (data.staff || []).length);
+  const resourceRows = Math.max(1, (data.resources || []).length);
   const panelRows = Math.max(1, (data.panel || []).length);
-  const rowCount = staffRows + panelRows + 2;
+  const rowCount = resourceRows + panelRows + 2;
   const rowH = Math.max(18, Math.min(52, (innerH - headH - captionH - 40) / rowCount));
   const dayShare = Math.min(0.62, Math.max(0.18, days.length * 0.16));
   const rest = 1 - dayShare;
@@ -10533,13 +12129,13 @@ async function savePanelPdf() {
   const panelWeights = [0.1, 0.46, 0.22, 0.22];
   const panelWidths = panelWeights.map((size) => size * innerW);
   const staffHead = ["අනු අංකය", "නම", "තනතුර", ...days.map((day) => panelDayHead(day))];
-  const staffBody = (data.staff || []).length
-    ? data.staff.map((row, index) => [String(index + 1), row.name || "", row.post || "", ...days.map(() => "")])
-    : [["", "තෝරාගත් නිලධාරීන් නොමැත.", "", ...days.map(() => "")]];
+  const staffBody = (data.resources || []).length
+    ? data.resources.map((row, index) => [String(index + 1), row.name || "", row.post || "", ...days.map(() => "")])
+    : [["1", "", "", ...days.map(() => "")]];
   const panelHead = ["අනු අංකය", "නිලධාරියාගේ නම හා තනතුර", "කාර්යභාරය", "අත්සන\nපොදු දිනටම සඳහා"];
   const panelBody = (data.panel || []).map((row, index) => [
     String(index + 1).padStart(2, "0"),
-    [row.name, row.post].filter(Boolean).join(", "),
+    row.who || panelWho(row),
     row.role || "",
     "",
   ]);
@@ -10714,7 +12310,7 @@ function sheetPayload(form) {
 
 function downloadModuleExcel(dayCount) {
   const count = Math.max(1, Math.min(60, Number(dayCount) || 10));
-  const rows = [["දිනය", "කාලය", "සැසිය", "දේශකයා", "විෂය කරුණු සහ ක්‍රියාකාරකම්"]];
+  const rows = [["දිනය", "කාලය", "සැසිය", "විෂය කරුණු සහ ක්‍රියාකාරකම්", "දේශකයා"]];
   for (let day = 1; day <= count; day += 1) {
     for (let line = 0; line < 4; line += 1) rows.push([String(day), "", "", "", ""]);
   }
@@ -10738,7 +12334,7 @@ function sheetHeader(data) {
     coordinator: data.coordinator || sheet.coordinator || "",
     coordinatorPost: data.coordinatorPost || sheet.coordinatorPost || "",
     supervisor: data.supervisor || sheet.supervisor || "",
-    supervisorPost: data.supervisorPost || sheet.supervisorPost || "",
+    supervisorPost: MODULE_SUPERVISOR_POST(),
     people: data.people || sheet.people || [],
     lecturers: data.lecturers || sheet.lecturers || [],
     stime: data.stime || sheet.stime || "",
@@ -10763,9 +12359,10 @@ function formatModuleCanvas(header, day, index) {
   const margin = Math.round(1240 / 8.27);
   const width = canvas.width - margin * 2;
   const colW = many
-    ? [Math.round(width * 0.18), Math.round(width * 0.20), Math.round(width * 0.22), 0]
+    ? [Math.round(width * 0.16), Math.round(width * 0.18), 0, Math.round(width * 0.20)]
     : [Math.round(width * 0.22), Math.round(width * 0.26), 0];
-  colW[colW.length - 1] = width - colW.slice(0, -1).reduce((sum, item) => sum + item, 0);
+  if (many) colW[2] = width - colW[0] - colW[1] - colW[3];
+  else colW[2] = width - colW[0] - colW[1];
   const draw = (fontSize) => {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -10823,23 +12420,26 @@ function formatModuleCanvas(header, day, index) {
     y += 8;
     ctx.font = `400 ${fontSize}px "Noto Sans Sinhala", sans-serif`;
     const headerH = lineH + 14;
-    const pointCol = colW.length - 1;
+    const pointCol = 2;
     const measured = rows.map((row) => {
-      const packs = [wrapLetterLines(ctx, row.time || " ", colW[0] - 16), wrapLetterLines(ctx, row.session || " ", colW[1] - 16)];
-      if (many) packs.push(wrapLetterLines(ctx, row.lecturer || " ", colW[2] - 16));
-      packs.push(String(row.points || " ").split(/\n/).flatMap((part) => wrapLetterLines(ctx, part || " ", colW[pointCol] - 16)));
+      const packs = [
+        wrapLetterLines(ctx, row.time || " ", colW[0] - 16),
+        wrapLetterLines(ctx, row.session || " ", colW[1] - 16),
+        String(row.points || " ").split(/\n/).flatMap((part) => wrapLetterLines(ctx, part || " ", colW[pointCol] - 16)),
+      ];
+      if (many) packs.push(wrapLetterLines(ctx, row.lecturer || " ", colW[3] - 16));
       const count = Math.max(...packs.map((lines) => lines.length), 1);
       return { packs, height: count * lineH + 16 };
     });
     const foot = [
-      `•  සමායෝජන සම්බන්ධීකරණය: ${namedPost(header.coordinatorPost, header.coordinator)}`,
-      `•  සම්පත්දායක අධීක්ෂණය: ${namedPost(header.supervisorPost, header.supervisor)}`,
-      `•  සම්බන්ධීකරණය: ${namedPost(liaison.post, liaison.name)}`,
+      `•  සමායෝජන: ${namedPersonRole(header.coordinator, header.coordinatorPost)}`,
+      `•  අධීක්ෂණය: ${namedPersonRole(header.supervisor, MODULE_SUPERVISOR_POST())}`,
+      `•  සම්බන්ධීකරණය: ${namedPersonRole(liaison.name, liaison.post || MODULE_LIAISON_POST())}`,
     ];
     const footHeight = foot.reduce((sum, line) => sum + wrapLetterLines(ctx, line, width).length * lineH, 0) + 20;
     const tableH = headerH + measured.reduce((sum, row) => sum + row.height, 0);
     if (y + tableH + footHeight > canvas.height - margin) return false;
-    const labels = many ? ["කාලය", "සැසිය", "දේශකයා", "විෂය කරුණු සහ ක්‍රියාකාරකම්"] : ["කාලය", "සැසිය", "විෂය කරුණු සහ ක්‍රියාකාරකම්"];
+    const labels = many ? ["කාලය", "සැසිය", "විෂය කරුණු සහ ක්‍රියාකාරකම්", "දේශකයා"] : ["කාලය", "සැසිය", "විෂය කරුණු සහ ක්‍රියාකාරකම්"];
     ctx.fillStyle = "#e4e4e4";
     ctx.fillRect(margin, y, width, headerH);
     ctx.strokeStyle = "#222222";
@@ -10864,7 +12464,7 @@ function formatModuleCanvas(header, day, index) {
       row.packs.forEach((lines, col) => {
         const x = margin + colW.slice(0, col).reduce((sum, item) => sum + item, 0);
         ctx.strokeRect(x, y, colW[col], row.height);
-        const left = col >= (many ? 2 : 2) && col === row.packs.length - 1 || (many && col === 2);
+        const left = col === 2;
         ctx.textAlign = left ? "left" : "center";
         lines.forEach((line, lineIndex) => {
           if (!String(line).trim()) return;
@@ -10968,19 +12568,75 @@ async function saveLetter(kind) {
     saveBlob(blob, `nomination-letter-${stamp}.png`);
     return;
   }
-  const blob = await new Promise((resolve) => page.toBlob(resolve, "image/jpeg", 0.92));
+  const blob = await new Promise((resolve) => page.toBlob(resolve, "image/jpeg", 0.96));
   const jpeg = new Uint8Array(await blob.arrayBuffer());
   saveBlob(jpegPdf(jpeg, page.width, page.height), `nomination-letter-${stamp}.pdf`);
 }
 
 async function submitMessage(form, task) {
+  if (form.dataset.busy === "1") return;
+  form.dataset.busy = "1";
+  const buttons = [...form.querySelectorAll("button")];
+  buttons.forEach((button) => { button.disabled = true; });
   const slot = form.querySelector("#form-msg") || $("#form-msg");
+  if (slot) slot.innerHTML = `<div class="ok">${esc(L("රැඳී සිටින්න…", "காத்திருக்கவும்…", "Please wait…"))}</div>`;
   try {
     await task();
   } catch (error) {
     if (slot) slot.innerHTML = `<div class="error">${esc(error.message)}</div>`;
     else alert(error.message);
+  } finally {
+    delete form.dataset.busy;
+    buttons.forEach((button) => { button.disabled = false; });
   }
+}
+
+async function fillCoordinatorName(box) {
+  const name = box.form?.querySelector("[name=atp_coordname]");
+  if (!name) return;
+  const nid = String(box.value || "").trim();
+  if (!nid) return;
+  try {
+    const data = await api("profile", { query: { nid } });
+    name.value = data.profile?.name || "";
+  } catch (error) {
+    name.value = "";
+  }
+}
+
+function letterCoordinatorLine(letter, plan) {
+  const name = String(letter?.coordName || plan?.atp_coordname || "").trim();
+  const phone = String(letter?.coordPhone || "").trim();
+  const parts = [];
+  if (name) parts.push(name);
+  if (phone) parts.push(`දුරකථන අංකය - ${phone}`);
+  return parts.join(", ");
+}
+
+function letterFacilities(plan) {
+  return String(plan?.atp_facilities || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[\s*★•\-–—]+/, "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function letterSpecialHtml(plan) {
+  const text = String(plan?.atp_specialfacts || "").trim();
+  const flag = String(plan?.atp_specialfinletter || "").trim().toLowerCase();
+  if (!text || flag === "නැත" || flag === "no") return "";
+  return `<p class="letter-body">${esc(text)}</p>`;
+}
+
+function letterOnDate(iso) {
+  const parts = String(iso || "").slice(0, 10).split("-");
+  if (parts.length !== 3 || parts[0].length !== 4) return String(iso || "");
+  return `${parts[0]}.${parts[1]}.${parts[2]}`;
+}
+
+function letterThrough(post) {
+  const text = String(post || "").trim() || "ලේකම්";
+  return text.includes("මගින්") ? text : `${text} මගින්`;
 }
 
 async function addNeedToPlan(need) {
@@ -11051,6 +12707,13 @@ document.body.addEventListener("input", (event) => {
 });
 
 document.body.addEventListener("change", async (event) => {
+  if (event.target.id === "coord-officer") {
+    state.coordPick = event.target.value;
+    const slot = document.getElementById("coord-sheet");
+    const picked = coordChosenOfficer(state.coordReport);
+    if (slot) slot.innerHTML = picked ? coordOfficerHtml(picked) : `<p class="pad-note">මේ වර්ෂයේ සම්බන්ධීකරණ වැඩසටහන් නැත.</p>`;
+    return;
+  }
   if (event.target.matches("[data-year-pick]")) {
     rememberYear(event.target.value);
     if (event.target.closest("#year-bar")) {
@@ -11088,7 +12751,16 @@ document.body.addEventListener("change", async (event) => {
   if (event.target.id === "person-year") {
     rememberYear(event.target.value);
     const tab = state.query.get("tab") === "detail" ? "detail" : "summary";
-    location.hash = `#console/person?year=${encodeURIComponent(event.target.value)}&tab=${tab}`;
+    const from = document.querySelector("#person-from")?.value || "";
+    const until = document.querySelector("#person-until")?.value || "";
+    const q = new URLSearchParams({ year: event.target.value, tab });
+    if (from) q.set("from", from);
+    if (until) q.set("until", until);
+    location.hash = `#console/person?${q.toString()}`;
+    return;
+  }
+  if (event.target.id === "person-from" || event.target.id === "person-until") {
+    loadPersonMatrixPreview().catch((error) => alert(error.message));
     return;
   }
   if (event.target.closest?.("#total-form")) paintTotalSums();
@@ -11151,7 +12823,7 @@ document.body.addEventListener("change", async (event) => {
   }
   const nextPlan = event.target.closest("[data-next-plan]");
   if (nextPlan && nextPlan.files[0]) {
-    const year = document.querySelector("#next-plan [name=year]")?.value || "";
+    const year = document.querySelector("#next-plan [name=year], #plan-upload [name=year]")?.value || "";
     const body = new FormData();
     body.append("file", nextPlan.files[0]);
     body.append("year", year);

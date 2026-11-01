@@ -6,6 +6,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/config.php';
+require __DIR__ . '/backup_lib.php';
 app_bootstrap();
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
@@ -14,6 +15,10 @@ if (!is_string($action) || $action === '') {
 }
 
 try {
+    fill_blank_panel_numbers();
+    fill_blank_coord_names();
+    ensure_meeting_type_merge();
+    backup_maybe_auto();
     match ($action) {
         'me' => action_me(),
         'login' => action_login(),
@@ -54,6 +59,7 @@ try {
         'officer-letter' => action_officer_letter(),
         'call-letters' => action_call_letters(),
         'letter' => action_letter(),
+        'letter-check' => action_letter_check(),
         'signatory' => action_signatory(),
         'signatory-save' => action_signatory_save(),
         'modules' => action_modules(),
@@ -63,6 +69,7 @@ try {
         'module-gemini' => action_module_gemini(),
         'gemini-key' => action_gemini_key(),
         'eval-get' => action_eval_get(),
+        'eval-gemini' => action_eval_gemini(),
         'eval-save' => action_eval_save(),
         'eval-live' => action_eval_live(),
         'eval-report' => action_eval_report(),
@@ -76,12 +83,17 @@ try {
         'total-calc' => action_total_calc(),
         'split' => action_split(),
         'person' => action_person(),
+        'person-matrix' => action_person_matrix(),
+        'backup-list' => action_backup_list(),
+        'backup-run' => action_backup_run(),
+        'backup-download' => action_backup_download(),
         'attended' => action_attended(),
         'pace' => action_pace(),
         'pace-save' => action_pace_save(),
         'pace-calc' => action_pace_calc(),
         'pace-slides' => action_pace_slides(),
         'pace-slides-save' => action_pace_slides_save(),
+        'coord-progress' => action_coord_progress(),
         'ahead-tamil' => action_ahead_tamil(),
         'ahead-tamil-save' => action_ahead_tamil_save(),
         'ahead-drug' => action_ahead_drug(),
@@ -101,9 +113,12 @@ try {
         'ahead-compare' => action_ahead_compare(),
         'messages-save' => action_messages_save(),
         'messages-gmail' => action_messages_gmail(),
+        'messages-sms' => action_messages_sms(),
         'messages-send' => action_messages_send(),
+        'birthday-sms' => action_birthday_sms(),
         'blacklist' => action_blacklist(),
         'blacklist-add' => action_blacklist_add(),
+        'staff-upload' => action_staff_upload(),
         'estimate' => action_estimate(),
         'save-estimate' => action_save_estimate(),
         'saved-estimates' => action_saved_estimates(),
@@ -160,12 +175,19 @@ function body(): array
 function action_me(): void
 {
     session_idle();
-    json_out(['ok' => true, 'user' => current_user(), 'csrf' => csrf_token()]);
+    $user = current_user();
+    if ($user && (is_admin($user) || is_super($user))) {
+        birthday_sms_dispatch();
+    }
+    json_out(['ok' => true, 'user' => $user, 'csrf' => csrf_token()]);
 }
 
 function action_pulse(): void
 {
-    require_user();
+    $user = require_user();
+    if (is_admin($user) || is_super($user)) {
+        birthday_sms_dispatch();
+    }
     json_out(['ok' => true]);
 }
 
@@ -281,23 +303,15 @@ function action_home(): void
         'sssss',
         [$today, YES_SI, YES_SI, 'Yes', 'yes']
     );
-    $dayKeep = [];
-    $dayTypes = '';
-    $dayParams = [];
-    for ($day = 1; $day <= 10; $day++) {
-        $dayKeep[] = "(atp_day{$day} >= ? AND atp_day{$day} NOT LIKE '0000%' AND atp_day{$day} NOT LIKE '1111%')";
-        $dayTypes .= 's';
-        $dayParams[] = $today;
-    }
-    $upcoming = rows(
+    $upcoming = array_values(array_filter(rows(
         "SELECT atp_id, atp_trname, atp_location, atp_day1, atp_day2, atp_day3, atp_day4, atp_day5,
                 atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_stime, atp_etime, atp_trtype, atp_lastdateapply
          FROM cp_atp
-         WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?) AND (" . implode(' OR ', $dayKeep) . ")
-         ORDER BY atp_id DESC LIMIT 80",
-        'sss' . $dayTypes,
-        array_merge([YES_SI, 'Yes', 'yes'], $dayParams)
-    );
+         WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?)
+         ORDER BY atp_id DESC LIMIT 400",
+        'sss',
+        [YES_SI, 'Yes', 'yes']
+    ), static fn(array $row): bool => programme_still_on($row, $today)));
     usort($upcoming, static function (array $a, array $b): int {
         $endA = plan_end_date($a);
         $endB = plan_end_date($b);
@@ -307,11 +321,7 @@ function action_home(): void
         return $endA <=> $endB;
     });
     $upcoming = array_slice($upcoming, 0, 8);
-    $notices = rows(
-        "SELECT msg_id, msg_date, msg_message FROM cp_messeges WHERE msg_status = ? ORDER BY msg_date DESC, msg_id DESC LIMIT 12",
-        's',
-        [YES_SI]
-    );
+    $notices = home_notices($today);
     $slides = rows(
         "SELECT slp_id, slp_photo FROM cp_slideshowimgs WHERE slp_status = ? ORDER BY slp_id DESC",
         's',
@@ -382,6 +392,87 @@ function action_home(): void
     ]);
 }
 
+function programme_still_on(array $row, string $today): bool
+{
+    $end = programme_last_day($row);
+    return $end !== '' && $end >= $today;
+}
+
+function notice_deadline(array $notice): string
+{
+    $stored = substr(trim((string) ($notice['msg_end'] ?? '')), 0, 10);
+    if (preg_match('/^20\d{2}-\d{2}-\d{2}$/', $stored)) {
+        $parsed = DateTime::createFromFormat('Y-m-d', $stored);
+        if ($parsed && $parsed->format('Y-m-d') === $stored) {
+            return $stored;
+        }
+    }
+    $message = (string) ($notice['msg_message'] ?? '');
+    if (!preg_match('/අවසන් දිනය\s*(20\d{2}-\d{2}-\d{2})/u', $message, $found)) {
+        return '';
+    }
+    $day = $found[1];
+    $parsed = DateTime::createFromFormat('Y-m-d', $day);
+    if (!$parsed || $parsed->format('Y-m-d') !== $day) {
+        return '';
+    }
+    $id = (int) ($notice['msg_id'] ?? 0);
+    if ($id > 0) {
+        $stmt = db()->prepare("UPDATE cp_messeges SET msg_end = ? WHERE msg_id = ? AND (msg_end IS NULL OR msg_end = '0000-00-00')");
+        if ($stmt) {
+            $stmt->bind_param('si', $day, $id);
+            $stmt->execute();
+        }
+    }
+    return $day;
+}
+
+function home_notices(string $today): array
+{
+    $rows = rows(
+        "SELECT msg_id, msg_date, msg_message, msg_end FROM cp_messeges
+         WHERE msg_status IS NULL OR TRIM(msg_status) = '' OR msg_status NOT IN ('නැත', 'No', 'no')
+         ORDER BY msg_date DESC, msg_id DESC LIMIT 400"
+    );
+    $seen = [];
+    $kept = [];
+    foreach ($rows as $notice) {
+        $end = notice_deadline($notice);
+        if ($end !== '' && $end < $today) {
+            continue;
+        }
+        $key = mb_strtolower(trim((string) ($notice['msg_message'] ?? '')));
+        if ($key === '' || isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $kept[] = $notice;
+    }
+    return $kept;
+}
+
+function public_programme_rows(string $like, string $typeValue): array
+{
+    $today = date('Y-m-d');
+    $columns = 'atp_id, atp_trname, atp_location, atp_day1, atp_day2, atp_day3, atp_day4, atp_day5,
+                atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_stime, atp_etime, atp_trtype,
+                atp_targetgroup, atp_noofdays, atp_lastdateapply, atp_purpose, atp_fundsource';
+    if ($typeValue === '') {
+        $items = rows(
+            "SELECT $columns FROM cp_atp WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?) AND atp_trname LIKE ? ORDER BY atp_day1 DESC LIMIT 500",
+            'ssss',
+            [YES_SI, 'Yes', 'yes', $like]
+        );
+    } else {
+        $items = rows(
+            "SELECT $columns FROM cp_atp WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?) AND atp_trtype = ? AND atp_trname LIKE ? ORDER BY atp_day1 DESC LIMIT 500",
+            'sssss',
+            [YES_SI, 'Yes', 'yes', $typeValue, $like]
+        );
+    }
+    return array_values(array_filter($items, static fn(array $row): bool => programme_still_on($row, $today)));
+}
+
 function action_public_list(): void
 {
     $kind = (string) ($_GET['kind'] ?? '');
@@ -394,23 +485,7 @@ function action_public_list(): void
     if ($kind === 'programmes') {
         $type = (string) ($_GET['type'] ?? '');
         $typeValue = $type === 'productivity' ? TYPE_PRODUCTIVITY : ($type === 'mdtu' ? TYPE_MDTU : '');
-        if ($typeValue === '') {
-            $items = rows(
-                "SELECT atp_id, atp_trname, atp_location, atp_day1, atp_stime, atp_etime, atp_trtype,
-                        atp_targetgroup, atp_noofdays, atp_lastdateapply, atp_purpose, atp_fundsource
-                 FROM cp_atp WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?) AND atp_trname LIKE ? ORDER BY atp_day1 DESC LIMIT $limit OFFSET $offset",
-                'ssss',
-                [YES_SI, 'Yes', 'yes', $like]
-            );
-        } else {
-            $items = rows(
-                "SELECT atp_id, atp_trname, atp_location, atp_day1, atp_stime, atp_etime, atp_trtype,
-                        atp_targetgroup, atp_noofdays, atp_lastdateapply, atp_purpose, atp_fundsource
-                 FROM cp_atp WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?) AND atp_trtype = ? AND atp_trname LIKE ? ORDER BY atp_day1 DESC LIMIT $limit OFFSET $offset",
-                'sssss',
-                [YES_SI, 'Yes', 'yes', $typeValue, $like]
-            );
-        }
+        $items = array_slice(public_programme_rows($like, $typeValue), $offset, $limit);
     } elseif ($kind === 'downloads') {
         $type = (string) ($_GET['type'] ?? '');
         if ($type !== '' && !isset(DOWNLOAD_TYPES[$type])) {
@@ -556,11 +631,15 @@ function action_catalog(): void
         $items[] = ['id' => 'person', 'label' => 'One-person report', 'group' => 'Reports', 'kind' => 'person'];
         $items[] = ['id' => 'settle', 'label' => 'Estimate, food bill and allowances', 'group' => 'Reports', 'kind' => 'settle'];
         $items[] = ['id' => 'ahead', 'label' => 'Progress tabs', 'group' => 'Reports', 'kind' => 'ahead'];
+        $items[] = ['id' => 'coordreport', 'label' => 'Coordinator progress', 'group' => 'Reports', 'kind' => 'coordreport'];
     }
     if (is_admin($user) || is_super($user)) {
         $items[] = ['id' => 'reports', 'label' => 'Reports', 'group' => 'Reports', 'kind' => 'reports'];
     } elseif ($user['role'] === 'User') {
         $items[] = ['id' => 'reports', 'label' => 'Office reports', 'group' => 'Reports', 'kind' => 'reports'];
+    }
+    if (is_admin($user)) {
+        $items[] = ['id' => 'backup', 'label' => 'Database backup', 'group' => 'Control', 'kind' => 'backup'];
     }
     foreach (table_registry() as $table => $meta) {
         if (!in_array($user['role'], $meta['roles'], true)) {
@@ -672,6 +751,9 @@ function action_list(): void
     $hidden = $meta['hidden'] ?? [];
     while ($row = $result->fetch_assoc()) {
         foreach ($hidden as $column) {
+            if ($column === 'lg_pwd' && ($user['role'] ?? '') === 'Administrator') {
+                continue;
+            }
             if (array_key_exists($column, $row)) {
                 $row[$column] = '';
             }
@@ -736,8 +818,24 @@ function action_save(): void
         json_out(['ok' => false, 'error' => 'මෙය වෙනස් කරන්න පුළුවන් පරිපාලකට පමණයි.'], 403);
     }
 
-    if ($user['role'] === 'User' && !empty($meta['office'])) {
+    if ($user['role'] === 'User' && !empty($meta['office']) && !($table === 'cp_staff' && !$isInsert)) {
         $record[$meta['office']] = $user['office'];
+    }
+    if ($table === 'cp_staff' && !$isInsert) {
+        $office = trim((string) ($record['stf_office'] ?? ''));
+        if ($office === '') {
+            json_out(['ok' => false, 'error' => 'කාර්යාලය තෝරන්න.'], 422);
+        }
+        $known = rows('SELECT of_name FROM offices WHERE of_name = ? LIMIT 1', 's', [$office]);
+        if ($known) {
+            $record['stf_office'] = (string) $known[0]['of_name'];
+        } else {
+            $currentOffice = rows('SELECT stf_office FROM cp_staff WHERE `' . str_replace('`', '', $primary) . '` = ? LIMIT 1', 's', [$id]);
+            $kept = trim((string) ($currentOffice[0]['stf_office'] ?? ''));
+            if ($kept !== $office) {
+                json_out(['ok' => false, 'error' => 'කාර්යාලය ලැයිස්තුවෙන් තෝරන්න.'], 422);
+            }
+        }
     }
     if ($table === 'cp_trrequirements' && $isInsert && $user['role'] === 'User') {
         $today = date('Y-m-d');
@@ -765,6 +863,40 @@ function action_save(): void
     if ($table === 'cp_login' && $isInsert === false && trim((string) ($record['lg_pwd'] ?? '')) === '') {
         unset($record['lg_pwd']);
     }
+    if ($table === 'cp_messeges') {
+        $message = trim((string) ($record['msg_message'] ?? ''));
+        if ($message !== '') {
+            $dup = rows('SELECT msg_id FROM cp_messeges WHERE msg_message = ? AND msg_id <> ? LIMIT 1', 'si', [$message, (int) $id]);
+            if ($dup) {
+                json_out(['ok' => false, 'error' => 'මෙම දැනුම්දීම දැනටමත් ඇත. එකම පණිවිඩය දෙවරක් දාන්න බැහැ.'], 422);
+            }
+        }
+    }
+    if ($table === 'cp_trainingapplications' && array_key_exists('tapp_priority', $record)) {
+        if (trim((string) $record['tapp_priority']) === '') {
+            json_out(['ok' => false, 'error' => 'ප්‍රමුඛතාව අනිවාර්යයි. 1 සිට 50 දක්වා තෝරන්න.'], 422);
+        }
+        $priority = (int) $record['tapp_priority'];
+        if ($priority < 1 || $priority > 50) {
+            json_out(['ok' => false, 'error' => 'ප්‍රමුඛතාව අනිවාර්යයි. 1 සිට 50 දක්වා තෝරන්න.'], 422);
+        }
+        $office = trim((string) ($record['tapp_office'] ?? ''));
+        $atpId = trim((string) ($record['tapp_atpid'] ?? ''));
+        if (!$isInsert && ($office === '' || $atpId === '')) {
+            $current = rows('SELECT tapp_office, tapp_atpid FROM cp_trainingapplications WHERE tapp_id = ? LIMIT 1', 'i', [(int) $id]);
+            if ($current) {
+                if ($office === '') {
+                    $office = (string) $current[0]['tapp_office'];
+                }
+                if ($atpId === '') {
+                    $atpId = (string) $current[0]['tapp_atpid'];
+                }
+            }
+        }
+        if (office_priority_taken($atpId, $office, $priority, $isInsert ? 0 : (int) $id)) {
+            json_out(['ok' => false, 'error' => 'මේ කාර්යාලයෙන් මේ පුහුණුවට මේ ප්‍රමුඛතාව දැනටමත් දී ඇත. එකම කාර්යාලයේ දෙන්නෙකුට එකම ප්‍රමුඛතාව දෙන්න බැහැ. වෙනත් අංකයක් තෝරන්න.'], 422);
+        }
+    }
     if ($table === 'cp_trainingapplications' && $isInsert && officer_is_blacklisted(trim((string) ($record['tapp_officerNid'] ?? '')))) {
         json_out(['ok' => false, 'error' => blacklist_apply_error(trim((string) ($record['tapp_officerNid'] ?? '')))], 422);
     }
@@ -788,6 +920,31 @@ function action_save(): void
         $record['tro_email'] = (string) $staff[0]['stf_email'];
         if ($user['role'] !== 'User') {
             $record['tro_office'] = (string) $staff[0]['stf_office'];
+        }
+    }
+    if ($table === 'cp_atp' && array_key_exists('atp_panelno', $record)) {
+        $panel = trim((string) $record['atp_panelno']);
+        if ($panel !== '') {
+            $record['atp_panelno'] = normalize_panel_number($panel);
+        } elseif (trim((string) ($record['atp_trname'] ?? '')) !== '') {
+            $record['atp_panelno'] = next_panel_number(panel_year_of($record));
+        }
+    }
+    if ($table === 'cp_atp') {
+        $coordId = trim((string) ($record['atp_supportstaff1'] ?? ''));
+        $named = trim((string) ($record['atp_trname'] ?? ''));
+        if ($named !== '' && $coordId === '') {
+            json_out(['ok' => false, 'error' => 'සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි.'], 422);
+        }
+        if ($coordId !== '' && coord_nid_key($coordId) === '') {
+            json_out(['ok' => false, 'error' => 'සම්බන්ධීකරණය සඳහා වලංගු ජාතික හැඳුනුම්පත් අංකයක් දෙන්න.'], 422);
+        }
+    }
+    if ($table === 'cp_atp' && array_key_exists('atp_coordname', $record)) {
+        $coordName = trim((string) $record['atp_coordname']);
+        $fromId = staff_name_for((string) ($record['atp_supportstaff1'] ?? ''));
+        if ($fromId !== '' && ($coordName === '' || coord_nid_key($coordName) !== '')) {
+            $record['atp_coordname'] = $fromId;
         }
     }
     if ($table === 'cp_resourcepersons') {
@@ -978,9 +1135,9 @@ function announce_programme(int $id): void
     }
     $today = date('Y-m-d');
     $status = YES_SI;
-    $stmt = db()->prepare('INSERT INTO cp_messeges (msg_date, msg_message, msg_status) VALUES (?, ?, ?)');
+    $stmt = db()->prepare('INSERT INTO cp_messeges (msg_date, msg_message, msg_status, msg_end) VALUES (?, ?, ?, ?)');
     if ($stmt) {
-        $stmt->bind_param('sss', $today, $message, $status);
+        $stmt->bind_param('ssss', $today, $message, $status, $close);
         $stmt->execute();
     }
 }
@@ -1106,6 +1263,61 @@ function action_upload(): void
     json_out(['ok' => true, 'name' => $stored, 'url' => $folder . '/' . $stored]);
 }
 
+function action_backup_list(): void
+{
+    $user = require_user();
+    if (!is_admin($user)) {
+        json_out(['ok' => false, 'error' => 'උපස්ථ බලන්න පුළුවන් පරිපාලකට පමණයි.'], 403);
+    }
+    json_out([
+        'ok' => true,
+        'items' => backup_list(),
+        'nextAuto' => 'හැමදාම ප.ව. 4:00ට පූර්ණ උපස්ථයක්.',
+        'rules' => [
+            'daily' => 'සාමාන්‍ය උපස්ථය දින 2කට පසු මකයි (බාගත කළත් නැතත්).',
+            'friday' => 'සිකුරාදා ප.ව. 4:00 උපස්ථය අඟහරුවාදා ප.ව. 4:00 දක්වා තියෙනවා. සඳුදා ප.ව. 4:00ට අලුත් උපස්ථයක් නැවත හැදෙනවා.',
+        ],
+        'now' => date('c'),
+        'hour' => (int) date('G'),
+    ]);
+}
+
+function action_backup_run(): void
+{
+    csrf_check();
+    $user = require_user();
+    if (!is_admin($user)) {
+        json_out(['ok' => false, 'error' => 'උපස්ථ හදන්න පුළුවන් පරිපාලකට පමණයි.'], 403);
+    }
+    $meta = backup_create(new DateTimeImmutable('now'), 'manual');
+    json_out(['ok' => true, 'backup' => $meta, 'items' => backup_list()]);
+}
+
+function action_backup_download(): void
+{
+    $user = require_user();
+    if (!is_admin($user)) {
+        json_out(['ok' => false, 'error' => 'උපස්ථ බාගත කරන්න පුළුවන් පරිපාලකට පමණයි.'], 403);
+    }
+    $stamp = trim((string) ($_GET['stamp'] ?? ''));
+    $kind = strtolower(trim((string) ($_GET['kind'] ?? 'sql')));
+    if ($kind !== 'json') {
+        $kind = 'sql';
+    }
+    $path = backup_file_for($stamp, $kind);
+    if ($path === null) {
+        json_out(['ok' => false, 'error' => 'උපස්ථ ගොනුව හමු නොවීය.'], 404);
+    }
+    $mime = $kind === 'json' ? 'application/json' : 'application/sql';
+    $name = 'mdtu-full-' . $stamp . '.' . $kind;
+    header('Content-Type: ' . $mime . '; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $name . '"');
+    header('Content-Length: ' . (string) filesize($path));
+    header('X-Content-Type-Options: nosniff');
+    readfile($path);
+    exit;
+}
+
 function action_dashboard(): void
 {
     $user = require_user();
@@ -1160,6 +1372,12 @@ function action_dashboard(): void
 function action_options(): void
 {
     require_user();
+    $team = signatory_profile()['team'] ?? [
+        'dcs' => ['nid' => '', 'name' => '', 'role' => 'dcs'],
+        'supervisor' => ['nid' => '', 'name' => '', 'role' => 'supervisor'],
+        'cash' => ['nid' => '', 'name' => '', 'role' => 'cash'],
+        'support' => [],
+    ];
     json_out([
         'ok' => true,
         'offices' => array_values(array_filter(
@@ -1175,20 +1393,17 @@ function action_options(): void
         'yesno' => [['value' => YES_SI, 'label' => 'Yes'], ['value' => NO_SI, 'label' => 'No']],
         'roles' => ['Administrator', 'Super User', 'User'],
         'types' => [
-            ['value' => TYPE_MDTU, 'label' => 'MDTU programme'],
-            ['value' => TYPE_PRODUCTIVITY, 'label' => 'Productivity programme'],
+            ['value' => TYPE_MDTU, 'label' => 'පොදු පුහුණු'],
             ['value' => 'විශේෂ පුහුණු', 'label' => 'Special training'],
             ['value' => 'දෙපාර්තමේන්තු පුහුණු', 'label' => 'Departmental training'],
-            ['value' => 'භාෂා පුහුණු', 'label' => 'Language training'],
-            ['value' => 'OBT', 'label' => 'OBT'],
+            ['value' => 'භාෂා පුහුණු', 'label' => 'දෙමළ භාෂා පුහුණු'],
             ['value' => 'උපදේශණය හා මත්ද්‍රවය නිවාරණ', 'label' => 'Counselling and drug prevention'],
-            ['value' => 'රැස්වීම්', 'label' => 'Meetings'],
-            ['value' => 'උපදේශන කමිටුව', 'label' => 'Advisory committee'],
-            ['value' => 'ප්‍රගති සමාලෝචන', 'label' => 'Progress review'],
+            ['value' => TYPE_MEETING, 'label' => TYPE_MEETING],
             ['value' => 'වෙනත්', 'label' => 'Other'],
         ],
         'downloadTypes' => DOWNLOAD_TYPES,
         'blacklist' => [['value' => '', 'label' => 'No'], ['value' => 'Yes', 'label' => 'Yes']],
+        'team' => $team,
     ]);
 }
 
@@ -1207,10 +1422,14 @@ function action_apply(): void
     }
     $staff = rows('SELECT stf_Nid, stf_office, stf_blacklisted FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$nid]);
     if (!$staff) {
-        json_out(['ok' => false, 'error' => 'That national ID is not in the staff register.'], 422);
+        $person = staff_by_identity($nid);
+        if ($person) {
+            $staff = [$person];
+            $nid = trim((string) ($person['stf_Nid'] ?? $nid));
+        }
     }
-    if ($user['role'] === 'User' && $staff[0]['stf_office'] !== $user['office']) {
-        json_out(['ok' => false, 'error' => 'You can apply only for officers in your office.'], 403);
+    if (!$staff) {
+        json_out(['ok' => false, 'error' => 'That national ID is not in the staff register.'], 422);
     }
     if (officer_is_blacklisted($nid)) {
         json_out(['ok' => false, 'error' => blacklist_apply_error($nid)], 422);
@@ -1239,14 +1458,23 @@ function action_apply(): void
     if ($existing) {
         json_out(['ok' => false, 'error' => 'This officer is already nominated for that programme.'], 422);
     }
-    $office = (string) $staff[0]['stf_office'];
+    $office = trim((string) $staff[0]['stf_office']);
+    if ($office === '') {
+        json_out(['ok' => false, 'error' => 'මේ නිලධාරියාට කාර්යාලයක් නැත. කාර්යමණ්ඩල ලේඛනයේ කාර්යාලය යොදන්න.'], 422);
+    }
     $name = (string) $plan[0]['atp_trname'];
     $start = (string) $plan[0]['atp_day1'];
     $applied = date('Y-m-d');
     $relevant = (string) ($data['relevant'] ?? YES_SI);
-    $priority = (int) ($data['priority'] ?? 1);
+    if (!array_key_exists('priority', $data) || trim((string) $data['priority']) === '') {
+        json_out(['ok' => false, 'error' => 'ප්‍රමුඛතාව අනිවාර්යයි. 1 සිට 50 දක්වා තෝරන්න.'], 422);
+    }
+    $priority = (int) $data['priority'];
     if ($priority < 1 || $priority > 50) {
-        json_out(['ok' => false, 'error' => 'Choose a priority from 1 to 50.'], 422);
+        json_out(['ok' => false, 'error' => 'ප්‍රමුඛතාව අනිවාර්යයි. 1 සිට 50 දක්වා තෝරන්න.'], 422);
+    }
+    if (office_priority_taken((string) $atpId, $office, $priority)) {
+        json_out(['ok' => false, 'error' => 'මේ කාර්යාලයෙන් මේ පුහුණුවට මේ ප්‍රමුඛතාව දැනටමත් දී ඇත. එකම කාර්යාලයේ දෙන්නෙකුට එකම ප්‍රමුඛතාව දෙන්න බැහැ. වෙනත් අංකයක් තෝරන්න.'], 422);
     }
     $stay = (string) ($data['accommodation'] ?? NO_SI);
     $diet = (string) ($data['diet'] ?? '');
@@ -1471,7 +1699,7 @@ function action_report(): void
     $user = require_user();
     $name = (string) ($_GET['name'] ?? 'summary');
     $year = (int) ($_GET['year'] ?? date('Y'));
-    if ($year < 1990 || $year > 2100) {
+    if ($year < 1990 || $year > 2200) {
         $year = (int) date('Y');
     }
     $start = $year . '-01-01';
@@ -1703,12 +1931,211 @@ function action_import(): void
         if ($user['role'] === 'User' && $table === 'cp_trrequirements') {
             $record['req_addoffice'] = $user['office'];
         }
+        if ($table === 'cp_atp' && trim((string) ($record['atp_coordname'] ?? '')) === '') {
+            $record['atp_coordname'] = staff_name_for((string) ($record['atp_supportstaff1'] ?? ''));
+        }
+        if ($table === 'cp_atp') {
+            $panel = trim((string) ($record['atp_panelno'] ?? ''));
+            if ($panel !== '') {
+                $record['atp_panelno'] = normalize_panel_number($panel);
+            } elseif (trim((string) ($record['atp_trname'] ?? '')) !== '') {
+                $record['atp_panelno'] = next_panel_number(panel_year_of($record));
+            }
+        }
         $id = trim((string) ($record[$primary] ?? ''));
         unset($record['lg_pwd']);
         save_mapped($table, $record, $id, $desc);
         $saved++;
     }
     json_out(['ok' => true, 'saved' => $saved]);
+}
+
+function plan_upload_type(string $value): string
+{
+    $value = trim($value);
+    $known = [
+        TYPE_MDTU,
+        'ඵලදායිතා පුහුණුවකි',
+        'විශේෂ පුහුණු',
+        'දෙපාර්තමේන්තු පුහුණු',
+        'භාෂා පුහුණු',
+        'OBT',
+        'උපදේශණය හා මත්ද්‍රවය නිවාරණ',
+        TYPE_MEETING,
+        'රැස්වීම්',
+        'උපදේශන කමිටුව',
+        'ප්‍රගති සමාලෝචන',
+        'වෙනත්',
+    ];
+    if (in_array($value, $known, true)) {
+        return plan_meeting_type($value);
+    }
+    if (str_contains($value, 'විශේෂ') || strcasecmp($value, 'special') === 0) {
+        return 'විශේෂ පුහුණු';
+    }
+    if (str_contains($value, 'දෙපාර්තමේන්තු') || str_contains(mb_strtolower($value), 'department')) {
+        return 'දෙපාර්තමේන්තු පුහුණු';
+    }
+    if (str_contains($value, 'දෙමළ') || str_contains($value, 'භාෂා') || str_contains(mb_strtolower($value), 'tamil')) {
+        return 'භාෂා පුහුණු';
+    }
+    if (plan_is_meeting_type($value)) {
+        return TYPE_MEETING;
+    }
+    if ($value === '' || str_contains($value, 'පොදු') || strcasecmp($value, 'general') === 0 || strcasecmp($value, 'mdtu') === 0) {
+        return TYPE_MDTU;
+    }
+    return $value;
+}
+
+function plan_is_meeting_type(string $type): bool
+{
+    $type = trim($type);
+    if ($type === TYPE_MEETING || $type === 'රැස්වීම්' || $type === 'උපදේශන කමිටුව' || $type === 'ප්‍රගති සමාලෝචන') {
+        return true;
+    }
+    if (str_contains($type, 'රැස්වීම') || str_contains($type, 'උපදේශන කමිට') || str_contains($type, 'ප්‍රගති සමාලෝචන')) {
+        return true;
+    }
+    return false;
+}
+
+function plan_meeting_type(string $type): string
+{
+    return plan_is_meeting_type($type) ? TYPE_MEETING : $type;
+}
+
+function ensure_meeting_type_merge(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $old = ['රැස්වීම්', 'උපදේශන කමිටුව', 'ප්‍රගති සමාලෝචන'];
+    $marks = implode(',', array_fill(0, count($old), '?'));
+    $types = str_repeat('s', count($old));
+    $params = array_merge([TYPE_MEETING], $old);
+    $stmt = db()->prepare("UPDATE cp_atp SET atp_trtype = ? WHERE atp_trtype IN ($marks)");
+    if ($stmt) {
+        $stmt->bind_param('s' . $types, ...$params);
+        $stmt->execute();
+    }
+    $stmt = db()->prepare("UPDATE cp_completedtrainings SET ct_trtype = ? WHERE ct_trtype IN ($marks)");
+    if ($stmt) {
+        $stmt->bind_param('s' . $types, ...$params);
+        $stmt->execute();
+    }
+}
+
+function panel_year_of(array $row): string
+{
+    foreach (['atp_day1', 'atp_requestDate'] as $key) {
+        $day = substr(trim((string) ($row[$key] ?? '')), 0, 10);
+        if (preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $day)) {
+            return substr($day, 0, 4);
+        }
+    }
+    return date('Y');
+}
+
+function normalize_panel_number(string $panel): string
+{
+    $panel = trim($panel);
+    if ($panel === '') {
+        return '';
+    }
+    foreach (['NWP/MDTU/2/', 'NWP/MDTU/'] as $prefix) {
+        if (str_starts_with($panel, $prefix)) {
+            $panel = substr($panel, strlen($prefix));
+            break;
+        }
+    }
+    $panel = ltrim($panel, '/');
+    return $panel === '' ? '' : 'NWP/MDTU/' . $panel;
+}
+
+function next_panel_number(string $year): string
+{
+    $year = preg_replace('/\D/', '', $year) ?? '';
+    if (!preg_match('/^(19|2[0-2])\d{2}$/', $year)) {
+        $year = date('Y');
+    }
+    $highest = 0;
+    foreach (rows(
+        'SELECT atp_panelno FROM cp_atp WHERE atp_panelno LIKE ? OR atp_panelno LIKE ? OR atp_panelno LIKE ?',
+        'sss',
+        [$year . '/%', 'NWP/MDTU/' . $year . '/%', 'NWP/MDTU/2/' . $year . '/%']
+    ) as $row) {
+        $text = trim((string) ($row['atp_panelno'] ?? ''));
+        if (preg_match('/^(?:NWP\/MDTU\/(?:2\/)?)?' . preg_quote($year, '/') . '\/(\d+)$/', $text, $found)) {
+            $highest = max($highest, (int) $found[1]);
+        }
+    }
+    return 'NWP/MDTU/' . $year . '/' . str_pad((string) ($highest + 1), 2, '0', STR_PAD_LEFT);
+}
+
+function fill_blank_panel_numbers(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $pending = rows(
+        "SELECT atp_id, atp_day1, atp_requestDate FROM cp_atp
+         WHERE TRIM(atp_trname) <> '' AND (atp_panelno IS NULL OR TRIM(atp_panelno) = '')
+         ORDER BY atp_day1, atp_id"
+    );
+    foreach ($pending as $row) {
+        $number = next_panel_number(panel_year_of($row));
+        $id = (int) $row['atp_id'];
+        $stmt = db()->prepare("UPDATE cp_atp SET atp_panelno = ? WHERE atp_id = ? AND (atp_panelno IS NULL OR TRIM(atp_panelno) = '')");
+        if ($stmt) {
+            $stmt->bind_param('si', $number, $id);
+            $stmt->execute();
+        }
+    }
+}
+
+function fill_blank_coord_names(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $pending = rows("SELECT atp_id, atp_supportstaff1, atp_coordname FROM cp_atp WHERE TRIM(atp_supportstaff1) <> ''");
+    $stmt = db()->prepare('UPDATE cp_atp SET atp_coordname = ? WHERE atp_id = ?');
+    if (!$stmt) {
+        return;
+    }
+    foreach ($pending as $row) {
+        $current = trim((string) ($row['atp_coordname'] ?? ''));
+        if ($current !== '' && coord_nid_key($current) === '') {
+            continue;
+        }
+        $name = staff_name_for((string) ($row['atp_supportstaff1'] ?? ''));
+        if ($name === '' || $name === $current) {
+            continue;
+        }
+        $id = (int) $row['atp_id'];
+        $stmt->bind_param('si', $name, $id);
+        $stmt->execute();
+    }
+}
+
+function plan_upload_day(string $value, string $fallback): string
+{
+    $value = str_replace(['/', '.'], '-', substr(trim($value), 0, 10));
+    if (preg_match('/^(\d{2})-(\d{2})-(20\d{2})$/', $value, $found)) {
+        $value = $found[3] . '-' . $found[2] . '-' . $found[1];
+    }
+    $parsed = DateTime::createFromFormat('Y-m-d', $value);
+    if ($parsed && $parsed->format('Y-m-d') === $value) {
+        return $value;
+    }
+    return $fallback;
 }
 
 function action_next_plan(): void
@@ -1719,7 +2146,7 @@ function action_next_plan(): void
         json_out(['ok' => false, 'error' => 'මේ ලැයිස්තුව දාන්න පුළුවන් පුහුණු කාර්ය මණ්ඩලයට පමණයි.'], 403);
     }
     $year = (int) ($_POST['year'] ?? 0);
-    if ($year < 1990 || $year > 2100) {
+    if ($year < 1990 || $year > 2200) {
         json_out(['ok' => false, 'error' => 'වර්ෂය තෝරන්න.'], 422);
     }
     if (!isset($_FILES['file']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
@@ -1733,19 +2160,46 @@ function action_next_plan(): void
         'පුහුණු වැඩසටහන' => 'name',
         'atp_trname' => 'name',
         'programme' => 'name',
+        'පුහුණු වැඩසටහනේ වර්ගය' => 'type',
+        'වර්ගය' => 'type',
+        'atp_trtype' => 'type',
+        'වැඩමුළු ගණන' => 'workshops',
+        'atp_nooftrainings' => 'workshops',
+        'එක් වැඩමුළුවකට දින ගණන' => 'days',
         'දින ගණන' => 'days',
         'atp_noofdays' => 'days',
+        'සහභාගී කරගන්නා නිලධාරීන් ගණන' => 'people',
         'සේවක සංඛ්‍යාව' => 'people',
         'atp_noofparticipants' => 'people',
         'ස්ථානය' => 'place',
         'atp_location' => 'place',
         'ඉලක්කගත කණ්ඩායම' => 'target',
         'atp_targetgroup' => 'target',
+        'මූල්‍ය ප්‍රභවය' => 'fund',
+        'atp_fundsource' => 'fund',
+        'එක් වැඩමුළුවක් සඳහා වෙන් කල මුදල (රුපියල්)' => 'money',
         'ප්‍රතිපාදන' => 'money',
         'atp_bdjet' => 'money',
+        'ආරම්භක දිනය' => 'start',
+        'atp_day1' => 'start',
+        'සම්බන්ධීකරණය (ජා.හැ.අංකය)' => 'coord',
+        'සම්බන්ධීකරණය' => 'coord',
+        'atp_supportstaff1' => 'coord',
+        'සම්බන්ධීකරණ නිලධාරියාගේ නම' => 'coordname',
+        'atp_coordname' => 'coordname',
     ];
+    $headerAt = 0;
+    foreach ($rows as $rowIndex => $line) {
+        foreach ($line as $cell) {
+            $label = trim((string) $cell);
+            if ($label === 'පුහුණු වැඩසටහන' || mb_strtolower($label) === 'atp_trname') {
+                $headerAt = $rowIndex;
+                break 2;
+            }
+        }
+    }
     $map = [];
-    foreach ($rows[0] as $index => $header) {
+    foreach ($rows[$headerAt] as $index => $header) {
         $key = trim((string) $header);
         $low = mb_strtolower($key);
         if (isset($aliases[$key])) {
@@ -1759,8 +2213,8 @@ function action_next_plan(): void
     }
     $stamp = $year . '-01-01';
     $saved = 0;
-    foreach (array_slice($rows, 1, 2000) as $line) {
-        $picked = ['name' => '', 'days' => '', 'people' => '', 'place' => '', 'target' => '', 'money' => ''];
+    foreach (array_slice($rows, $headerAt + 1, 2000) as $line) {
+        $picked = ['name' => '', 'type' => '', 'workshops' => '', 'days' => '', 'people' => '', 'place' => '', 'target' => '', 'fund' => '', 'money' => '', 'start' => '', 'coord' => '', 'coordname' => ''];
         foreach ($map as $index => $column) {
             $picked[$column] = trim((string) ($line[$index] ?? ''));
         }
@@ -1776,18 +2230,28 @@ function action_next_plan(): void
             $row[$column['Field']] = '';
         }
         $row['atp_trname'] = mb_substr($name, 0, 500);
+        $row['atp_trtype'] = plan_upload_type($picked['type']);
+        $row['atp_nooftrainings'] = mb_substr($picked['workshops'], 0, 20);
         $row['atp_noofdays'] = mb_substr($picked['days'], 0, 20);
         $row['atp_noofparticipants'] = mb_substr($picked['people'], 0, 20);
         $row['atp_location'] = mb_substr($picked['place'], 0, 500);
         $row['atp_targetgroup'] = mb_substr($picked['target'], 0, 500);
+        $row['atp_fundsource'] = mb_substr($picked['fund'], 0, 200);
         $row['atp_bdjet'] = mb_substr($picked['money'], 0, 40);
-        $row['atp_trtype'] = TYPE_MDTU;
+        $row['atp_supportstaff1'] = mb_substr($picked['coord'], 0, 40);
+        $coordName = trim($picked['coordname']);
+        if ($coordName === '') {
+            $coordName = staff_name_for($picked['coord']);
+        }
+        $row['atp_coordname'] = mb_substr($coordName, 0, 300);
+        $start = plan_upload_day($picked['start'], $stamp);
+        $row['atp_panelno'] = next_panel_number(substr($start, 0, 4));
         $row['atp_offweb'] = NO_SI;
         $row['atp_addhome'] = NO_SI;
         $row['atp_isinatp'] = NO_SI;
         $row['atp_isaddatp'] = NO_SI;
-        $row['atp_day1'] = $stamp;
-        $row['atp_requestDate'] = $stamp;
+        $row['atp_day1'] = $start;
+        $row['atp_requestDate'] = $start;
         $row['atp_lastdateapply'] = '0000-00-00';
         $row['atp_stime'] = '9.00 am';
         $row['atp_etime'] = '4.15 pm';
@@ -2188,7 +2652,7 @@ function programme_first_day(array $plan): string
 {
     $days = array_values(array_filter(
         programme_days($plan, 'atp_day'),
-        static fn (string $day): bool => preg_match('/^(19|20)\d{2}-\d{2}-\d{2}$/', $day) === 1
+        static fn (string $day): bool => preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $day) === 1
     ));
     sort($days);
     return $days[0] ?? '';
@@ -2198,7 +2662,7 @@ function programme_last_day(array $plan): string
 {
     $days = array_values(array_filter(
         programme_days($plan, 'atp_day'),
-        static fn (string $day): bool => preg_match('/^(19|20)\d{2}-\d{2}-\d{2}$/', $day) === 1
+        static fn (string $day): bool => preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $day) === 1
     ));
     sort($days);
     return $days ? $days[count($days) - 1] : '';
@@ -2272,20 +2736,24 @@ function action_calendar(): void
 function action_birthdays(): void
 {
     if (($_GET['today'] ?? '') === '1') {
-        $people = rows(
-            "SELECT stf_Name, stf_desig, stf_office, stf_mobile, stf_email, stf_Photo, stf_dob
-             FROM cp_staff
-             WHERE MONTH(stf_dob) = ? AND DAY(stf_dob) = ?
-               AND stf_dob NOT LIKE '0000%'
-             ORDER BY stf_Name ASC",
-            'ii',
-            [(int) date('n'), (int) date('j')]
-        );
+        $people = birthday_people_today();
         foreach ($people as &$person) {
             $person['photo'] = $person['stf_Photo'] !== '' ? public_file('staff', (string) $person['stf_Photo']) : '';
         }
         unset($person);
-        json_out(['ok' => true, 'today' => date('Y-m-d'), 'people' => $people]);
+        $bday = [];
+        $user = current_user();
+        if ($user && (is_admin($user) || is_super($user))) {
+            $bday = birthday_sms_dispatch();
+        }
+        json_out([
+            'ok' => true,
+            'today' => date('Y-m-d'),
+            'people' => $people,
+            'birthdayMsg' => birthday_message_template(),
+            'birthdaySms' => $bday,
+            'smsReady' => sms_ready(),
+        ]);
     }
     $month = (int) ($_GET['month'] ?? date('n'));
     if ($month < 1 || $month > 12) {
@@ -2342,13 +2810,12 @@ function action_profile(): void
     if ($nid === '') {
         json_out(['ok' => false, 'error' => 'Enter a national ID.'], 422);
     }
-    $found = rows('SELECT * FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$nid]);
-    if (!$found) {
+    $person = staff_by_identity($nid);
+    if (!$person) {
         json_out(['ok' => false, 'error' => 'No officer was found for that ID.'], 404);
     }
-    $person = $found[0];
     $user = current_user();
-    $full = $user && (is_admin($user) || $user['office'] === $person['stf_office'] || $user['role'] === 'Super User');
+    $full = $user && ($user['role'] === 'User' || is_super($user));
     $public = [
         'name' => $person['stf_Name'],
         'designation' => $person['stf_desig'],
@@ -2377,6 +2844,14 @@ function action_profile(): void
         );
         $public['attendance'] = $attended;
     }
+    $year = preg_replace('/\D/', '', (string) ($_GET['year'] ?? '')) ?? '';
+    if (!preg_match('/^(19|2[0-2])\d{2}$/', $year)) {
+        $year = date('Y');
+    }
+    $yearInfo = officer_year_trainings($nid, $year);
+    $public['year'] = $year;
+    $public['yearTrainings'] = (int) ($yearInfo['count'] ?? 0);
+    $public['yearTrainingNames'] = array_values($yearInfo['names'] ?? []);
     json_out(['ok' => true, 'profile' => $public, 'full' => $full]);
 }
 
@@ -2453,9 +2928,26 @@ function signatory_titles(): array
     return ['මහතා', 'මහත්මිය', 'මෙනවිය'];
 }
 
+function signatory_team_person(string $nid): array
+{
+    $nid = trim($nid);
+    if ($nid === '') {
+        return ['nid' => '', 'name' => ''];
+    }
+    $name = staff_name_for($nid);
+    if ($name === '') {
+        $found = staff_by_identity($nid);
+        $name = trim((string) ($found['stf_Name'] ?? ''));
+    }
+    return ['nid' => $nid, 'name' => $name !== '' ? $name : $nid];
+}
+
 function signatory_profile(): array
 {
-    $rows = rows('SELECT sg_name, sg_title, sg_sign, sg_photo FROM cp_signatory WHERE sg_id = 1 LIMIT 1');
+    $rows = rows(
+        'SELECT sg_name, sg_title, sg_sign, sg_photo, sg_supervisor, sg_support1, sg_support2, sg_support3, sg_cash
+         FROM cp_signatory WHERE sg_id = 1 LIMIT 1'
+    );
     $row = $rows[0] ?? [];
     $name = trim((string) ($row['sg_name'] ?? ''));
     if ($name === '') {
@@ -2467,14 +2959,43 @@ function signatory_profile(): array
     }
     $sign = trim((string) ($row['sg_sign'] ?? ''));
     $photo = trim((string) ($row['sg_photo'] ?? ''));
+    $supervisorName = trim((string) ($row['sg_supervisor'] ?? ''));
+    $support = [
+        signatory_team_person((string) ($row['sg_support1'] ?? '')),
+        signatory_team_person((string) ($row['sg_support2'] ?? '')),
+        signatory_team_person((string) ($row['sg_support3'] ?? '')),
+    ];
+    $support = array_values(array_filter($support, static fn(array $item): bool => $item['nid'] !== ''));
+    $display = trim($name . ' ' . $title);
+    $cashRaw = trim((string) ($row['sg_cash'] ?? ''));
+    if ($cashRaw === '' || preg_match('/^\d{9,12}[vVxX]?$/', $cashRaw)) {
+        $cashName = '';
+    } else {
+        $cashName = $cashRaw;
+    }
     return [
         'name' => $name,
         'title' => $title,
-        'display' => trim($name . ' ' . $title),
+        'display' => $display,
         'file' => $sign,
         'signUrl' => $sign !== '' ? public_file('sign', $sign) : '',
         'photo' => $photo,
         'photoUrl' => $photo !== '' ? public_file('sign', $photo) : '',
+        'supervisor' => $supervisorName,
+        'support1' => (string) ($row['sg_support1'] ?? ''),
+        'support2' => (string) ($row['sg_support2'] ?? ''),
+        'support3' => (string) ($row['sg_support3'] ?? ''),
+        'cash' => $cashName,
+        'cashName' => $cashName,
+        'team' => [
+            'dcs' => ['nid' => '', 'name' => $display, 'role' => 'dcs'],
+            'supervisor' => ['nid' => '', 'name' => $supervisorName, 'role' => 'supervisor'],
+            'cash' => ['nid' => '', 'name' => $cashName, 'role' => 'cash'],
+            'support' => array_map(static function (array $item): array {
+                $item['role'] = 'support';
+                return $item;
+            }, $support),
+        ],
     ];
 }
 
@@ -2489,6 +3010,19 @@ function signatory_public(): array
     ];
 }
 
+function office_priority_taken(string $atpId, string $office, int $priority, int $exceptId = 0): bool
+{
+    if ($atpId === '' || $office === '' || $priority < 1) {
+        return false;
+    }
+    $found = rows(
+        'SELECT tapp_id FROM cp_trainingapplications WHERE tapp_atpid = ? AND tapp_office = ? AND tapp_priority = ? AND tapp_id <> ? LIMIT 1',
+        'ssii',
+        [$atpId, $office, $priority, $exceptId]
+    );
+    return (bool) $found;
+}
+
 function letter_signatory(): array
 {
     $profile = signatory_profile();
@@ -2496,6 +3030,27 @@ function letter_signatory(): array
         'signName' => $profile['display'],
         'signUrl' => $profile['signUrl'],
     ];
+}
+
+function letter_coordinator(array $plan): array
+{
+    $nid = trim((string) ($plan['atp_supportstaff1'] ?? ''));
+    $name = trim((string) ($plan['atp_coordname'] ?? ''));
+    $phone = '';
+    $staff = $nid !== '' ? staff_by_identity($nid) : [];
+    if ($name === '' || coord_nid_key($name) !== '') {
+        $found = trim((string) ($staff['stf_Name'] ?? ''));
+        if ($found !== '') {
+            $name = $found;
+        }
+    }
+    if ($staff) {
+        $phone = trim((string) ($staff['stf_mobile'] ?? ''));
+        if ($phone === '') {
+            $phone = trim((string) ($staff['stf_ofstele'] ?? ''));
+        }
+    }
+    return ['coordName' => $name, 'coordPhone' => $phone];
 }
 
 function letter_selected_date(array $application): string
@@ -2548,7 +3103,7 @@ function action_blacklist(): void
     }
     $today = date('Y-m-d');
     $year = (int) ($_GET['year'] ?? 0);
-    if ($year < 1990 || $year > 2100) {
+    if ($year < 1990 || $year > 2200) {
         $year = (int) date('Y');
     }
     $items = rows(
@@ -2603,6 +3158,282 @@ function action_blacklist_add(): void
         $mark->execute();
     }
     json_out(['ok' => true, 'from' => $from, 'until' => $until]);
+}
+
+function staff_sheet_date(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '0000-00-00';
+    }
+    if (preg_match('/^\d+(\.\d+)?$/', $value)) {
+        $serial = (float) $value;
+        if ($serial > 20000 && $serial < 80000) {
+            $unix = (int) round(($serial - 25569) * 86400);
+            return gmdate('Y-m-d', $unix);
+        }
+    }
+    $value = str_replace(['/', '.'], '-', $value);
+    if (preg_match('/^(\d{1,2})-(\d{1,2})-((?:19|20)\d{2})$/', $value, $found)) {
+        return sprintf('%04d-%02d-%02d', (int) $found[3], (int) $found[2], (int) $found[1]);
+    }
+    if (preg_match('/^((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})$/', $value, $found)) {
+        return sprintf('%04d-%02d-%02d', (int) $found[1], (int) $found[2], (int) $found[3]);
+    }
+    return '0000-00-00';
+}
+
+function staff_sheet_sex(string $value): string
+{
+    $raw = trim($value);
+    if ($raw === '') {
+        return '';
+    }
+    $lower = mb_strtolower($raw);
+    if ($lower === 'f' || $lower === 'female' || str_contains($lower, 'female') || str_contains($raw, 'ස්ත්‍රී') || str_contains($raw, 'ස්ත්')) {
+        return 'ස්ත්‍රී';
+    }
+    if ($lower === 'm' || $lower === 'male' || str_contains($lower, 'male') || str_contains($raw, 'පුරුෂ') || str_contains($raw, 'පුරු')) {
+        return 'පුරුෂ';
+    }
+    return mb_substr($raw, 0, 40);
+}
+
+function staff_upload_aliases(): array
+{
+    return [
+        'stf_nid' => 'stf_Nid',
+        'national id' => 'stf_Nid',
+        'nid' => 'stf_Nid',
+        'ජාතික හැඳුනුම්පත් අංකය' => 'stf_Nid',
+        'හැඳුනුම්පත' => 'stf_Nid',
+        'stf_name' => 'stf_Name',
+        'name' => 'stf_Name',
+        'නම' => 'stf_Name',
+        'stf_dob' => 'stf_dob',
+        'date of birth' => 'stf_dob',
+        'dob' => 'stf_dob',
+        'උපන් දිනය' => 'stf_dob',
+        'stf_sex' => 'stf_sex',
+        'gender' => 'stf_sex',
+        'sex' => 'stf_sex',
+        'ස්ත්‍රී පුරුෂ භාවය' => 'stf_sex',
+        'ස්ත්‍රී / පුරුෂ' => 'stf_sex',
+        'stf_desig' => 'stf_desig',
+        'designation' => 'stf_desig',
+        'තනතුර' => 'stf_desig',
+        'stf_office' => 'stf_office',
+        'office' => 'stf_office',
+        'කාර්යාලය' => 'stf_office',
+        'stf_suboff' => 'stf_suboff',
+        'sub office' => 'stf_suboff',
+        'උප කාර්යාලය' => 'stf_suboff',
+        'stf_mobile' => 'stf_mobile',
+        'mobile' => 'stf_mobile',
+        'ජංගම දුරකථන අංකය' => 'stf_mobile',
+        'දුරකථනය' => 'stf_mobile',
+        'stf_ofstele' => 'stf_ofstele',
+        'office telephone' => 'stf_ofstele',
+        'කාර්යාල දුරකථන අංකය' => 'stf_ofstele',
+        'stf_email' => 'stf_email',
+        'email' => 'stf_email',
+        'විද්‍යුත් ලිපිනය' => 'stf_email',
+        'stf_desigtype' => 'stf_desigtype',
+        'designation type' => 'stf_desigtype',
+        'තනතුර වර්ගය' => 'stf_desigtype',
+        'stf_service' => 'stf_service',
+        'service' => 'stf_service',
+        'සේවාව' => 'stf_service',
+        'stf_class' => 'stf_class',
+        'class' => 'stf_class',
+        'පන්තිය' => 'stf_class',
+        'stf_firstappdate' => 'stf_firstappdate',
+        'first appointment' => 'stf_firstappdate',
+        'පළමු පත්වීමේ දිනය' => 'stf_firstappdate',
+        'stf_cdesigdate' => 'stf_cdesigdate',
+        'present designation date' => 'stf_cdesigdate',
+        'වර්තමාන තනතුරේ දිනය' => 'stf_cdesigdate',
+    ];
+}
+
+function action_staff_upload(): void
+{
+    csrf_check();
+    $user = require_user();
+    if (!is_admin($user)) {
+        json_out(['ok' => false, 'error' => 'කාර්යමණ්ඩල ලේඛනය උඩුගත කරන්න පුළුවන් පරිපාලකට පමණයි.'], 403);
+    }
+    if (!isset($_FILES['file']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
+        json_out(['ok' => false, 'error' => 'CSV හෝ Excel ගොනුව තෝරන්න.'], 422);
+    }
+    @set_time_limit(0);
+    @ini_set('memory_limit', '1024M');
+    $rows = read_sheet($_FILES['file']['tmp_name'], (string) $_FILES['file']['name']);
+    if (count($rows) < 2) {
+        json_out(['ok' => false, 'error' => 'ගොනුවේ දත්ත පේළි නැත. පළමු පේළියේ තීරු මාතෘකා තියන්න.'], 422);
+    }
+    $aliases = staff_upload_aliases();
+    foreach (['stf_Nid', 'stf_Name', 'stf_dob', 'stf_sex', 'stf_desig', 'stf_office', 'stf_suboff', 'stf_mobile', 'stf_ofstele', 'stf_email', 'stf_desigtype', 'stf_service', 'stf_class', 'stf_firstappdate', 'stf_cdesigdate'] as $field) {
+        $aliases[strtolower(field_label($field))] = $field;
+        $aliases[strtolower($field)] = $field;
+    }
+    $map = [];
+    foreach ($rows[0] as $index => $header) {
+        $key = mb_strtolower(trim((string) $header));
+        if ($key !== '' && isset($aliases[$key])) {
+            $map[$index] = $aliases[$key];
+        }
+    }
+    if (!in_array('stf_Nid', $map, true) || !in_array('stf_Name', $map, true)) {
+        json_out(['ok' => false, 'error' => 'පළමු පේළියේ අනිවාර්යයෙන් National ID / ජාතික හැඳුනුම්පත් අංකය සහ Name / නම තීරු තියන්න.'], 422);
+    }
+    $existing = [];
+    foreach (rows('SELECT stf_ID, stf_Nid FROM cp_staff') as $row) {
+        $raw = trim((string) ($row['stf_Nid'] ?? ''));
+        if ($raw === '') {
+            continue;
+        }
+        $existing[strtoupper(preg_replace('/\s+/', '', $raw) ?? '')] = (int) $row['stf_ID'];
+        $key = coord_nid_key($raw);
+        if ($key !== '') {
+            $existing[$key] = (int) $row['stf_ID'];
+        }
+    }
+    $dateFields = ['stf_dob', 'stf_firstappdate', 'stf_cdesigdate'];
+    $inserted = 0;
+    $updated = 0;
+    $skipped = 0;
+    $seen = [];
+    $db = db();
+    $db->begin_transaction();
+    try {
+        foreach (array_slice($rows, 1) as $line) {
+            $record = [
+                'stf_Photo' => '',
+                'stf_Nid' => '',
+                'stf_Name' => '',
+                'stf_dob' => '0000-00-00',
+                'stf_sex' => '',
+                'stf_desig' => '',
+                'stf_office' => '',
+                'stf_suboff' => '',
+                'stf_mobile' => '',
+                'stf_ofstele' => '',
+                'stf_email' => '',
+                'stf_desigtype' => '',
+                'stf_service' => '',
+                'stf_class' => '',
+                'stf_firstappdate' => '0000-00-00',
+                'stf_cdesigdate' => '0000-00-00',
+                'stf_blacklisted' => '',
+            ];
+            foreach ($map as $index => $column) {
+                $value = trim((string) ($line[$index] ?? ''));
+                if (in_array($column, $dateFields, true)) {
+                    $record[$column] = staff_sheet_date($value);
+                } elseif ($column === 'stf_sex') {
+                    $record[$column] = staff_sheet_sex($value);
+                } else {
+                    $record[$column] = mb_substr($value, 0, $column === 'stf_Name' || $column === 'stf_office' || $column === 'stf_desig' ? 200 : 120);
+                }
+            }
+            $nid = trim((string) $record['stf_Nid']);
+            $name = trim((string) $record['stf_Name']);
+            if ($nid === '' || $name === '') {
+                $skipped++;
+                continue;
+            }
+            $compact = strtoupper(preg_replace('/\s+/', '', $nid) ?? '');
+            $nidKey = coord_nid_key($nid);
+            $dupKey = $nidKey !== '' ? $nidKey : $compact;
+            if ($dupKey !== '' && isset($seen[$dupKey])) {
+                $skipped++;
+                continue;
+            }
+            if ($dupKey !== '') {
+                $seen[$dupKey] = true;
+            }
+            $id = $existing[$compact] ?? ($nidKey !== '' ? ($existing[$nidKey] ?? 0) : 0);
+            if ($id > 0) {
+                $stmt = $db->prepare('UPDATE cp_staff SET stf_Nid=?, stf_Name=?, stf_dob=?, stf_sex=?, stf_desig=?, stf_office=?, stf_suboff=?, stf_mobile=?, stf_ofstele=?, stf_email=?, stf_desigtype=?, stf_service=?, stf_class=?, stf_firstappdate=?, stf_cdesigdate=? WHERE stf_ID=?');
+                if (!$stmt) {
+                    throw new RuntimeException('update prepare failed');
+                }
+                $stmt->bind_param(
+                    'sssssssssssssssi',
+                    $record['stf_Nid'],
+                    $record['stf_Name'],
+                    $record['stf_dob'],
+                    $record['stf_sex'],
+                    $record['stf_desig'],
+                    $record['stf_office'],
+                    $record['stf_suboff'],
+                    $record['stf_mobile'],
+                    $record['stf_ofstele'],
+                    $record['stf_email'],
+                    $record['stf_desigtype'],
+                    $record['stf_service'],
+                    $record['stf_class'],
+                    $record['stf_firstappdate'],
+                    $record['stf_cdesigdate'],
+                    $id
+                );
+                if (!$stmt->execute()) {
+                    throw new RuntimeException('update failed');
+                }
+                $updated++;
+            } else {
+                $stmt = $db->prepare('INSERT INTO cp_staff (stf_Photo, stf_Nid, stf_Name, stf_dob, stf_sex, stf_desig, stf_office, stf_suboff, stf_mobile, stf_ofstele, stf_email, stf_desigtype, stf_service, stf_class, stf_firstappdate, stf_cdesigdate, stf_blacklisted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                if (!$stmt) {
+                    throw new RuntimeException('insert prepare failed');
+                }
+                $photo = '';
+                $black = '';
+                $stmt->bind_param(
+                    'sssssssssssssssss',
+                    $photo,
+                    $record['stf_Nid'],
+                    $record['stf_Name'],
+                    $record['stf_dob'],
+                    $record['stf_sex'],
+                    $record['stf_desig'],
+                    $record['stf_office'],
+                    $record['stf_suboff'],
+                    $record['stf_mobile'],
+                    $record['stf_ofstele'],
+                    $record['stf_email'],
+                    $record['stf_desigtype'],
+                    $record['stf_service'],
+                    $record['stf_class'],
+                    $record['stf_firstappdate'],
+                    $record['stf_cdesigdate'],
+                    $black
+                );
+                if (!$stmt->execute()) {
+                    throw new RuntimeException('insert failed');
+                }
+                $newId = (int) $db->insert_id;
+                if ($compact !== '') {
+                    $existing[$compact] = $newId;
+                }
+                if ($nidKey !== '') {
+                    $existing[$nidKey] = $newId;
+                }
+                $inserted++;
+            }
+        }
+        $db->commit();
+    } catch (Throwable $error) {
+        $db->rollback();
+        json_out(['ok' => false, 'error' => 'උඩුගත කිරීම අසාර්ථකයි. ගොනුව පරීක්ෂා කර නැවත උත්සාහ කරන්න.'], 500);
+    }
+    json_out([
+        'ok' => true,
+        'inserted' => $inserted,
+        'updated' => $updated,
+        'skipped' => $skipped,
+        'total' => $inserted + $updated,
+    ]);
 }
 
 function gemini_account(): array
@@ -2672,10 +3503,22 @@ function module_person(string $value): array
     return $cache[$value];
 }
 
+function module_supervisor_post(): string
+{
+    return 'සහකාර ප්‍රධාන ලේකම්';
+}
+
 function module_sheet_fields(array $item): array
 {
     $liaison = module_person((string) ($item['liaisonNid'] ?? ''));
-    $supervisor = module_person((string) ($item['supervisorNid'] ?? ''));
+    $rawSupervisor = trim((string) ($item['supervisorNid'] ?? ''));
+    $supervisor = module_person($rawSupervisor);
+    if ($supervisor['name'] === '' && $rawSupervisor !== '') {
+        $byName = rows('SELECT stf_Name FROM cp_staff WHERE stf_Name = ? LIMIT 1', 's', [$rawSupervisor]);
+        $supervisor['name'] = $byName
+            ? trim((string) $byName[0]['stf_Name'])
+            : $rawSupervisor;
+    }
     $people = [];
     foreach ((array) ($item['people'] ?? []) as $name) {
         $name = trim((string) $name);
@@ -2686,7 +3529,7 @@ function module_sheet_fields(array $item): array
     return [
         'liaison' => $liaison,
         'supervisor' => $supervisor['name'],
-        'supervisorPost' => $supervisor['post'],
+        'supervisorPost' => module_supervisor_post(),
         'people' => $people,
         'lecturers' => module_lecturers($people),
     ];
@@ -2726,7 +3569,7 @@ function module_sheet_for(int $atp): array
         'days' => 1,
         'liaison' => ['name' => '', 'post' => '', 'office' => ''],
         'supervisor' => '',
-        'supervisorPost' => '',
+        'supervisorPost' => module_supervisor_post(),
         'people' => [],
         'lecturers' => [],
         'stime' => '',
@@ -2782,8 +3625,13 @@ function action_modules(): void
         }
     }
     $programmes = [];
+    $today = date('Y-m-d');
     foreach (saved_estimate_items() as $item) {
         if (!empty($item['offweb']) || trim((string) $item['name']) === '') {
+            continue;
+        }
+        $start = estimate_sort_day((string) ($item['day'] ?? ''));
+        if ($start === '0000-00-00' || $start < $today) {
             continue;
         }
         $extra = module_sheet_fields($item);
@@ -2809,7 +3657,7 @@ function action_modules(): void
         ];
     }
     $leader = signatory_profile();
-    json_out(['ok' => true, 'items' => $items, 'programmes' => $programmes, 'coordinator' => $leader['display'], 'coordinatorPost' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)', 'gemini' => gemini_account(), 'geminiReady' => gemini_key() !== '']);
+    json_out(['ok' => true, 'items' => $items, 'programmes' => $programmes, 'coordinator' => $leader['display'], 'coordinatorPost' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)', 'geminiReady' => gemini_key() !== '']);
 }
 
 function action_module(): void
@@ -2833,7 +3681,6 @@ function action_module(): void
         'days' => module_days($id),
         'sheet' => module_sheet_for((int) ($row['md_atp'] ?? 0)),
         'coordinator' => signatory_profile()['display'],
-        'gemini' => gemini_account(),
     ]);
 }
 
@@ -2955,7 +3802,8 @@ function action_module_excel(): void
     }
     $rows = read_sheet($_FILES['file']['tmp_name'], (string) $_FILES['file']['name']);
     $grouped = [];
-    $hasLecturer = false;
+    $lecturerCol = -1;
+    $pointsCol = 3;
     foreach ($rows as $line) {
         if (!is_array($line)) {
             continue;
@@ -2966,7 +3814,21 @@ function action_module_excel(): void
         }
         $dayCell = $cells[0] ?? '';
         if ($dayCell === 'දිනය' || strcasecmp($dayCell, 'day') === 0) {
-            $hasLecturer = str_contains(implode(' ', $cells), 'දේශක');
+            $lecturerCol = -1;
+            $pointsCol = 3;
+            foreach ($cells as $index => $label) {
+                if (str_contains($label, 'දේශක')) {
+                    $lecturerCol = $index;
+                }
+                if (str_contains($label, 'විෂය') || stripos($label, 'topic') !== false || stripos($label, 'activit') !== false) {
+                    $pointsCol = $index;
+                }
+            }
+            if ($lecturerCol < 0) {
+                $pointsCol = 3;
+            } elseif ($pointsCol === $lecturerCol) {
+                $pointsCol = $lecturerCol === 3 ? 4 : 3;
+            }
             continue;
         }
         if ($dayCell === '') {
@@ -2981,8 +3843,8 @@ function action_module_excel(): void
         }
         $time = $cells[1] ?? '';
         $session = $cells[2] ?? '';
-        $lecturer = $hasLecturer ? ($cells[3] ?? '') : '';
-        $points = $hasLecturer ? ($cells[4] ?? '') : ($cells[3] ?? '');
+        $lecturer = $lecturerCol >= 0 ? ($cells[$lecturerCol] ?? '') : '';
+        $points = $cells[$pointsCol] ?? '';
         if ($time === '' && $session === '' && $lecturer === '' && $points === '') {
             continue;
         }
@@ -3016,8 +3878,11 @@ function action_gemini_key(): void
 {
     csrf_check();
     module_staff();
+    if (!is_admin(current_user() ?? [])) {
+        json_out(['ok' => false, 'error' => 'Gemini යතුර වෙනස් කරන්න පුළුවන් Admin ට පමණයි.'], 403);
+    }
     $key = trim((string) (body()['key'] ?? ''));
-    if (!preg_match('/^[A-Za-z0-9_-]{20,200}$/', $key)) {
+    if (!preg_match('/^[A-Za-z0-9._-]{20,200}$/', $key)) {
         json_out(['ok' => false, 'error' => 'Gemini යතුර වැරදියි. Google AI Studio එකෙන් අරගත් යතුර දාන්න.'], 422);
     }
     if (file_put_contents(__DIR__ . '/gemini.key', $key) === false) {
@@ -3035,6 +3900,11 @@ function gemini_clip(string $value, int $max): string
     return substr($value, 0, $max);
 }
 
+function gemini_models(): array
+{
+    return ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+}
+
 function gemini_request(string $model, string $key, string $payload): array
 {
     if (!function_exists('curl_init')) {
@@ -3047,7 +3917,8 @@ function gemini_request(string $model, string $key, string $payload): array
         CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-goog-api-key: ' . $key],
         CURLOPT_POSTFIELDS => $payload,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 90,
+        CURLOPT_TIMEOUT => 150,
+        CURLOPT_CONNECTTIMEOUT => 20,
     ];
     $ca = 'C:/xampp/php/extras/ssl/cacert.pem';
     if (is_file($ca)) {
@@ -3064,6 +3935,108 @@ function gemini_request(string $model, string $key, string $payload): array
     }
     $decoded = json_decode((string) $raw, true);
     return ['status' => $status, 'body' => is_array($decoded) ? $decoded : []];
+}
+
+function gemini_reply_text(array $body): string
+{
+    $text = '';
+    foreach (($body['candidates'][0]['content']['parts'] ?? []) as $part) {
+        if (!is_array($part)) {
+            continue;
+        }
+        if (isset($part['text']) && is_string($part['text'])) {
+            $text .= $part['text'];
+        }
+    }
+    return trim($text);
+}
+
+function gemini_parse_json(string $text): array
+{
+    $clean = trim($text);
+    if (str_starts_with($clean, '```')) {
+        $clean = preg_replace('/^```(?:json)?\s*/i', '', $clean) ?? $clean;
+        $clean = preg_replace('/\s*```$/', '', $clean) ?? $clean;
+        $clean = trim($clean);
+    }
+    $parsed = json_decode($clean, true);
+    if (is_array($parsed)) {
+        return $parsed;
+    }
+    $objectStart = strpos($clean, '{');
+    $objectEnd = strrpos($clean, '}');
+    if ($objectStart !== false && $objectEnd !== false && $objectEnd > $objectStart) {
+        $parsed = json_decode(substr($clean, $objectStart, $objectEnd - $objectStart + 1), true);
+        if (is_array($parsed)) {
+            return $parsed;
+        }
+    }
+    $arrayStart = strpos($clean, '[');
+    $arrayEnd = strrpos($clean, ']');
+    if ($arrayStart !== false && $arrayEnd !== false && $arrayEnd > $arrayStart) {
+        $parsed = json_decode(substr($clean, $arrayStart, $arrayEnd - $arrayStart + 1), true);
+        if (is_array($parsed)) {
+            return $parsed;
+        }
+    }
+    return [];
+}
+
+function gemini_list(array $parsed, array $keys): array
+{
+    foreach ($keys as $key) {
+        if (isset($parsed[$key]) && is_array($parsed[$key])) {
+            return $parsed[$key];
+        }
+    }
+    if ($parsed !== [] && array_is_list($parsed) && isset($parsed[0]) && is_array($parsed[0])) {
+        return $parsed;
+    }
+    return [];
+}
+
+function gemini_should_retry(int $status, string $message): bool
+{
+    $lower = strtolower($message);
+    return $status === 0
+        || $status === 404
+        || $status === 429
+        || $status === 503
+        || str_contains($lower, 'not found')
+        || str_contains($lower, 'not supported')
+        || str_contains($lower, 'no longer available')
+        || str_contains($lower, 'high demand')
+        || str_contains($lower, 'try again')
+        || str_contains($lower, 'timeout')
+        || str_contains($lower, 'timed out');
+}
+
+function gemini_generate(string $key, string $payload, string $failMessage): string
+{
+    $last = $failMessage;
+    foreach (gemini_models() as $model) {
+        try {
+            $reply = gemini_request($model, $key, $payload);
+        } catch (RuntimeException $error) {
+            $last = $error->getMessage();
+            continue;
+        }
+        $body = $reply['body'];
+        $text = gemini_reply_text($body);
+        if ($reply['status'] >= 200 && $reply['status'] < 300 && $text !== '') {
+            return $text;
+        }
+        $message = (string) ($body['error']['message'] ?? '');
+        if ($message === '' && ($body['promptFeedback']['blockReason'] ?? '') !== '') {
+            $message = 'Gemini ඉල්ලීම අවහිර වුණා.';
+        }
+        if (gemini_should_retry((int) $reply['status'], $message) || ($reply['status'] >= 200 && $reply['status'] < 300)) {
+            $last = $message !== '' ? $message : $last;
+            continue;
+        }
+        throw new RuntimeException($message !== '' ? $message : $failMessage);
+    }
+    throw new RuntimeException($last);
 }
 
 function gemini_public_error(string $message, string $key): string
@@ -3124,10 +4097,10 @@ function module_gemini_sessions(mixed $rows): array
             return '';
         };
         $session = [
-            'time' => gemini_clip($pick($row, ['time', 'කාලය']), 80),
-            'session' => gemini_clip($pick($row, ['session', 'සැසිය']), 200),
-            'lecturer' => gemini_clip($pick($row, ['lecturer', 'දේශකයා']), 160),
-            'points' => gemini_clip($pick($row, ['points', 'විෂය', 'topics']), 2000),
+            'time' => gemini_clip($pick($row, ['time', 'කාලය', 'period', 'slot']), 80),
+            'session' => gemini_clip($pick($row, ['session', 'සැසිය', 'title', 'name', 'topic', 'heading']), 200),
+            'lecturer' => gemini_clip($pick($row, ['lecturer', 'දේශකයා', 'resource', 'trainer', 'teacher']), 160),
+            'points' => gemini_clip($pick($row, ['points', 'විෂය', 'topics', 'content', 'details', 'agenda', 'body']), 2000),
         ];
         if ($session['time'] === '' && $session['session'] === '' && $session['lecturer'] === '' && $session['points'] === '') {
             continue;
@@ -3140,11 +4113,63 @@ function module_gemini_sessions(mixed $rows): array
     return $sessions;
 }
 
+function module_gemini_days(array $parsed, int $dayCount): array
+{
+    $raw = gemini_list($parsed, ['days', 'Days', 'module', 'schedule', 'timetable', 'data', 'දින']);
+    if (!$raw && isset($parsed['sessions']) && is_array($parsed['sessions'])) {
+        $raw = [['no' => 1, 'sessions' => $parsed['sessions']]];
+    }
+    if (!$raw && isset($parsed[0]) && is_array($parsed[0])) {
+        $first = $parsed[0];
+        if (isset($first['time']) || isset($first['session']) || isset($first['points']) || isset($first['title'])) {
+            $raw = [['no' => 1, 'sessions' => $parsed]];
+        }
+    }
+    if (!$raw) {
+        return [];
+    }
+    $days = [];
+    $index = 0;
+    foreach ($raw as $day) {
+        $index++;
+        if (!is_array($day)) {
+            continue;
+        }
+        if (isset($day['days']) && is_array($day['days'])) {
+            foreach (module_gemini_days($day, $dayCount) as $inner) {
+                $days[] = $inner;
+            }
+            continue;
+        }
+        $no = (int) preg_replace('/\D+/', '', (string) ($day['no'] ?? $day['day'] ?? $day['Day'] ?? $index));
+        if ($no < 1) {
+            $no = $index;
+        }
+        if ($no > $dayCount) {
+            $no = min($dayCount, $index);
+        }
+        $sessions = module_gemini_sessions(
+            $day['sessions'] ?? $day['Sessions'] ?? $day['items'] ?? $day['schedule'] ?? $day['සැසි'] ?? []
+        );
+        if (!$sessions && (isset($day['time']) || isset($day['session']) || isset($day['points']) || isset($day['title']))) {
+            $sessions = module_gemini_sessions([$day]);
+        }
+        if (!$sessions) {
+            continue;
+        }
+        $days[] = ['no' => $no, 'sessions' => $sessions];
+        if (count($days) >= $dayCount) {
+            break;
+        }
+    }
+    return $days;
+}
+
 function action_module_gemini(): void
 {
     csrf_check();
     module_staff();
-    @set_time_limit(120);
+    @set_time_limit(180);
     $data = body();
     $topic = gemini_clip((string) ($data['topic'] ?? ''), 400);
     $dayCount = max(1, min(60, (int) ($data['days'] ?? 1)));
@@ -3231,9 +4256,10 @@ function action_module_gemini(): void
         . "Lecturers (name | post | office): " . ($lecturerLines ? implode('; ', $lecturerLines) : 'none') . "\n"
         . "Requested topic: " . ($topic !== '' ? $topic : $name) . "\n"
         . ($source !== '' ? "Existing module text:\n{$source}\n" : '')
-        . "Return JSON only, no markdown, in this shape:\n"
+        . "Return JSON only, no markdown. The top level MUST be an object with a days array in this shape:\n"
         . "{\"days\":[{\"no\":1,\"sessions\":[{\"time\":\"පෙ.ව. 8.30 – 10.30\",\"session\":\"\",\"lecturer\":\"\",\"points\":\"\"}]}]}\n"
-        . "Rules: exactly {$dayCount} days numbered from 1. Each day has 4 to 6 sessions inside the start and end times, with a short tea break and a lunch break when the day is long enough. "
+        . "Rules: exactly {$dayCount} days numbered from 1. Do not return a bare array. Each day object must have no and sessions. "
+        . "Each day has 4 to 6 sessions inside the start and end times, with a short tea break and a lunch break when the day is long enough. "
         . "session is the session title. points are the topics and activities, short lines separated by newline characters. "
         . "If lecturers are given, lecturer must be one of those names. If none are given, leave lecturer empty. "
         . "Use the requested topic. If an existing module is attached or pasted, keep its real contents and only reshape them into this day-and-session format. Do not invent a different programme.\n";
@@ -3242,73 +4268,22 @@ function action_module_gemini(): void
         'contents' => [['parts' => $parts]],
         'generationConfig' => [
             'temperature' => 0.4,
+            'maxOutputTokens' => 8192,
             'responseMimeType' => 'application/json',
         ],
     ], JSON_UNESCAPED_UNICODE);
     if (!is_string($payload)) {
         json_out(['ok' => false, 'error' => 'Gemini එකට ඉල්ලීම හදන්න බැරි වුණා.'], 500);
     }
-    $last = 'Gemini එකෙන් මොඩියුලය ගන්න බැරි වුණා.';
-    $text = '';
-    foreach (['gemini-2.5-flash', 'gemini-2.0-flash'] as $model) {
-        try {
-            $reply = gemini_request($model, $key, $payload);
-        } catch (RuntimeException $error) {
-            json_out(['ok' => false, 'error' => gemini_public_error($error->getMessage(), $key)], 502);
-        }
-        $body = $reply['body'];
-        $text = (string) ($body['candidates'][0]['content']['parts'][0]['text'] ?? '');
-        if ($reply['status'] >= 200 && $reply['status'] < 300 && $text !== '') {
-            $last = '';
-            break;
-        }
-        $message = (string) ($body['error']['message'] ?? '');
-        $missing = $reply['status'] === 404 || str_contains(strtolower($message), 'not found') || str_contains(strtolower($message), 'not supported');
-        if ($missing || ($reply['status'] >= 200 && $reply['status'] < 300)) {
-            $last = $message !== '' ? $message : $last;
-            continue;
-        }
-        json_out(['ok' => false, 'error' => gemini_public_error($message, $key)], 502);
+    try {
+        $text = gemini_generate($key, $payload, 'Gemini එකෙන් මොඩියුලය ගන්න බැරි වුණා.');
+    } catch (RuntimeException $error) {
+        json_out(['ok' => false, 'error' => gemini_public_error($error->getMessage(), $key)], 502);
     }
-    if ($last !== '') {
-        json_out(['ok' => false, 'error' => gemini_public_error($last, $key)], 502);
-    }
-    $clean = trim($text);
-    if (str_starts_with($clean, '```')) {
-        $clean = preg_replace('/^```(?:json)?\s*/i', '', $clean) ?? $clean;
-        $clean = preg_replace('/\s*```$/', '', $clean) ?? $clean;
-    }
-    $parsed = json_decode($clean, true);
-    if (!is_array($parsed)) {
-        $start = strpos($clean, '{');
-        $end = strrpos($clean, '}');
-        if ($start !== false && $end !== false && $end > $start) {
-            $parsed = json_decode(substr($clean, $start, $end - $start + 1), true);
-        }
-    }
-    $rawDays = is_array($parsed) ? ($parsed['days'] ?? $parsed) : [];
-    if (!is_array($rawDays)) {
-        json_out(['ok' => false, 'error' => 'Gemini එකෙන් ආකෘතියට ගැලපෙන මොඩියුලයක් ආවේ නැහැ.'], 422);
-    }
-    $days = [];
-    $index = 0;
-    foreach ($rawDays as $day) {
-        $index++;
-        if (!is_array($day)) {
-            continue;
-        }
-        $no = (int) ($day['no'] ?? $index);
-        if ($no < 1 || $no > $dayCount) {
-            continue;
-        }
-        $sessions = module_gemini_sessions($day['sessions'] ?? []);
-        if (!$sessions) {
-            continue;
-        }
-        $days[] = ['no' => $no, 'sessions' => $sessions];
-    }
+    $parsed = gemini_parse_json($text);
+    $days = module_gemini_days($parsed, $dayCount);
     if (!$days) {
-        json_out(['ok' => false, 'error' => 'Gemini එකෙන් සැසි ලැබුණේ නැහැ.'], 422);
+        json_out(['ok' => false, 'error' => 'Gemini එකෙන් ආකෘතියට ගැලපෙන මොඩියුලයක් ආවේ නැහැ. නැවත උත්සාහ කරන්න.'], 422);
     }
     json_out(['ok' => true, 'days' => $days]);
 }
@@ -3406,16 +4381,63 @@ function action_eval_get(): void
 {
     eval_staff();
     $atp = (int) ($_GET['atp'] ?? 0);
+    $today = date('Y-m-d');
     $programmes = [];
-    foreach (rows("SELECT atp_id, atp_trname, atp_day1 FROM cp_atp WHERE TRIM(atp_trname) <> '' ORDER BY atp_id DESC LIMIT 300") as $row) {
+    $seen = [];
+    foreach (rows(
+        "SELECT atp_id, atp_trname, atp_day1, atp_day2, atp_day3, atp_day4, atp_day5,
+                atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays
+         FROM cp_atp
+         WHERE TRIM(atp_trname) <> ''
+         ORDER BY atp_day1 DESC, atp_id DESC"
+    ) as $row) {
+        $id = (int) $row['atp_id'];
+        $end = programme_last_day($row);
+        if ($end === '') {
+            $end = substr((string) ($row['atp_day1'] ?? ''), 0, 10);
+        }
+        if ($end === '' || !preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $end)) {
+            continue;
+        }
+        $until = date('Y-m-d', strtotime($end . ' +7 days'));
+        if ($until < $today && $id !== $atp) {
+            continue;
+        }
         $programmes[] = [
-            'id' => (int) $row['atp_id'],
+            'id' => $id,
             'name' => (string) $row['atp_trname'],
-            'day' => substr((string) $row['atp_day1'], 0, 10),
+            'day' => substr((string) ($row['atp_day1'] ?? ''), 0, 10),
+            'end' => $end,
         ];
+        $seen[$id] = true;
+    }
+    if ($atp > 0 && empty($seen[$atp])) {
+        $picked = rows(
+            "SELECT atp_id, atp_trname, atp_day1, atp_day2, atp_day3, atp_day4, atp_day5,
+                    atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays
+             FROM cp_atp WHERE atp_id = ? LIMIT 1",
+            'i',
+            [$atp]
+        );
+        if ($picked && trim((string) ($picked[0]['atp_trname'] ?? '')) !== '') {
+            array_unshift($programmes, [
+                'id' => (int) $picked[0]['atp_id'],
+                'name' => (string) $picked[0]['atp_trname'],
+                'day' => substr((string) ($picked[0]['atp_day1'] ?? ''), 0, 10),
+                'end' => programme_last_day($picked[0]),
+            ]);
+        }
     }
     $imports = [];
-    foreach (rows('SELECT e.ev_id, e.ev_title, e.ev_atp, MIN(a.atp_day1) AS day, COUNT(q.eq_id) AS n FROM cp_eval e INNER JOIN cp_evalq q ON q.eq_eval = e.ev_id LEFT JOIN cp_atp a ON a.atp_id = e.ev_atp GROUP BY e.ev_id, e.ev_title, e.ev_atp ORDER BY e.ev_id DESC LIMIT 100') as $row) {
+    foreach (rows(
+        'SELECT e.ev_id, e.ev_title, e.ev_atp, MIN(a.atp_day1) AS day, COUNT(q.eq_id) AS n
+         FROM cp_eval e
+         INNER JOIN cp_evalq q ON q.eq_eval = e.ev_id
+         LEFT JOIN cp_atp a ON a.atp_id = e.ev_atp
+         GROUP BY e.ev_id, e.ev_title, e.ev_atp
+         HAVING n >= 10
+         ORDER BY e.ev_id DESC'
+    ) as $row) {
         $imports[] = [
             'id' => (int) $row['ev_id'],
             'title' => (string) $row['ev_title'],
@@ -3443,8 +4465,98 @@ function action_eval_get(): void
         'imports' => $imports,
         'eval' => $eval,
         'copy' => $copyId > 0 ? eval_questions($copyId, true) : [],
-        'gemini' => gemini_account(),
+        'geminiReady' => gemini_key() !== '',
     ]);
+}
+
+function action_eval_gemini(): void
+{
+    csrf_check();
+    eval_staff();
+    @set_time_limit(180);
+    $atp = (int) (body()['atp'] ?? 0);
+    $plan = rows('SELECT atp_id, atp_trname, atp_location FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$atp]);
+    $title = trim((string) ($plan[0]['atp_trname'] ?? ''));
+    if ($title === '') {
+        json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහන තෝරන්න.'], 422);
+    }
+    $key = gemini_key();
+    if ($key === '') {
+        json_out(['ok' => false, 'error' => 'Gemini යතුරක් නැත. Google AI Studio එකෙන් යතුරක් අරගෙන මෙතන සුරකින්න.'], 422);
+    }
+    $place = trim((string) ($plan[0]['atp_location'] ?? ''));
+    $prompt = "You write a training quiz for the Management Development and Training Unit of the North Western Provincial Council.\n"
+        . "Programme: {$title}\n"
+        . ($place !== '' ? "Place: {$place}\n" : '')
+        . "Write exactly 10 multiple-choice questions in Sinhala about this programme.\n"
+        . "Each question must include four short answer choices (a, b, c, d) and one correct answer letter.\n"
+        . "Exactly one answer is correct. Spread the correct answers across A, B, C and D. Do not make every correct answer A.\n"
+        . "Questions should check what a trainee should know before the programme and again after it, so the same paper can be used for both.\n"
+        . "Return JSON only, no markdown, with exactly 10 items in this shape:\n"
+        . "{\"questions\":[{\"text\":\"ප්‍රශ්නය\",\"a\":\"උත්තරය 1\",\"b\":\"උත්තරය 2\",\"c\":\"උත්තරය 3\",\"d\":\"උත්තරය 4\",\"correct\":\"B\"}]}\n"
+        . "correct must be A, B, C or D. Every field must be filled. Do not add explanations.\n";
+    $payload = json_encode([
+        'contents' => [['parts' => [['text' => $prompt]]]],
+        'generationConfig' => [
+            'temperature' => 0.4,
+            'maxOutputTokens' => 8192,
+            'responseMimeType' => 'application/json',
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+    if (!is_string($payload)) {
+        json_out(['ok' => false, 'error' => 'Gemini එකට ඉල්ලීම හදන්න බැරි වුණා.'], 500);
+    }
+    try {
+        $text = gemini_generate($key, $payload, 'Gemini එකෙන් ප්‍රශ්න ගන්න බැරි වුණා.');
+    } catch (RuntimeException $error) {
+        json_out(['ok' => false, 'error' => gemini_public_error($error->getMessage(), $key)], 502);
+    }
+    $parsed = gemini_parse_json($text);
+    $raw = gemini_list($parsed, ['questions', 'quiz', 'items', 'data']);
+    $questions = [];
+    foreach ($raw as $question) {
+        if (!is_array($question)) {
+            continue;
+        }
+        $correct = strtoupper(trim((string) ($question['correct'] ?? $question['answer'] ?? $question['correct_answer'] ?? '')));
+        if (in_array($correct, ['1', '2', '3', '4'], true)) {
+            $correct = ['1' => 'A', '2' => 'B', '3' => 'C', '4' => 'D'][$correct];
+        }
+        if (!in_array($correct, ['A', 'B', 'C', 'D'], true)) {
+            $correct = 'A';
+        }
+        $options = $question['options'] ?? $question['choices'] ?? null;
+        $a = (string) ($question['a'] ?? $question['A'] ?? $question['optionA'] ?? '');
+        $b = (string) ($question['b'] ?? $question['B'] ?? $question['optionB'] ?? '');
+        $c = (string) ($question['c'] ?? $question['C'] ?? $question['optionC'] ?? '');
+        $d = (string) ($question['d'] ?? $question['D'] ?? $question['optionD'] ?? '');
+        if (is_array($options)) {
+            $values = array_values($options);
+            $a = $a !== '' ? $a : (string) ($values[0] ?? $options['A'] ?? $options['a'] ?? '');
+            $b = $b !== '' ? $b : (string) ($values[1] ?? $options['B'] ?? $options['b'] ?? '');
+            $c = $c !== '' ? $c : (string) ($values[2] ?? $options['C'] ?? $options['c'] ?? '');
+            $d = $d !== '' ? $d : (string) ($values[3] ?? $options['D'] ?? $options['d'] ?? '');
+        }
+        $item = [
+            'text' => eval_clip((string) ($question['text'] ?? $question['question'] ?? $question['q'] ?? ''), 2000),
+            'a' => eval_clip($a, 500),
+            'b' => eval_clip($b, 500),
+            'c' => eval_clip($c, 500),
+            'd' => eval_clip($d, 500),
+            'correct' => $correct,
+        ];
+        if ($item['text'] === '' || $item['a'] === '' || $item['b'] === '' || $item['c'] === '' || $item['d'] === '') {
+            continue;
+        }
+        $questions[] = $item;
+        if (count($questions) >= 10) {
+            break;
+        }
+    }
+    if (count($questions) !== 10) {
+        json_out(['ok' => false, 'error' => 'Gemini එකෙන් ප්‍රශ්න 10ක් උත්තර සමඟ ලැබුණේ නැහැ. නැවත උත්සාහ කරන්න.'], 422);
+    }
+    json_out(['ok' => true, 'questions' => $questions]);
 }
 
 function action_eval_save(): void
@@ -3810,8 +4922,170 @@ function notify_officers(int $atp): array
 
 function notify_row(): array
 {
-    $saved = rows('SELECT nt_wa_token, nt_wa_phone, nt_gmail_app FROM cp_notify WHERE nt_id = 1 LIMIT 1');
-    return $saved[0] ?? ['nt_wa_token' => '', 'nt_wa_phone' => '', 'nt_gmail_app' => ''];
+    $saved = rows(
+        'SELECT nt_wa_token, nt_wa_phone, nt_gmail_app, nt_sms_token, nt_sms_sender, nt_sms_url, nt_bday_msg
+         FROM cp_notify WHERE nt_id = 1 LIMIT 1'
+    );
+    return $saved[0] ?? [
+        'nt_wa_token' => '',
+        'nt_wa_phone' => '',
+        'nt_gmail_app' => '',
+        'nt_sms_token' => '',
+        'nt_sms_sender' => '',
+        'nt_sms_url' => '',
+        'nt_bday_msg' => '',
+    ];
+}
+
+function notify_write(array $fields): bool
+{
+    $row = notify_row();
+    $token = array_key_exists('nt_wa_token', $fields) ? (string) $fields['nt_wa_token'] : (string) ($row['nt_wa_token'] ?? '');
+    $phone = array_key_exists('nt_wa_phone', $fields) ? (string) $fields['nt_wa_phone'] : (string) ($row['nt_wa_phone'] ?? '');
+    $app = array_key_exists('nt_gmail_app', $fields) ? (string) $fields['nt_gmail_app'] : (string) ($row['nt_gmail_app'] ?? '');
+    $smsToken = array_key_exists('nt_sms_token', $fields) ? (string) $fields['nt_sms_token'] : (string) ($row['nt_sms_token'] ?? '');
+    $smsSender = array_key_exists('nt_sms_sender', $fields) ? (string) $fields['nt_sms_sender'] : (string) ($row['nt_sms_sender'] ?? '');
+    $smsUrl = array_key_exists('nt_sms_url', $fields) ? (string) $fields['nt_sms_url'] : (string) ($row['nt_sms_url'] ?? '');
+    $bday = array_key_exists('nt_bday_msg', $fields) ? (string) $fields['nt_bday_msg'] : (string) ($row['nt_bday_msg'] ?? '');
+    $id = 1;
+    $stmt = db()->prepare(
+        'REPLACE INTO cp_notify (nt_id, nt_wa_token, nt_wa_phone, nt_gmail_app, nt_sms_token, nt_sms_sender, nt_sms_url, nt_bday_msg)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    return (bool) ($stmt && $stmt->bind_param('isssssss', $id, $token, $phone, $app, $smsToken, $smsSender, $smsUrl, $bday) && $stmt->execute());
+}
+
+function birthday_message_template(): string
+{
+    $saved = trim((string) (notify_row()['nt_bday_msg'] ?? ''));
+    if ($saved !== '') {
+        return $saved;
+    }
+    return "සුබ උපන්දිනක් {name}!\nකළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය\nවයඹ පළාත් සභාව";
+}
+
+function birthday_message_for(string $name): string
+{
+    $who = trim($name) !== '' ? trim($name) : 'නිලධාරියා';
+    return str_replace(['{name}', '{Name}', '{NAME}'], $who, birthday_message_template());
+}
+
+function sms_ready(): bool
+{
+    $row = notify_row();
+    return trim((string) ($row['nt_sms_token'] ?? '')) !== '' && trim((string) ($row['nt_sms_sender'] ?? '')) !== '';
+}
+
+function sms_one(string $to, string $message): void
+{
+    $row = notify_row();
+    $token = trim((string) ($row['nt_sms_token'] ?? ''));
+    $sender = trim((string) ($row['nt_sms_sender'] ?? ''));
+    $url = trim((string) ($row['nt_sms_url'] ?? ''));
+    if ($url === '') {
+        $url = 'https://app.text.lk/api/v3/sms/send';
+    }
+    if ($token === '' || $sender === '') {
+        throw new RuntimeException('SMS');
+    }
+    $payload = json_encode([
+        'recipient' => $to,
+        'sender_id' => $sender,
+        'type' => 'plain',
+        'message' => $message,
+    ], JSON_UNESCAPED_UNICODE);
+    if ($payload === false) {
+        throw new RuntimeException('SMS');
+    }
+    $raw = false;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 25,
+        ]);
+        $raw = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($raw === false || $code >= 400) {
+            $decoded = is_string($raw) ? json_decode($raw, true) : null;
+            $err = is_array($decoded) ? (string) ($decoded['message'] ?? $decoded['error']['message'] ?? '') : '';
+            throw new RuntimeException($err !== '' ? $err : 'SMS');
+        }
+        return;
+    }
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Authorization: Bearer {$token}\r\nContent-Type: application/json\r\nAccept: application/json\r\n",
+            'content' => $payload,
+            'ignore_errors' => true,
+            'timeout' => 25,
+        ],
+    ]);
+    $raw = @file_get_contents($url, false, $context);
+    if ($raw === false) {
+        throw new RuntimeException('SMS');
+    }
+}
+
+function birthday_people_today(): array
+{
+    return rows(
+        "SELECT stf_Nid, stf_Name, stf_desig, stf_office, stf_mobile, stf_email, stf_Photo, stf_dob
+         FROM cp_staff
+         WHERE MONTH(stf_dob) = ? AND DAY(stf_dob) = ?
+           AND stf_dob NOT LIKE '0000%'
+         ORDER BY stf_Name ASC",
+        'ii',
+        [(int) date('n'), (int) date('j')]
+    );
+}
+
+function birthday_sms_dispatch(): array
+{
+    $out = ['sent' => 0, 'skipped' => 0, 'failed' => 0, 'ready' => sms_ready()];
+    if (!$out['ready']) {
+        return $out;
+    }
+    $today = date('Y-m-d');
+    $sentIds = [];
+    foreach (rows('SELECT bs_nid FROM cp_bday_sent WHERE bs_day = ?', 's', [$today]) as $row) {
+        $sentIds[(string) $row['bs_nid']] = true;
+    }
+    foreach (birthday_people_today() as $person) {
+        $nid = trim((string) ($person['stf_Nid'] ?? ''));
+        if ($nid === '' || isset($sentIds[$nid])) {
+            $out['skipped']++;
+            continue;
+        }
+        $phone = notify_phone((string) ($person['stf_mobile'] ?? ''));
+        if ($phone === '') {
+            $out['skipped']++;
+            continue;
+        }
+        $body = birthday_message_for((string) ($person['stf_Name'] ?? ''));
+        try {
+            sms_one($phone, $body);
+            $stmt = db()->prepare('INSERT INTO cp_bday_sent (bs_nid, bs_day, bs_at) VALUES (?, ?, ?)');
+            $at = date('Y-m-d H:i:s');
+            if ($stmt) {
+                $stmt->bind_param('sss', $nid, $today, $at);
+                $stmt->execute();
+            }
+            $out['sent']++;
+        } catch (RuntimeException $error) {
+            $out['failed']++;
+        }
+    }
+    return $out;
 }
 
 function action_messages(): void
@@ -3852,11 +5126,18 @@ function action_messages(): void
         }
     }
     $saved = notify_row();
+    $bday = birthday_sms_dispatch();
     json_out([
         'ok' => true,
         'from' => gemini_account()['email'],
         'whatsapp' => trim((string) $saved['nt_wa_token']) !== '' && trim((string) $saved['nt_wa_phone']) !== '',
         'gmailApp' => trim((string) ($saved['nt_gmail_app'] ?? '')) !== '',
+        'smsReady' => sms_ready(),
+        'smsSender' => (string) ($saved['nt_sms_sender'] ?? ''),
+        'smsUrl' => (string) ($saved['nt_sms_url'] ?? ''),
+        'smsTokenSet' => trim((string) ($saved['nt_sms_token'] ?? '')) !== '',
+        'birthdayMsg' => birthday_message_template(),
+        'birthdaySms' => $bday,
         'waPhone' => (string) $saved['nt_wa_phone'],
         'programmes' => $programmes,
         'officers' => $officers,
@@ -3881,13 +5162,59 @@ function action_messages_save(): void
     if ($token === '' || $phone === '') {
         json_out(['ok' => false, 'error' => 'WhatsApp Business ටෝකනය සහ දුරකථන අංක හැඳුනුම දෙන්න.'], 422);
     }
-    $id = 1;
-    $app = (string) ($saved['nt_gmail_app'] ?? '');
-    $stmt = db()->prepare('REPLACE INTO cp_notify (nt_id, nt_wa_token, nt_wa_phone, nt_gmail_app) VALUES (?, ?, ?, ?)');
-    if (!$stmt || !$stmt->bind_param('isss', $id, $token, $phone, $app) || !$stmt->execute()) {
+    if (!notify_write(['nt_wa_token' => $token, 'nt_wa_phone' => $phone])) {
         json_out(['ok' => false, 'error' => 'WhatsApp Business සුරකින්න බැරි වුණා.'], 500);
     }
     json_out(['ok' => true]);
+}
+
+function action_messages_sms(): void
+{
+    csrf_check();
+    module_staff();
+    if (!is_admin(current_user() ?? [])) {
+        json_out(['ok' => false, 'error' => 'SMS සැකසුම් වෙනස් කරන්න පුළුවන් Admin ට පමණයි.'], 403);
+    }
+    $data = body();
+    $fields = [];
+    if (array_key_exists('token', $data)) {
+        $token = trim((string) ($data['token'] ?? ''));
+        if ($token !== '') {
+            $fields['nt_sms_token'] = $token;
+        }
+    }
+    if (array_key_exists('sender', $data)) {
+        $fields['nt_sms_sender'] = mb_substr(trim((string) ($data['sender'] ?? '')), 0, 40);
+    }
+    if (array_key_exists('url', $data)) {
+        $fields['nt_sms_url'] = mb_substr(trim((string) ($data['url'] ?? '')), 0, 250);
+    }
+    if (array_key_exists('birthdayMsg', $data)) {
+        $msg = trim((string) ($data['birthdayMsg'] ?? ''));
+        if (function_exists('mb_substr')) {
+            $msg = mb_substr($msg, 0, 500);
+        } else {
+            $msg = substr($msg, 0, 500);
+        }
+        $fields['nt_bday_msg'] = $msg;
+    }
+    if ($fields === []) {
+        json_out(['ok' => false, 'error' => 'සුරකින්න දෙයක් නැත.'], 422);
+    }
+    if (!notify_write($fields)) {
+        json_out(['ok' => false, 'error' => 'SMS සැකසුම් සුරකින්න බැරි වුණා.'], 500);
+    }
+    json_out([
+        'ok' => true,
+        'smsReady' => sms_ready(),
+        'birthdayMsg' => birthday_message_template(),
+    ]);
+}
+
+function action_birthday_sms(): void
+{
+    module_staff();
+    json_out(['ok' => true] + birthday_sms_dispatch() + ['message' => birthday_message_template()]);
 }
 
 function smtp_read($fp): string
@@ -3924,6 +5251,9 @@ function action_messages_gmail(): void
 {
     csrf_check();
     module_staff();
+    if (!is_admin(current_user() ?? [])) {
+        json_out(['ok' => false, 'error' => 'Gmail සැකසුම් වෙනස් කරන්න පුළුවන් Admin ට පමණයි.'], 403);
+    }
     $app = preg_replace('/\s+/', '', (string) (body()['app'] ?? '')) ?? '';
     if ($app === '') {
         json_out(['ok' => false, 'error' => 'Gmail එකේ හදපු App password එක දාන්න.'], 422);
@@ -3931,12 +5261,7 @@ function action_messages_gmail(): void
     if (strlen($app) < 16) {
         json_out(['ok' => false, 'error' => 'App password එක අකුරු 16කි. Gmail එකේ පෙන්නන ඒකම දාන්න.'], 422);
     }
-    $saved = notify_row();
-    $id = 1;
-    $token = (string) ($saved['nt_wa_token'] ?? '');
-    $phone = (string) ($saved['nt_wa_phone'] ?? '');
-    $stmt = db()->prepare('REPLACE INTO cp_notify (nt_id, nt_wa_token, nt_wa_phone, nt_gmail_app) VALUES (?, ?, ?, ?)');
-    if (!$stmt || !$stmt->bind_param('isss', $id, $token, $phone, $app) || !$stmt->execute()) {
+    if (!notify_write(['nt_gmail_app' => $app])) {
         json_out(['ok' => false, 'error' => 'App password එක සුරකින්න බැරි වුණා.'], 500);
     }
     json_out(['ok' => true]);
@@ -4047,12 +5372,22 @@ function action_messages_send(): void
     module_staff();
     $data = body();
     $atp = (int) ($data['atp'] ?? 0);
-    $kind = (string) ($data['kind'] ?? '') === 'remind' ? 'remind' : 'notice';
-    $channel = (string) ($data['channel'] ?? '') === 'whatsapp' ? 'whatsapp' : 'email';
+    $kind = (string) ($data['kind'] ?? '');
+    if ($kind !== 'remind' && $kind !== 'custom') {
+        $kind = 'notice';
+    }
+    $channel = (string) ($data['channel'] ?? '');
+    if (!in_array($channel, ['email', 'whatsapp', 'sms'], true)) {
+        $channel = 'email';
+    }
+    $custom = trim((string) ($data['text'] ?? ''));
     $plan = rows('SELECT * FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$atp]);
     $programme = trim((string) ($plan[0]['atp_trname'] ?? ''));
     if ($programme === '') {
         json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහනක් තෝරන්න.'], 422);
+    }
+    if ($kind === 'custom' && $custom === '') {
+        json_out(['ok' => false, 'error' => 'යවන්න SMS පණිවිඩය ලියන්න.'], 422);
     }
     $day = notify_when($plan[0]);
     $place = trim((string) ($plan[0]['atp_location'] ?? ''));
@@ -4078,17 +5413,26 @@ function action_messages_send(): void
                 : 'Gmail එකෙන් ඊමේල් යවන්න බැරි වුණා.';
             json_out(['ok' => false, 'error' => $why], 502);
         }
-    } else {
+    } elseif ($channel === 'whatsapp') {
         $saved = notify_row();
         $token = trim((string) $saved['nt_wa_token']);
         $phoneId = trim((string) $saved['nt_wa_phone']);
         if ($token === '' || $phoneId === '') {
             json_out(['ok' => false, 'error' => 'මුලින්ම WhatsApp Business ටෝකනය සුරකින්න.'], 422);
         }
+    } else {
+        if (!sms_ready()) {
+            json_out(['ok' => false, 'error' => 'මුලින්ම SMS API ටෝකනය සහ Sender ID සුරකින්න.'], 422);
+        }
     }
     foreach ($people as $person) {
         $who = trim((string) ($person['stf_Name'] ?? ''));
-        [$subject, $body] = notify_letter($kind, $who, $programme, $day, $place);
+        if ($kind === 'custom') {
+            $subject = 'පණිවිඩය';
+            $body = str_replace(['{name}', '{Name}', '{NAME}'], $who !== '' ? $who : 'නිලධාරියා', $custom);
+        } else {
+            [$subject, $body] = notify_letter($kind, $who, $programme, $day, $place);
+        }
         try {
             if ($channel === 'email') {
                 $email = trim((string) ($person['stf_email'] ?? ''));
@@ -4097,13 +5441,20 @@ function action_messages_send(): void
                     continue;
                 }
                 gmail_one($mail, $from, $email, $subject, $body);
-            } else {
+            } elseif ($channel === 'whatsapp') {
                 $phone = notify_phone((string) ($person['stf_mobile'] ?? ''));
                 if ($phone === '') {
                     $skipped++;
                     continue;
                 }
                 whatsapp_one($token, $phoneId, $phone, $body);
+            } else {
+                $phone = notify_phone((string) ($person['stf_mobile'] ?? ''));
+                if ($phone === '') {
+                    $skipped++;
+                    continue;
+                }
+                sms_one($phone, $body);
             }
             $sent++;
         } catch (RuntimeException $error) {
@@ -4138,6 +5489,13 @@ function action_signatory(): void
         'url' => $profile['signUrl'],
         'photo' => $profile['photo'],
         'photoUrl' => $profile['photoUrl'],
+        'supervisor' => $profile['supervisor'],
+        'support1' => $profile['support1'],
+        'support2' => $profile['support2'],
+        'support3' => $profile['support3'],
+        'cash' => $profile['cash'],
+        'cashName' => $profile['cashName'],
+        'team' => $profile['team'],
     ]);
 }
 
@@ -4153,11 +5511,19 @@ function action_signatory_save(): void
     $title = trim((string) ($data['title'] ?? ''));
     $file = basename(str_replace('\\', '/', trim((string) ($data['sign'] ?? ''))));
     $photo = basename(str_replace('\\', '/', trim((string) ($data['photo'] ?? ''))));
+    $supervisor = mb_substr(trim((string) ($data['supervisor'] ?? '')), 0, 200);
+    $support1 = mb_substr(trim((string) ($data['support1'] ?? '')), 0, 40);
+    $support2 = mb_substr(trim((string) ($data['support2'] ?? '')), 0, 40);
+    $support3 = mb_substr(trim((string) ($data['support3'] ?? '')), 0, 40);
     if ($name === '') {
         json_out(['ok' => false, 'error' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)ගේ නම දෙන්න.'], 422);
     }
     if (!in_array($title, signatory_titles(), true)) {
         json_out(['ok' => false, 'error' => 'මහතා, මහත්මිය හෝ මෙනවිය තෝරන්න.'], 422);
+    }
+    $cash = mb_substr(trim((string) ($data['cash'] ?? '')), 0, 200);
+    if (preg_match('/^\d{9,12}[vVxX]?$/', $cash)) {
+        $cash = '';
     }
     $existing = rows('SELECT sg_id, sg_sign, sg_photo FROM cp_signatory WHERE sg_id = 1 LIMIT 1');
     if ($file === '' && $existing) {
@@ -4167,12 +5533,41 @@ function action_signatory_save(): void
         $photo = (string) $existing[0]['sg_photo'];
     }
     if ($existing) {
-        $stmt = db()->prepare('UPDATE cp_signatory SET sg_name = ?, sg_title = ?, sg_sign = ?, sg_photo = ? WHERE sg_id = 1');
-        $ok = $stmt && $stmt->bind_param('ssss', $name, $title, $file, $photo) && $stmt->execute();
+        $stmt = db()->prepare(
+            'UPDATE cp_signatory SET sg_name = ?, sg_title = ?, sg_sign = ?, sg_photo = ?,
+             sg_supervisor = ?, sg_support1 = ?, sg_support2 = ?, sg_support3 = ?, sg_cash = ? WHERE sg_id = 1'
+        );
+        $ok = $stmt && $stmt->bind_param(
+            'sssssssss',
+            $name,
+            $title,
+            $file,
+            $photo,
+            $supervisor,
+            $support1,
+            $support2,
+            $support3,
+            $cash
+        ) && $stmt->execute();
     } else {
         $id = 1;
-        $stmt = db()->prepare('INSERT INTO cp_signatory (sg_id, sg_name, sg_title, sg_sign, sg_photo) VALUES (?, ?, ?, ?, ?)');
-        $ok = $stmt && $stmt->bind_param('issss', $id, $name, $title, $file, $photo) && $stmt->execute();
+        $stmt = db()->prepare(
+            'INSERT INTO cp_signatory (sg_id, sg_name, sg_title, sg_sign, sg_photo, sg_supervisor, sg_support1, sg_support2, sg_support3, sg_cash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ok = $stmt && $stmt->bind_param(
+            'isssssssss',
+            $id,
+            $name,
+            $title,
+            $file,
+            $photo,
+            $supervisor,
+            $support1,
+            $support2,
+            $support3,
+            $cash
+        ) && $stmt->execute();
     }
     if (!$ok) {
         json_out(['ok' => false, 'error' => 'සුරැකිය නොහැකි විය.'], 500);
@@ -4186,6 +5581,13 @@ function action_signatory_save(): void
         'url' => $profile['signUrl'],
         'photo' => $profile['photo'],
         'photoUrl' => $profile['photoUrl'],
+        'supervisor' => $profile['supervisor'],
+        'support1' => $profile['support1'],
+        'support2' => $profile['support2'],
+        'support3' => $profile['support3'],
+        'cash' => $profile['cash'],
+        'cashName' => $profile['cashName'],
+        'team' => $profile['team'],
     ]);
 }
 
@@ -4235,19 +5637,26 @@ function action_officer_letter(): void
             'tapp_office' => $staff[0]['stf_office'] ?? '',
         ];
     }
+    $officeName = trim((string) ($staff[0]['stf_office'] ?? $application['tapp_office'] ?? ''));
+    $headPost = office_head_post($officeName);
+    if ($headPost === '') {
+        $headPost = office_head_post(trim((string) ($application['tapp_office'] ?? '')));
+    }
     json_out([
         'ok' => true,
         'letter' => [
             'application' => $application,
             'officer' => $staff[0] ?? ['stf_Name' => '', 'stf_desig' => '', 'stf_office' => (string) ($application['tapp_office'] ?? ''), 'stf_Nid' => $nid, 'stf_sex' => ''],
+            'headPost' => $headPost,
             'programme' => $plan,
             'days' => $plan ? programme_days($plan, 'atp_day') : ($attended ? [substr((string) $attended[0]['tratt_startdate'], 0, 10)] : []),
             'selectedDate' => letter_selected_date($application),
+            'token' => letter_verify_token($nid, $atp),
             'unit' => MDTU_NAME,
             'org' => MDTU_ORG,
             'place' => MDTU_PLACE,
             'phone' => MDTU_PHONE,
-        ] + letter_signatory(),
+        ] + letter_signatory() + letter_coordinator($plan),
     ]);
 }
 
@@ -4256,7 +5665,7 @@ function action_call_letters(): void
     $user = require_user();
     $nid = trim((string) ($_GET['nid'] ?? ''));
     $year = (int) ($_GET['year'] ?? 0);
-    if ($year < 1990 || $year > 2100) {
+    if ($year < 1990 || $year > 2200) {
         $year = (int) date('Y');
     }
     if ($nid === '') {
@@ -4304,6 +5713,59 @@ function action_call_letters(): void
     ]);
 }
 
+function office_match_key(string $name): string
+{
+    $name = trim(str_replace(["\xc2\xa0", "\xe2\x80\x93", "\xe2\x80\x94", '-', '_', '.', ',', '/', '\\', '(', ')', ':'], '', $name));
+    $name = preg_replace('/\s+/u', '', $name) ?? $name;
+    return mb_strtolower($name, 'UTF-8');
+}
+
+function office_head_post(string $officeName): string
+{
+    $wanted = office_match_key($officeName);
+    if ($wanted === '') {
+        return '';
+    }
+    $exact = '';
+    $exactFound = false;
+    $near = '';
+    $nearScore = 0;
+    foreach (rows('SELECT of_name, of_headdesig FROM offices') as $row) {
+        $key = office_match_key((string) $row['of_name']);
+        $post = trim((string) $row['of_headdesig']);
+        if ($key === '') {
+            continue;
+        }
+        if ($key === $wanted) {
+            $exactFound = true;
+            if ($post !== '' && $exact === '') {
+                $exact = $post;
+            }
+            continue;
+        }
+        if ($post === '') {
+            continue;
+        }
+        $shorter = min(mb_strlen($key, 'UTF-8'), mb_strlen($wanted, 'UTF-8'));
+        $longer = max(mb_strlen($key, 'UTF-8'), mb_strlen($wanted, 'UTF-8'));
+        if ($longer < 8 || $shorter / $longer < 0.86) {
+            continue;
+        }
+        if (!str_contains($key, $wanted) && !str_contains($wanted, $key)) {
+            continue;
+        }
+        $score = (int) round(1000 * $shorter / $longer);
+        if ($score > $nearScore) {
+            $nearScore = $score;
+            $near = $post;
+        }
+    }
+    if ($exactFound) {
+        return $exact;
+    }
+    return $near;
+}
+
 function action_letter(): void
 {
     $user = require_user();
@@ -4319,19 +5781,102 @@ function action_letter(): void
     $staff = rows('SELECT stf_Name, stf_desig, stf_office, stf_Nid, stf_sex FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$application['tapp_officerNid']]);
     $planRows = rows('SELECT * FROM cp_atp WHERE atp_id = ? LIMIT 1', 's', [(string) $application['tapp_atpid']]);
     $plan = $planRows[0] ?? [];
+    $officeName = trim((string) ($staff[0]['stf_office'] ?? $application['tapp_office'] ?? ''));
+    $headPost = office_head_post($officeName);
+    if ($headPost === '') {
+        $headPost = office_head_post(trim((string) ($application['tapp_office'] ?? '')));
+    }
     json_out([
         'ok' => true,
         'letter' => [
             'application' => $application,
             'officer' => $staff[0] ?? ['stf_Name' => '', 'stf_desig' => '', 'stf_office' => $application['tapp_office'], 'stf_Nid' => $application['tapp_officerNid'], 'stf_sex' => ''],
+            'headPost' => $headPost,
             'programme' => $plan,
             'days' => $plan ? programme_days($plan, 'atp_day') : [],
             'selectedDate' => letter_selected_date($application),
+            'token' => letter_verify_token((string) ($application['tapp_officerNid'] ?? ''), (string) ($application['tapp_atpid'] ?? '')),
             'unit' => MDTU_NAME,
             'org' => MDTU_ORG,
             'place' => MDTU_PLACE,
             'phone' => MDTU_PHONE,
-        ] + letter_signatory(),
+        ] + letter_signatory() + letter_coordinator($plan),
+    ]);
+}
+
+function action_letter_check(): void
+{
+    $parsed = letter_verify_parts((string) ($_GET['token'] ?? ''));
+    if ($parsed === null) {
+        json_out(['ok' => true, 'genuine' => false]);
+    }
+    $atp = $parsed['atp'];
+    $sig = $parsed['sig'];
+    $nids = [];
+    $seen = [];
+    $addNid = static function (string $value) use (&$nids, &$seen): void {
+        $nid = trim($value);
+        if ($nid === '' || isset($seen['k' . $nid])) {
+            return;
+        }
+        $seen['k' . $nid] = true;
+        $nids[] = $nid;
+    };
+    foreach (rows('SELECT tapp_officerNid FROM cp_trainingapplications WHERE tapp_atpid = ?', 's', [$atp]) as $row) {
+        $addNid((string) ($row['tapp_officerNid'] ?? ''));
+    }
+    foreach (rows('SELECT tratt_empnid FROM cp_trainingattendance WHERE tratt_atpid = ?', 's', [$atp]) as $row) {
+        $addNid((string) ($row['tratt_empnid'] ?? ''));
+    }
+    $found = '';
+    foreach ($nids as $nid) {
+        if (hash_equals(letter_verify_sig($nid, $atp), $sig)) {
+            $found = $nid;
+            break;
+        }
+    }
+    if ($found === '') {
+        json_out(['ok' => true, 'genuine' => false]);
+    }
+    $staff = rows('SELECT stf_Name, stf_desig, stf_office FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$found]);
+    $person = $staff[0] ?? [];
+    $planRows = rows(
+        'SELECT atp_trname, atp_fileno, atp_location, atp_stime, atp_etime,
+                atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays
+         FROM cp_atp WHERE atp_id = ? LIMIT 1',
+        's',
+        [$atp]
+    );
+    $plan = $planRows[0] ?? [];
+    $apps = rows(
+        'SELECT tapp_trname, tapp_office FROM cp_trainingapplications WHERE tapp_atpid = ? AND tapp_officerNid = ? LIMIT 1',
+        'ss',
+        [$atp, $found]
+    );
+    $application = $apps[0] ?? [];
+    $name = trim((string) ($person['stf_Name'] ?? ''));
+    $office = trim((string) ($person['stf_office'] ?? ''));
+    if ($office === '') {
+        $office = trim((string) ($application['tapp_office'] ?? ''));
+    }
+    $programme = trim((string) ($plan['atp_trname'] ?? ''));
+    if ($programme === '') {
+        $programme = trim((string) ($application['tapp_trname'] ?? ''));
+    }
+    $start = trim((string) ($plan['atp_stime'] ?? ''));
+    $end = trim((string) ($plan['atp_etime'] ?? ''));
+    $time = trim($start . ($start !== '' && $end !== '' ? ' - ' : '') . $end);
+    json_out([
+        'ok' => true,
+        'genuine' => true,
+        'name' => $name,
+        'designation' => trim((string) ($person['stf_desig'] ?? '')),
+        'office' => $office,
+        'programme' => $programme,
+        'days' => $plan ? programme_days($plan, 'atp_day') : [],
+        'time' => $time,
+        'place' => trim((string) ($plan['atp_location'] ?? '')),
+        'file' => trim((string) ($plan['atp_fileno'] ?? '')),
     ]);
 }
 
@@ -4463,7 +6008,7 @@ function saved_estimate_items(): array
     $items = rows(
         'SELECT s.se_atpid, s.se_day1, s.se_trname, s.se_fileno, s.se_total,
                 a.atp_trname, a.atp_fileno, a.atp_targetgroup, a.atp_noofparticipants, a.atp_noofdays, a.atp_location, a.atp_reqoffice, a.atp_stime, a.atp_etime, a.atp_supportstaff1, a.atp_supervisor,
-                a.atp_day1, a.atp_day2, a.atp_day3, a.atp_day4, a.atp_day5, a.atp_day6, a.atp_day7, a.atp_day8, a.atp_day9, a.atp_day10, a.atp_offweb,
+                a.atp_day1, a.atp_day2, a.atp_day3, a.atp_day4, a.atp_day5, a.atp_day6, a.atp_day7, a.atp_day8, a.atp_day9, a.atp_day10, a.atp_offweb, a.atp_requestDate,
                 a.atp_moredays, a.atp_resourcep1, a.atp_resourcep2, a.atp_resourcep3, a.atp_resourcep4, a.atp_resourcep5,
                 a.atp_resourcep6, a.atp_resourcep7, a.atp_resourcep8, a.atp_resourcep9, a.atp_resourcep10, a.atp_moreresource
          FROM cp_savedestimates s
@@ -4534,6 +6079,7 @@ function saved_estimate_items(): array
             'supervisorNid' => trim((string) ($row['atp_supervisor'] ?? '')),
             'total' => (string) $row['se_total'],
             'dayCount' => $dayCount,
+            'atp_requestDate' => substr((string) ($row['atp_requestDate'] ?? ''), 0, 10),
             'offweb' => in_array((string) ($row['atp_offweb'] ?? ''), [YES_SI, 'Yes', 'yes'], true),
         ];
     }
@@ -4609,13 +6155,21 @@ function action_offweb_save(): void
     if ($name === '') {
         json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහනේ නම දෙන්න.'], 422);
     }
+    $coordId = trim((string) ($data['atp_supportstaff1'] ?? ''));
+    if ($coordId === '') {
+        json_out(['ok' => false, 'error' => 'සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි.'], 422);
+    }
+    if (coord_nid_key($coordId) === '') {
+        json_out(['ok' => false, 'error' => 'සම්බන්ධීකරණය සඳහා වලංගු ජාතික හැඳුනුම්පත් අංකයක් දෙන්න.'], 422);
+    }
     $allowed = [
         'atp_trname', 'atp_fileno', 'atp_panelno', 'atp_supervisor', 'atp_purpose', 'atp_content',
         'atp_targetgroup', 'atp_nooftrainings', 'atp_noofdays', 'atp_noofparticipants', 'atp_location',
         'atp_fundsource', 'atp_bdjet', 'atp_stime', 'atp_etime',
         'atp_supportstaff1', 'atp_supportstaff2', 'atp_supportstaff3', 'atp_supportstaff4', 'atp_supportstaff5', 'atp_supportstaff6',
+        'atp_coordname',
         'atp_cashofficername', 'atp_cashofficerdesig', 'atp_cashofficerotherdetails',
-        'atp_trtype', 'atp_otherfacts', 'atp_specialfacts', 'atp_showspecialfacts', 'atp_specialfinletter',
+        'atp_trtype', 'atp_otherfacts', 'atp_facilities', 'atp_specialfacts', 'atp_showspecialfacts', 'atp_specialfinletter',
         'atp_moredays', 'atp_moreresource', 'atp_moresupport',
     ];
     for ($i = 1; $i <= 10; $i++) {
@@ -4627,6 +6181,13 @@ function action_offweb_save(): void
         $row[$field] = mb_substr(trim((string) ($data[$field] ?? '')), 0, 4000);
     }
     $row['atp_trname'] = mb_substr($name, 0, 500);
+    $row['atp_supportstaff1'] = mb_substr($coordId, 0, 40);
+    if (trim((string) ($row['atp_coordname'] ?? '')) === '' || coord_nid_key((string) $row['atp_coordname']) !== '') {
+        $fromId = staff_name_for($coordId);
+        if ($fromId !== '') {
+            $row['atp_coordname'] = mb_substr($fromId, 0, 300);
+        }
+    }
     for ($i = 1; $i <= 10; $i++) {
         $day = substr($row['atp_day' . $i], 0, 10);
         $row['atp_day' . $i] = preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) ? $day : '0000-00-00';
@@ -4784,7 +6345,7 @@ function provision_year(string $year): string
 {
     $year = preg_replace('/\D/', '', $year) ?? '';
     $number = (int) $year;
-    if ($number < 1990 || $number > 2100) {
+    if ($number < 1990 || $number > 2200) {
         $number = (int) date('Y');
     }
     return (string) $number;
@@ -4818,10 +6379,13 @@ function total_category(string $type): string
     if ($type === 'දෙපාර්තමේන්තු පුහුණු') {
         return 'department';
     }
-    if ($type === 'භාෂා පුහුණු') {
+    if ($type === 'භාෂා පුහුණු' || str_contains($type, 'දෙමළ')) {
         return 'language';
     }
-    if (str_contains($type, 'මත්') || str_contains($type, 'උපදේශ')) {
+    if (plan_is_meeting_type($type)) {
+        return 'meeting';
+    }
+    if (str_contains($type, 'මත්') || str_contains($type, 'උපදේශණය')) {
         return 'drug';
     }
     if (str_contains($type, 'බාහිර') || str_contains($type, 'පිටස්තර')) {
@@ -5088,7 +6652,7 @@ function split_skip(string $name, string $type): bool
     if (str_contains($blob, 'බාහිර') || str_contains($blob, 'පිටස්තර') || str_contains($low, 'external')) {
         return true;
     }
-    if (str_contains($blob, 'දෙමළ') || str_contains($low, 'tamil')) {
+    if (str_contains($blob, 'දෙමළ') || str_contains($low, 'tamil') || $type === 'භාෂා පුහුණු') {
         return true;
     }
     return false;
@@ -5343,7 +6907,10 @@ function progress_category(string $name, string $type, string $office): string
 {
     $blob = $name . ' ' . $type;
     $low = mb_strtolower($blob);
-    if (str_contains($blob, 'මත්') || str_contains($blob, 'උපදේශ')) {
+    if (plan_is_meeting_type($type) || str_contains($blob, 'රැස්වීම')) {
+        return 'meeting';
+    }
+    if (str_contains($blob, 'මත්') || str_contains($type, 'උපදේශණය')) {
         return 'drug';
     }
     if (str_contains($blob, 'බාහිර') || str_contains($blob, 'පිටස්තර') || str_contains($low, 'external')) {
@@ -5352,7 +6919,7 @@ function progress_category(string $name, string $type, string $office): string
     if (str_contains($blob, 'විදේශ')) {
         return 'foreign';
     }
-    if (str_contains($blob, 'දෙමළ') || str_contains($low, 'tamil')) {
+    if (str_contains($blob, 'දෙමළ') || str_contains($low, 'tamil') || $type === 'භාෂා පුහුණු') {
         return 'tamil';
     }
     if ($type === 'විශේෂ පුහුණු' || $type === 'OBT') {
@@ -5546,6 +7113,281 @@ function action_person(): void
     json_out(['ok' => true] + progress_report($year));
 }
 
+function person_matrix_categories(): array
+{
+    return [
+        ['id' => 'general', 'label' => 'පොදු'],
+        ['id' => 'special', 'label' => 'විශේෂ පුහුණු වැඩමුළු'],
+        ['id' => 'language', 'label' => 'රාජ්‍ය භාෂා වැඩමුළු'],
+        ['id' => 'software', 'label' => 'මෘදුකාංග නිර්මාණය'],
+        ['id' => 'department', 'label' => 'දෙපාර්තමේන්තු පුහුණු'],
+        ['id' => 'external', 'label' => 'බාහිර පුහුණු'],
+        ['id' => 'meeting', 'label' => 'ප්‍රගති සමාලෝචන රැස්වීම් හා කමිටු'],
+    ];
+}
+
+function person_matrix_kind(string $name, string $type, string $office): string
+{
+    if (plan_is_meeting_type($type) || str_contains($name . $type, 'රැස්වීම')) {
+        return 'meeting';
+    }
+    if (str_contains($name, 'මෘදුකාංග') || split_computer($name)) {
+        return 'software';
+    }
+    $id = progress_category($name, $type, $office);
+    if ($id === 'tamil') {
+        return 'language';
+    }
+    if ($id === 'drug' || $id === 'foreign') {
+        return '';
+    }
+    if ($id === 'meeting') {
+        return 'meeting';
+    }
+    foreach (person_matrix_categories() as $category) {
+        if ($category['id'] === $id) {
+            return $id;
+        }
+    }
+    return 'general';
+}
+
+function person_matrix_blank(array $categories): array
+{
+    $cells = [];
+    foreach ($categories as $category) {
+        $cells[$category['id']] = ['count' => 0, 'value' => 0.0];
+    }
+    return $cells;
+}
+
+/**
+ * Resolve coordinator for the matrix:
+ * - If NIC/ID is stored (support staff or coord field) → look up staff name.
+ * - If no ID but a typed name → keep that name, mark as no-id (shown separately).
+ * - If neither → "ID නැත" bucket.
+ *
+ * @return array{key:string,name:string,hasId:bool}
+ */
+function person_matrix_coord(array $plan): array
+{
+    $rawId = trim((string) ($plan['atp_supportstaff1'] ?? ''));
+    $typed = preg_replace('/\s+/u', ' ', trim((string) ($plan['atp_coordname'] ?? ''))) ?? '';
+    $nid = coord_nid_key($rawId);
+    if ($nid === '') {
+        $nid = coord_nid_key($typed);
+    }
+    if ($nid !== '') {
+        $officer = coord_officer($rawId !== '' ? $rawId : $typed, $typed);
+        $shown = trim((string) ($officer['shown'] ?? ''));
+        if ($shown === '') {
+            $shown = $rawId !== '' ? $rawId : $typed;
+        }
+        $name = trim((string) ($officer['name'] ?? ''));
+        if ($name === '' || $name === 'සම්බන්ධීකරණය නොමැත' || coord_nid_key($name) !== '') {
+            $name = staff_name_for($shown);
+        }
+        if ($name === '' || coord_nid_key($name) !== '') {
+            $fromDir = staff_directory();
+            $name = (string) ($fromDir['byKey'][$nid] ?? '');
+        }
+        if ($name === '' || coord_nid_key($name) !== '') {
+            $name = ($typed !== '' && coord_nid_key($typed) === '') ? $typed : ('ID ' . $shown);
+        }
+        return [
+            'key' => 'n:' . $nid,
+            'name' => $name,
+            'hasId' => true,
+        ];
+    }
+    if ($typed !== '') {
+        return [
+            'key' => 'a:' . coord_plain_name($typed),
+            'name' => $typed,
+            'hasId' => false,
+        ];
+    }
+    return [
+        'key' => 'none',
+        'name' => 'ID නැත / සම්බන්ධීකරණ නිලධාරියා නැත',
+        'hasId' => false,
+    ];
+}
+
+function action_person_matrix(): void
+{
+    total_staff();
+    $year = provision_year((string) ($_GET['year'] ?? ''));
+    $from = trim((string) ($_GET['from'] ?? ''));
+    $until = trim((string) ($_GET['until'] ?? ''));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+        $from = $year . '-10-01';
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $until)) {
+        $until = $year . '-12-31';
+    }
+    if ($from > $until) {
+        [$from, $until] = [$until, $from];
+    }
+    $categories = person_matrix_categories();
+    $spentSaved = [];
+    foreach (rows('SELECT ct_atpid, ct_actualexpenditure FROM cp_completedtrainings') as $row) {
+        $id = (int) $row['ct_atpid'];
+        $spentSaved[$id] = advance_number((string) $row['ct_actualexpenditure']);
+    }
+    foreach (rows('SELECT al_atpid, al_spent, al_resource, al_coord, al_supervise, al_liaise, al_account, al_office FROM cp_allowances') as $row) {
+        $id = (int) $row['al_atpid'];
+        if (($spentSaved[$id] ?? 0) > 0) {
+            continue;
+        }
+        $spentSaved[$id] = advance_number(total_step2($row));
+    }
+    $plans = rows(
+        "SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_bdjet, atp_supportstaff1, atp_coordname,
+                atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_requestDate
+         FROM cp_atp WHERE TRIM(atp_trname) <> ''"
+    );
+    $groups = [];
+    foreach ($plans as $plan) {
+        $name = split_plain((string) ($plan['atp_trname'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $dates = programme_days($plan, 'atp_day');
+        sort($dates);
+        $day = $dates[0] ?? '';
+        $programmeYear = $day !== '' ? substr($day, 0, 4) : substr((string) ($plan['atp_requestDate'] ?? ''), 0, 4);
+        if ($programmeYear !== $year) {
+            continue;
+        }
+        if ($day === '' || $day < $from || $day > $until) {
+            continue;
+        }
+        $kind = person_matrix_kind($name, (string) ($plan['atp_trtype'] ?? ''), (string) ($plan['atp_reqoffice'] ?? ''));
+        if ($kind === '') {
+            continue;
+        }
+        $coord = person_matrix_coord($plan);
+        $key = (string) $coord['key'];
+        if (!isset($groups[$key])) {
+            $label = (string) $coord['name'];
+            if (!$coord['hasId'] && $key !== 'none') {
+                $label = $label . ' (ID නැත)';
+            }
+            $groups[$key] = [
+                'key' => $key,
+                'name' => $label,
+                'short' => $label,
+                'hasId' => (bool) $coord['hasId'],
+                'cells' => person_matrix_blank($categories),
+                'estimate' => 0.0,
+                'spent' => 0.0,
+                'count' => 0,
+            ];
+        } elseif ($coord['hasId'] && (string) $coord['name'] !== '' && str_starts_with((string) $groups[$key]['name'], 'ID ')) {
+            $groups[$key]['name'] = (string) $coord['name'];
+            $groups[$key]['short'] = (string) $coord['name'];
+        }
+        $money = advance_number((string) ($plan['atp_bdjet'] ?? ''));
+        $id = (int) $plan['atp_id'];
+        $spent = (float) ($spentSaved[$id] ?? 0);
+        $groups[$key]['cells'][$kind]['count']++;
+        $groups[$key]['cells'][$kind]['value'] += $money;
+        $groups[$key]['estimate'] += $money;
+        $groups[$key]['spent'] += $spent;
+        $groups[$key]['count']++;
+    }
+    $rows = array_values($groups);
+    usort($rows, static function (array $a, array $b): int {
+        // With-ID first, then no-ID name rows, then the empty "none" bucket last.
+        $rank = static function (array $row): int {
+            if (!empty($row['hasId'])) {
+                return 0;
+            }
+            return $row['key'] === 'none' ? 2 : 1;
+        };
+        $left = $rank($a);
+        $right = $rank($b);
+        if ($left !== $right) {
+            return $left <=> $right;
+        }
+        return strcmp((string) $a['name'], (string) $b['name']);
+    });
+    $packed = [];
+    $colTotals = person_matrix_blank($categories);
+    $estimateTotal = 0.0;
+    $spentTotal = 0.0;
+    $countTotal = 0;
+    foreach ($rows as $row) {
+        if ((int) $row['count'] < 1) {
+            continue;
+        }
+        $cells = [];
+        foreach ($categories as $category) {
+            $id = $category['id'];
+            $cell = $row['cells'][$id];
+            $cells[$id] = [
+                'count' => (int) $cell['count'],
+                'value' => advance_box((float) $cell['value']),
+            ];
+            $colTotals[$id]['count'] += (int) $cell['count'];
+            $colTotals[$id]['value'] += (float) $cell['value'];
+        }
+        $estimateTotal += (float) $row['estimate'];
+        $spentTotal += (float) $row['spent'];
+        $countTotal += (int) $row['count'];
+        $packed[] = [
+            'key' => $row['key'],
+            'name' => $row['name'],
+            'short' => $row['name'],
+            'hasId' => !empty($row['hasId']),
+            'cells' => $cells,
+            'count' => (int) $row['count'],
+            'estimate' => advance_box((float) $row['estimate']),
+            'spent' => advance_box((float) $row['spent']),
+        ];
+    }
+    $totals = [];
+    foreach ($categories as $category) {
+        $id = $category['id'];
+        $totals[$id] = [
+            'count' => (int) $colTotals[$id]['count'],
+            'value' => advance_box((float) $colTotals[$id]['value']),
+        ];
+    }
+    $monthNames = [
+        '01' => 'ජනවාරි', '02' => 'පෙබරවාරි', '03' => 'මාර්තු', '04' => 'අප්‍රේල්',
+        '05' => 'මැයි', '06' => 'ජුනි', '07' => 'ජූලි', '08' => 'අගෝස්තු',
+        '09' => 'සැප්තැම්බර්', '10' => 'ඔක්තෝබර්', '11' => 'නොවැම්බර්', '12' => 'දෙසැම්බර්',
+    ];
+    $months = [];
+    $cursor = strtotime(substr($from, 0, 7) . '-01');
+    $end = strtotime(substr($until, 0, 7) . '-01');
+    while ($cursor !== false && $end !== false && $cursor <= $end) {
+        $ym = date('Y-m', $cursor);
+        $m = substr($ym, 5, 2);
+        $y = substr($ym, 0, 4);
+        $months[] = ($monthNames[$m] ?? $m) . ' ' . $y;
+        $cursor = strtotime('+1 month', $cursor);
+    }
+    json_out([
+        'ok' => true,
+        'year' => $year,
+        'from' => $from,
+        'until' => $until,
+        'title' => str_replace('-', '.', $from) . ' සිට ' . str_replace('-', '.', $until) . ' වන තෙක් නිම කිරීමට අපේක්ෂිත පුහුණු',
+        'categories' => $categories,
+        'officers' => $packed,
+        'totals' => $totals,
+        'countTotal' => $countTotal,
+        'estimateTotal' => advance_box($estimateTotal),
+        'spentTotal' => advance_box($spentTotal),
+        'remaining' => advance_box($estimateTotal - $spentTotal),
+        'monthLabel' => implode(', ', $months),
+        'spentLabel' => str_replace('-', '.', $until) . ' ට වියදම (නිමකළ හා අත්තිකාරම් ලේඛනයේ සටහන් කර ඇති)',
+    ]);
+}
+
 function action_attended(): void
 {
     $user = require_user();
@@ -5650,7 +7492,7 @@ function pace_categories(): array
         ['id' => 'language', 'label' => 'භාෂා පුහුණු'],
         ['id' => 'drug', 'label' => 'මත්ද්‍රව්‍ය නිවාරණ හා උපදේශන'],
         ['id' => 'external', 'label' => 'බාහිර පුහුණු'],
-        ['id' => 'meeting', 'label' => 'රැස්වීම්'],
+        ['id' => 'meeting', 'label' => TYPE_MEETING],
         ['id' => 'other', 'label' => 'වෙනත්'],
     ];
 }
@@ -5658,7 +7500,7 @@ function pace_categories(): array
 function pace_category_id(string $name, string $type, string $office): string
 {
     $blob = $name . ' ' . $type;
-    if (str_contains($blob, 'රැස්වීම')) {
+    if (plan_is_meeting_type($type) || str_contains($blob, 'රැස්වීම')) {
         return 'meeting';
     }
     $id = progress_category($name, $type, $office);
@@ -5842,6 +7684,7 @@ function ahead_progress_bundle(string $year, string $kind): array
     }
     $plans = rows(
         'SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_location, atp_noofparticipants, atp_bdjet,
+                atp_supportstaff1, atp_coordname,
                 atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_requestDate
          FROM cp_atp WHERE TRIM(atp_trname) <> \'\''
     );
@@ -5859,10 +7702,15 @@ function ahead_progress_bundle(string $year, string $kind): array
     }
     $came = advance_attended_map();
     $saved = [];
-    foreach (rows('SELECT as_atp, as_spent, as_people, as_money FROM cp_aheadsave WHERE as_year = ? AND as_kind = ?', 'ss', [$year, $kind]) as $row) {
+    $hidden = [];
+    foreach (rows('SELECT as_atp, as_spent, as_people, as_money, as_omit FROM cp_aheadsave WHERE as_year = ? AND as_kind = ?', 'ss', [$year, $kind]) as $row) {
         $saved[(int) $row['as_atp']] = $row;
+        if ((int) ($row['as_omit'] ?? 0) === 1) {
+            $hidden[(int) $row['as_atp']] = true;
+        }
     }
     $out = [];
+    $omitted = [];
     foreach ($plans as $plan) {
         $name = split_plain((string) ($plan['atp_trname'] ?? ''));
         if ($name === '') {
@@ -5879,14 +7727,23 @@ function ahead_progress_bundle(string $year, string $kind): array
             continue;
         }
         $id = (int) $plan['atp_id'];
+        if (!empty($hidden[$id])) {
+            $omitted[] = ['id' => $id, 'name' => $name];
+            continue;
+        }
         $edit = $saved[$id] ?? [];
         $cameCount = (int) ($came[$id] ?? 0);
         $planned = (int) advance_number((string) $plan['atp_noofparticipants']);
+        $coordName = trim((string) ($plan['atp_coordname'] ?? ''));
+        if ($coordName === '') {
+            $coordName = staff_name_for((string) ($plan['atp_supportstaff1'] ?? ''));
+        }
         $out[] = [
             'id' => $id,
             'name' => $name,
             'days' => implode(', ', $dates),
             'place' => split_plain((string) ($plan['atp_location'] ?? '')),
+            'coord' => $coordName,
             'money' => ahead_kept($edit, 'as_money', advance_box(advance_number((string) $plan['atp_bdjet']))),
             'spent' => ahead_kept($edit, 'as_spent', advance_box((float) ($spentSaved[$id] ?? 0))),
             'people' => ahead_kept($edit, 'as_people', (string) ($cameCount > 0 ? $cameCount : $planned)),
@@ -5911,7 +7768,7 @@ function ahead_progress_bundle(string $year, string $kind): array
     if (isset($allocKey[$kind])) {
         $allocation = (string) (provision_row($year)[$allocKey[$kind]] ?? '');
     }
-    return ['year' => $year, 'allocation' => $allocation, 'rows' => $out];
+    return ['year' => $year, 'allocation' => $allocation, 'rows' => $out, 'omitted' => $omitted];
 }
 
 function office_progress(string $year): array
@@ -6004,9 +7861,21 @@ function office_progress(string $year): array
         ];
     }
     $outside = rows('SELECT po_amount, po_spent, po_note FROM cp_provision_out WHERE po_year = ? LIMIT 1', 's', [$year]);
+    $spentSum = 0.0;
+    foreach ($rows as $row) {
+        $spentSum += $row['spent'];
+    }
+    $spentSum += advance_number((string) ($outside[0]['po_spent'] ?? ''));
+    $total = advance_number((string) ($provision['pv_total'] ?? ''));
+    if ($total <= 0) {
+        $total = array_sum($alloc);
+    }
     return [
         'year' => $year,
         'rows' => $out,
+        'totalProvision' => advance_money($total),
+        'spentTotal' => advance_money($spentSum),
+        'leftProvision' => advance_money($total - $spentSum),
         'outside' => [
             'amount' => (string) ($outside[0]['po_amount'] ?? ''),
             'spent' => (string) ($outside[0]['po_spent'] ?? ''),
@@ -6069,8 +7938,9 @@ function ahead_progress_save(string $kind): void
     $data = body();
     $year = provision_year((string) ($data['year'] ?? ''));
     $db = db();
-    $stmt = $db->prepare('INSERT INTO cp_aheadsave (as_year, as_kind, as_atp, as_spent, as_people, as_money) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE as_spent = VALUES(as_spent), as_people = VALUES(as_people), as_money = VALUES(as_money)');
-    if (!$stmt) {
+    $stmt = $db->prepare('INSERT INTO cp_aheadsave (as_year, as_kind, as_atp, as_spent, as_people, as_money, as_omit) VALUES (?, ?, ?, ?, ?, ?, 0) ON DUPLICATE KEY UPDATE as_spent = VALUES(as_spent), as_people = VALUES(as_people), as_money = VALUES(as_money), as_omit = 0');
+    $omitStmt = $db->prepare('INSERT INTO cp_aheadsave (as_year, as_kind, as_atp, as_spent, as_people, as_money, as_omit) VALUES (?, ?, ?, \'\', \'\', \'\', 1) ON DUPLICATE KEY UPDATE as_omit = 1');
+    if (!$stmt || !$omitStmt) {
         json_out(['ok' => false, 'error' => 'Could not save the progress report.'], 500);
     }
     $keep = [];
@@ -6095,16 +7965,42 @@ function ahead_progress_save(string $kind): void
             ]);
         }
     }
-    if ($keep === []) {
+    $idsOf = static function (mixed $list): array {
+        $out = [];
+        if (!is_array($list)) {
+            return $out;
+        }
+        foreach ($list as $item) {
+            $id = (int) $item;
+            if ($id > 0) {
+                $out[$id] = $id;
+            }
+        }
+        return array_values($out);
+    };
+    $omit = array_values(array_diff($idsOf($data['omit'] ?? []), $keep));
+    foreach ($omit as $id) {
+        bind_and_run($omitStmt, 'ssi', [$year, $kind, $id]);
+    }
+    $restore = array_values(array_diff($idsOf($data['restore'] ?? []), $keep, $omit));
+    if ($restore !== []) {
+        $marks = implode(',', array_fill(0, count($restore), '?'));
+        $back = $db->prepare("UPDATE cp_aheadsave SET as_omit = 0 WHERE as_year = ? AND as_kind = ? AND as_atp IN ($marks)");
+        if ($back) {
+            bind_and_run($back, 'ss' . str_repeat('i', count($restore)), array_merge([$year, $kind], $restore));
+        }
+    }
+    $protected = array_values(array_unique(array_merge($keep, $omit, $restore)));
+    if ($protected === []) {
         $drop = $db->prepare('DELETE FROM cp_aheadsave WHERE as_year = ? AND as_kind = ?');
         if ($drop) {
             bind_and_run($drop, 'ss', [$year, $kind]);
         }
     } else {
-        $marks = implode(',', array_fill(0, count($keep), '?'));
+        $marks = implode(',', array_fill(0, count($protected), '?'));
         $drop = $db->prepare("DELETE FROM cp_aheadsave WHERE as_year = ? AND as_kind = ? AND as_atp NOT IN ($marks)");
         if ($drop) {
-            bind_and_run($drop, 'ss' . str_repeat('i', count($keep)), array_merge([$year, $kind], $keep));
+            bind_and_run($drop, 'ss' . str_repeat('i', count($protected)), array_merge([$year, $kind], $protected));
         }
     }
     json_out(['ok' => true]);
@@ -6610,17 +8506,42 @@ function provision_send_plans(string $year): array
     $end = $year . '-12-31';
     [$yearSql, $yearTypes] = atp_year_clause();
     $rows = rows(
-        "SELECT atp_id, atp_fileno, atp_trname, atp_trtype FROM cp_atp WHERE TRIM(atp_trname) <> '' AND $yearSql ORDER BY atp_fileno, atp_id",
+        "SELECT atp_id, atp_panelno, atp_fileno, atp_trname, atp_trtype
+         FROM cp_atp
+         WHERE TRIM(atp_trname) <> '' AND $yearSql
+         ORDER BY atp_panelno, atp_trname, atp_id",
         $yearTypes,
         atp_year_params($start, $end)
     );
     $out = [];
     foreach ($rows as $row) {
+        $rawPanel = trim((string) ($row['atp_panelno'] ?? ''));
+        $planNo = $rawPanel !== '' ? normalize_panel_number($rawPanel) : '';
+        if ($planNo === '') {
+            $planNo = $rawPanel;
+        }
+        // Short code for the dropdown so Windows select does not clip the programme name.
+        $short = $planNo;
+        foreach (['NWP/MDTU/2/', 'NWP/MDTU/'] as $prefix) {
+            if (str_starts_with($short, $prefix)) {
+                $short = substr($short, strlen($prefix));
+                break;
+            }
+        }
+        $short = ltrim($short, '/');
+        if ($short === '') {
+            $short = $rawPanel !== '' ? $rawPanel : '—';
+        }
+        $name = html_entity_decode(trim((string) ($row['atp_trname'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $name = preg_replace('/\s+/u', ' ', $name) ?? $name;
         $out[] = [
             'id' => (string) $row['atp_id'],
-            'planNo' => (string) $row['atp_fileno'],
-            'name' => (string) $row['atp_trname'],
+            'planNo' => $planNo !== '' ? $planNo : $rawPanel,
+            'shortNo' => $short,
+            'fileNo' => trim((string) ($row['atp_fileno'] ?? '')),
+            'name' => $name,
             'kind' => provision_send_kind_from_type((string) $row['atp_trtype']),
+            'label' => $short . ' · ' . $name,
         ];
     }
     return $out;
@@ -7177,11 +9098,15 @@ function action_advsum(): void
     $today = date('Y-m-d');
     $items = [];
     foreach ($plans as $plan) {
+        $start = programme_first_day($plan);
         $end = programme_last_day($plan);
-        if (!preg_match('/^(19|20)\d{2}-\d{2}-\d{2}$/', $end) || $end > $today) {
+        if (!preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $end)) {
             continue;
         }
-        $until = date('Y-m-d', strtotime($end . ' +3 months'));
+        if (preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $start) && $start > $today) {
+            continue;
+        }
+        $until = date('Y-m-d', strtotime($end . ' +1 month'));
         if ($today > $until) {
             continue;
         }
@@ -7193,8 +9118,10 @@ function action_advsum(): void
             'name' => (string) $plan['atp_trname'],
             'file' => (string) ($plan['atp_fileno'] ?? ''),
             'dates' => implode(', ', $dates),
+            'start' => $start,
             'end' => $end,
             'until' => $until,
+            'active' => $end >= $today,
             'saved' => !empty($savedIds[$planId]),
         ];
     }
@@ -7587,6 +9514,23 @@ function plan_support_people(array $plan, array &$names): array
     return $people;
 }
 
+function office_who_label(array $people): string
+{
+    $labels = [];
+    foreach ($people as $person) {
+        if (!is_array($person)) {
+            continue;
+        }
+        $name = trim((string) ($person['name'] ?? ''));
+        $nid = trim((string) ($person['nid'] ?? ''));
+        $label = $name !== '' ? $name : $nid;
+        if ($label !== '' && !in_array($label, $labels, true)) {
+            $labels[] = $label;
+        }
+    }
+    return implode(' · ', $labels);
+}
+
 function estimate_lecture_names(array $sheet, array $plan): string
 {
     $names = [];
@@ -7676,13 +9620,18 @@ function allowance_item(int $id): ?array
     }
     foreach ($officePeople as $index => $person) {
         $nid = trim((string) ($person['nid'] ?? ''));
-        if ($nid === '') {
-            continue;
+        $name = trim((string) ($person['name'] ?? ''));
+        if ($nid !== '') {
+            $foundName = advance_coordinator($nid, $names);
+            if ($foundName !== '') {
+                $name = $foundName;
+            }
         }
-        $foundName = advance_coordinator($nid, $names);
-        if ($foundName !== '' && $foundName !== $nid) {
-            $officePeople[$index]['name'] = $foundName;
+        if ($name === '' && $nid !== '') {
+            $name = $nid;
         }
+        $officePeople[$index]['nid'] = $nid;
+        $officePeople[$index]['name'] = $name;
     }
     $foodSaved = rows('SELECT fb_food FROM cp_foodbills WHERE fb_atpid = ? LIMIT 1', 'i', [$id]);
     $spentAmount = advance_number((string) $base['spent']);
@@ -7712,14 +9661,7 @@ function allowance_item(int $id): ?array
         'account' => advance_box($account),
         'accountWho' => $accountWho,
         'office' => advance_box($office),
-        'officeWho' => (static function () use ($plan, &$names): string {
-            $nid = trim((string) ($plan['atp_supportstaff2'] ?? ''));
-            if ($nid === '') {
-                return '';
-            }
-            $name = advance_coordinator($nid, $names);
-            return $name === $nid ? '' : $name;
-        })(),
+        'officeWho' => office_who_label($officePeople),
         'officeUnit' => advance_box($officeUnit),
         'officePeople' => $officePeople,
         'officeChoices' => office_assistant_choices(array_merge($officePeople, $support)),
@@ -8056,6 +9998,36 @@ function action_settle(): void
         $coordWho = $savedPay && trim((string) ($pay['al_coordwho'] ?? '')) !== '' ? trim((string) $pay['al_coordwho']) : (string) $signatory;
         $superviseWho = $savedPay && trim((string) ($pay['al_supervisewho'] ?? '')) !== '' ? trim((string) $pay['al_supervisewho']) : allowance_named((string) ($plan['atp_supervisor'] ?? ''), $names);
         $liaiseWho = $savedPay && trim((string) ($pay['al_liaisewho'] ?? '')) !== '' ? trim((string) $pay['al_liaisewho']) : $coordinator;
+        foreach ($officePeople as $index => $officer) {
+            $officerNid = trim((string) ($officer['nid'] ?? ''));
+            $officerName = trim((string) ($officer['name'] ?? ''));
+            if ($officerNid !== '') {
+                $looked = advance_coordinator($officerNid, $names);
+                if ($looked !== '') {
+                    $officerName = $looked;
+                }
+            }
+            if ($officerName === '' && $officerNid !== '') {
+                $officerName = $officerNid;
+            }
+            $officePeople[$index]['nid'] = $officerNid;
+            $officePeople[$index]['name'] = $officerName;
+        }
+        $officeCount = count($officePeople);
+        $officeShare = $officeCount > 0 ? $office / $officeCount : 0.0;
+        foreach ($officePeople as $officer) {
+            $officerNid = trim((string) ($officer['nid'] ?? ''));
+            $officerName = trim((string) ($officer['name'] ?? ''));
+            if ($officerName === '' && $officerNid === '') {
+                continue;
+            }
+            if ($officeShare <= 0) {
+                continue;
+            }
+            $key = $officerNid !== '' ? $officerNid : $officerName;
+            settle_group_add($officeGroups, $key, $officerName !== '' ? $officerName : $officerNid, $officerNid, (string) $pack['name'], $officeShare);
+        }
+        $officeWho = office_who_label($officePeople);
         $lineTotal = $resource + $coord + $supervise + $liaise + $account + $office;
         $payRows[] = [
             'id' => $id,
@@ -8067,6 +10039,7 @@ function action_settle(): void
             'liaise' => advance_money($liaise),
             'account' => advance_money($account),
             'office' => advance_money($office),
+            'officeWho' => $officeWho,
             'total' => advance_money($lineTotal),
             'coordWho' => $coordWho,
             'superviseWho' => $superviseWho,
@@ -8104,26 +10077,6 @@ function action_settle(): void
         }
         if ($liaise > 0 && $liaiseWho !== '') {
             settle_group_add($liaiseGroups, $liaiseWho, $liaiseWho, '', (string) $pack['name'], $liaise);
-        }
-        $officeCount = count($officePeople);
-        $officeShare = $officeCount > 0 ? $office / $officeCount : 0.0;
-        foreach ($officePeople as $officer) {
-            $officerNid = trim((string) ($officer['nid'] ?? ''));
-            $officerName = trim((string) ($officer['name'] ?? ''));
-            if ($officerNid !== '') {
-                $looked = advance_coordinator($officerNid, $names);
-                if ($looked !== '' && $looked !== $officerNid) {
-                    $officerName = $looked;
-                }
-            }
-            if ($officerName === '' && $officerNid === '') {
-                continue;
-            }
-            if ($officeShare <= 0) {
-                continue;
-            }
-            $key = $officerNid !== '' ? $officerNid : $officerName;
-            settle_group_add($officeGroups, $key, $officerName, $officerNid, (string) $pack['name'], $officeShare);
         }
         if ($person && $person['name'] !== '') {
             $mine = 0.0;
@@ -8368,6 +10321,394 @@ function action_signsheet(): void
     ]);
 }
 
+function staff_by_identity(string $value): array
+{
+    $value = trim($value);
+    if ($value === '') {
+        return [];
+    }
+    $found = rows('SELECT * FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$value]);
+    if ($found) {
+        return $found[0];
+    }
+    $compact = strtoupper(preg_replace('/\s+/', '', $value) ?? '');
+    if ($compact !== '' && $compact !== $value) {
+        $found = rows('SELECT * FROM cp_staff WHERE REPLACE(UPPER(stf_Nid), " ", "") = ? LIMIT 1', 's', [$compact]);
+        if ($found) {
+            return $found[0];
+        }
+    }
+    $key = coord_nid_key($value);
+    if ($key === '') {
+        return [];
+    }
+    $stored = staff_directory()['nidText'][$key] ?? '';
+    if ($stored === '' || $stored === $value) {
+        return [];
+    }
+    $found = rows('SELECT * FROM cp_staff WHERE stf_Nid = ? LIMIT 1', 's', [$stored]);
+    return $found[0] ?? [];
+}
+
+function staff_name_for(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+    $dir = staff_directory();
+    if (isset($dir['exact'][$value])) {
+        return $dir['exact'][$value];
+    }
+    $compact = strtoupper(preg_replace('/\s+/', '', $value) ?? '');
+    if ($compact !== '' && isset($dir['exact'][$compact])) {
+        return $dir['exact'][$compact];
+    }
+    $key = coord_nid_key($value);
+    if ($key !== '' && isset($dir['byKey'][$key])) {
+        return $dir['byKey'][$key];
+    }
+    if ($key === '') {
+        $found = $dir['byName'][coord_plain_name($value)] ?? null;
+        if (is_array($found) && ($found['name'] ?? '') !== '') {
+            return (string) $found['name'];
+        }
+    }
+    return '';
+}
+
+function coord_percent(int $held, int $planned): string
+{
+    if ($planned < 1) {
+        return '';
+    }
+    return (string) (int) round($held * 100 / $planned);
+}
+
+function coord_share(float $done, float $plan): string
+{
+    if ($plan <= 0) {
+        return '';
+    }
+    return (string) (int) round($done * 100 / $plan);
+}
+
+function coord_pack(array $items): array
+{
+    $held = 0;
+    $planMoney = 0.0;
+    $spent = 0.0;
+    $planPeople = 0;
+    $came = 0;
+    foreach ($items as $item) {
+        $held += (int) ($item['held'] ?? 0);
+        $planMoney += advance_number((string) ($item['planMoney'] ?? '0'));
+        $spent += advance_number((string) ($item['spentMoney'] ?? '0'));
+        $planPeople += (int) ($item['planPeople'] ?? 0);
+        $came += (int) ($item['camePeople'] ?? 0);
+    }
+    $count = count($items);
+    return [
+        'planCount' => $count,
+        'heldCount' => $held,
+        'programmePercent' => coord_percent($held, $count),
+        'planMoney' => advance_box($planMoney),
+        'spentMoney' => advance_box($spent),
+        'moneyPercent' => coord_share($spent, $planMoney),
+        'planPeople' => $planPeople,
+        'camePeople' => $came,
+        'peoplePercent' => coord_share((float) $came, (float) $planPeople),
+    ];
+}
+
+function coord_plain_name(string $name): string
+{
+    $name = preg_replace('/\s+/u', ' ', trim($name)) ?? '';
+    return mb_strtolower($name);
+}
+
+function coord_nid_key(string $value): string
+{
+    $value = strtoupper(preg_replace('/\s+/', '', trim($value)) ?? '');
+    if (preg_match('/^(\d{9})[VX]$/', $value, $found)) {
+        return $found[1];
+    }
+    if (preg_match('/^\d{9}$/', $value) || preg_match('/^\d{12}$/', $value)) {
+        return $value;
+    }
+    return '';
+}
+
+function staff_directory(): array
+{
+    static $map = null;
+    if ($map !== null) {
+        return $map;
+    }
+    $exact = [];
+    $byKey = [];
+    $nidText = [];
+    $byName = [];
+    foreach (rows('SELECT stf_Nid, stf_Name FROM cp_staff') as $staff) {
+        $raw = trim((string) ($staff['stf_Nid'] ?? ''));
+        $name = trim((string) ($staff['stf_Name'] ?? ''));
+        if ($name === '' || coord_nid_key($name) !== '') {
+            continue;
+        }
+        if ($raw !== '') {
+            $exact[$raw] = $name;
+            $compact = strtoupper(preg_replace('/\s+/', '', $raw) ?? '');
+            if ($compact !== '') {
+                $exact[$compact] = $name;
+            }
+        }
+        $key = coord_nid_key($raw);
+        if ($key !== '') {
+            $byKey[$key] = $name;
+            $nidText[$key] = $raw;
+        }
+        $byName[coord_plain_name($name)] = ['name' => $name, 'nid' => $key, 'text' => $raw];
+    }
+    $map = ['exact' => $exact, 'byKey' => $byKey, 'nidText' => $nidText, 'byName' => $byName];
+    return $map;
+}
+
+function coord_officer(string $rawId, string $typedName): array
+{
+    $dir = staff_directory();
+    $rawId = trim($rawId);
+    $typedName = trim($typedName);
+    $nid = coord_nid_key($rawId);
+    if ($nid === '') {
+        $nid = coord_nid_key($typedName);
+    }
+    $name = $rawId !== '' ? staff_name_for($rawId) : '';
+    if ($name === '' && $nid !== '') {
+        $name = $dir['byKey'][$nid] ?? '';
+    }
+    if ($nid === '' && $rawId !== '') {
+        $found = $dir['byName'][coord_plain_name($rawId)] ?? null;
+        if (is_array($found)) {
+            if ($name === '') {
+                $name = (string) ($found['name'] ?? '');
+            }
+            $nid = (string) ($found['nid'] ?? '');
+        }
+    }
+    if ($nid === '' && $typedName !== '' && coord_nid_key($typedName) === '') {
+        $found = $dir['byName'][coord_plain_name($typedName)] ?? null;
+        if (is_array($found)) {
+            $name = (string) ($found['name'] ?? '');
+            $nid = (string) ($found['nid'] ?? '');
+        }
+    }
+    if ($typedName !== '' && coord_nid_key($typedName) === '') {
+        $name = $typedName;
+    }
+    if ($name === '' && $rawId !== '' && coord_nid_key($rawId) === '' && preg_match('/\p{L}/u', $rawId) && mb_strlen($rawId) >= 3) {
+        $name = $rawId;
+    }
+    if ($name === '' || coord_nid_key($name) !== '') {
+        $name = 'සම්බන්ධීකරණය නොමැත';
+    }
+    $shown = '';
+    if ($nid !== '') {
+        $shown = $dir['nidText'][$nid] ?? ($rawId !== '' && coord_nid_key($rawId) !== '' ? $rawId : $nid);
+    }
+    return ['name' => $name, 'nid' => $nid, 'shown' => $shown];
+}
+
+function action_coord_progress(): void
+{
+    $user = require_user();
+    if (!is_super($user)) {
+        json_out(['ok' => false, 'error' => 'මෙම වාර්තාව විවෘත කළ නොහැක.'], 403);
+    }
+    $year = provision_year((string) ($_GET['year'] ?? date('Y')));
+    $spentSaved = [];
+    $heldSaved = [];
+    foreach (rows('SELECT ct_atpid, ct_actualexpenditure FROM cp_completedtrainings') as $row) {
+        $id = (int) $row['ct_atpid'];
+        $heldSaved[$id] = true;
+        $spentSaved[$id] = advance_number((string) $row['ct_actualexpenditure']);
+    }
+    foreach (rows('SELECT al_atpid, al_spent, al_resource, al_coord, al_supervise, al_liaise, al_account, al_office FROM cp_allowances') as $row) {
+        $id = (int) $row['al_atpid'];
+        if (($spentSaved[$id] ?? 0) > 0) {
+            continue;
+        }
+        $spentSaved[$id] = advance_number(total_step2($row));
+    }
+    $came = advance_attended_map();
+    $plans = rows(
+        'SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_noofparticipants, atp_bdjet,
+                atp_supportstaff1, atp_coordname,
+                atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_requestDate
+         FROM cp_atp WHERE TRIM(atp_trname) <> \'\''
+    );
+    $groups = [];
+    foreach ($plans as $plan) {
+        $name = split_plain((string) ($plan['atp_trname'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $dates = programme_days($plan, 'atp_day');
+        sort($dates);
+        $day = $dates[0] ?? '';
+        $programmeYear = $day !== '' ? substr($day, 0, 4) : substr((string) ($plan['atp_requestDate'] ?? ''), 0, 4);
+        if ($programmeYear !== $year) {
+            continue;
+        }
+        $rawId = trim((string) ($plan['atp_supportstaff1'] ?? ''));
+        $typedName = trim((string) ($plan['atp_coordname'] ?? ''));
+        $officer = coord_officer($rawId, $typedName);
+        $nid = (string) $officer['nid'];
+        $officerName = (string) $officer['name'];
+        $key = $officerName === 'සම්බන්ධීකරණය නොමැත'
+            ? 'none'
+            : ($nid !== '' ? 'n:' . $nid : 'a:' . coord_plain_name($officerName));
+        $kind = progress_category($name, (string) ($plan['atp_trtype'] ?? ''), (string) ($plan['atp_reqoffice'] ?? ''));
+        if (!in_array($kind, ['general', 'department', 'special'], true)) {
+            $kind = 'other';
+        }
+        $id = (int) $plan['atp_id'];
+        $planMoney = advance_number((string) ($plan['atp_bdjet'] ?? ''));
+        $spent = (float) ($spentSaved[$id] ?? 0);
+        $planPeople = (int) round(split_day_count((string) ($plan['atp_noofparticipants'] ?? '')));
+        $camePeople = (int) ($came[$id] ?? 0);
+        $held = !empty($heldSaved[$id]) || $camePeople > 0 ? 1 : 0;
+        $shownNid = $key === 'none' ? '' : (string) $officer['shown'];
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'name' => $officerName,
+                'nid' => $shownNid,
+                'general' => [],
+                'department' => [],
+                'special' => [],
+                'other' => [],
+            ];
+        } else {
+            if ($officerName !== '' && $officerName !== 'සම්බන්ධීකරණය නොමැත' && ($groups[$key]['name'] === '' || $groups[$key]['name'] === 'සම්බන්ධීකරණය නොමැත' || $groups[$key]['name'] === $officerName)) {
+                $groups[$key]['name'] = $officerName;
+            }
+            if ($groups[$key]['nid'] === '' && $shownNid !== '') {
+                $groups[$key]['nid'] = $shownNid;
+            }
+        }
+        $groups[$key][$kind][] = [
+            'name' => $name,
+            'day' => $day,
+            'kind' => $kind,
+            'held' => $held,
+            'programmePercent' => $held ? '100' : '0',
+            'planMoney' => advance_box($planMoney),
+            'spentMoney' => advance_box($spent),
+            'moneyPercent' => coord_share($spent, $planMoney),
+            'planPeople' => $planPeople,
+            'camePeople' => $camePeople,
+            'peoplePercent' => coord_share((float) $camePeople, (float) $planPeople),
+        ];
+    }
+    foreach ($groups as $key => $group) {
+        if (!str_starts_with($key, 'a:')) {
+            continue;
+        }
+        $fromName = coord_nid_key((string) $group['name']);
+        $match = $fromName !== '' ? 'n:' . $fromName : '';
+        if ($match === '' || !isset($groups[$match])) {
+            continue;
+        }
+        foreach (['general', 'department', 'special', 'other'] as $kind) {
+            $groups[$match][$kind] = array_merge($groups[$match][$kind], $group[$kind]);
+        }
+        unset($groups[$key]);
+    }
+    $named = [];
+    foreach ($groups as $key => $group) {
+        if (!str_starts_with($key, 'n:')) {
+            continue;
+        }
+        $plain = coord_plain_name((string) $group['name']);
+        if ($plain === '' || $plain === 'සම්බන්ධීකරණය නොමැත') {
+            continue;
+        }
+        $named[$plain][] = $key;
+    }
+    foreach ($groups as $key => $group) {
+        if (!str_starts_with($key, 'a:')) {
+            continue;
+        }
+        $matches = $named[coord_plain_name((string) $group['name'])] ?? [];
+        if (count($matches) !== 1) {
+            continue;
+        }
+        $match = $matches[0];
+        foreach (['general', 'department', 'special', 'other'] as $kind) {
+            $groups[$match][$kind] = array_merge($groups[$match][$kind], $group[$kind]);
+        }
+        unset($groups[$key]);
+    }
+    $rows = [];
+    foreach ($groups as $key => $group) {
+        foreach (['general', 'department', 'special', 'other'] as $kind) {
+            usort($group[$kind], static function (array $a, array $b): int {
+                return strcmp((string) $a['day'], (string) $b['day']) ?: strcmp((string) $a['name'], (string) $b['name']);
+            });
+        }
+        $count = count($group['general']) + count($group['department']) + count($group['special']) + count($group['other']);
+        if ($count < 1) {
+            continue;
+        }
+        $rows[] = [
+            'key' => $key,
+            'name' => $group['name'],
+            'nid' => $group['nid'],
+            'generalCount' => count($group['general']),
+            'departmentCount' => count($group['department']),
+            'specialCount' => count($group['special']),
+            'general' => $group['general'],
+            'department' => $group['department'],
+            'special' => $group['special'],
+            'other' => $group['other'],
+            'generalTotal' => coord_pack($group['general']),
+            'departmentTotal' => coord_pack($group['department']),
+            'specialTotal' => coord_pack($group['special']),
+            'otherTotal' => coord_pack($group['other']),
+        ];
+    }
+    usort($rows, static function (array $a, array $b): int {
+        return strcmp((string) $a['name'], (string) $b['name']);
+    });
+    json_out([
+        'ok' => true,
+        'year' => $year,
+        'officers' => $rows,
+    ]);
+}
+
+function panel_staff_name(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+    $id = ctype_digit($value) ? $value : '0';
+    $staff = rows('SELECT stf_Name FROM cp_staff WHERE stf_Nid = ? OR stf_Name = ? OR CAST(stf_ID AS CHAR) = ? LIMIT 1', 'sss', [$value, $value, $id]);
+    $name = trim((string) ($staff[0]['stf_Name'] ?? ''));
+    return $name !== '' ? $name : $value;
+}
+
+function panel_login_name(array $user): string
+{
+    $username = trim((string) ($user['username'] ?? ''));
+    if ($username === '') {
+        return '';
+    }
+    $staff = rows('SELECT stf_Name FROM cp_staff WHERE stf_Nid = ? OR stf_Name = ? LIMIT 1', 'ss', [$username, $username]);
+    $name = trim((string) ($staff[0]['stf_Name'] ?? ''));
+    return $name !== '' ? $name : $username;
+}
+
 function action_panelsign(): void
 {
     $user = require_user();
@@ -8380,45 +10721,6 @@ function action_panelsign(): void
         json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහන හමු නොවුණි.'], 404);
     }
     $plan = $planRows[0];
-    $end = programme_last_day($plan);
-    [$roundSql, $roundTypes, $roundParams] = application_round_clause('a', $plan);
-    if ($end !== '' && $end < date('Y-m-d')) {
-        $roundSql .= ' AND 1=0';
-    }
-    $people = rows(
-        "SELECT s.stf_Name, s.stf_desig, t.tratt_name, t.tratt_desig
-         FROM cp_trainingapplications a
-         LEFT JOIN cp_staff s ON s.stf_Nid = a.tapp_officerNid
-         LEFT JOIN cp_trainingattendance t ON t.tratt_atpid = a.tapp_atpid AND t.tratt_empnid = a.tapp_officerNid
-         WHERE a.tapp_atpid = ? AND a.tapp_isselected IN (?, 'Yes', 'yes')" . $roundSql . "
-         ORDER BY s.stf_Name, t.tratt_name",
-        'ss' . $roundTypes,
-        array_merge([$id, YES_SI], $roundParams)
-    );
-    $staff = [];
-    foreach ($people as $person) {
-        $name = trim((string) ($person['stf_Name'] ?: $person['tratt_name']));
-        $post = trim((string) ($person['stf_desig'] ?: $person['tratt_desig']));
-        if ($name === '' && $post === '') {
-            continue;
-        }
-        $staff[] = ['name' => $name, 'post' => $post];
-    }
-    $signatory = signatory_profile();
-    $panel = [[
-        'name' => trim($signatory['name'] . ' ' . $signatory['title']),
-        'post' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)',
-        'role' => 'සමායෝජන සම්බන්ධීකරණය',
-    ]];
-    $supervisor = module_person((string) ($plan['atp_supervisor'] ?? ''));
-    if ($supervisor['name'] !== '') {
-        $panel[] = ['name' => $supervisor['name'], 'post' => $supervisor['post'], 'role' => 'සම්පත්දායක අධීක්ෂණය'];
-    }
-    $liaison = module_person((string) ($plan['atp_supportstaff1'] ?? ''));
-    if ($liaison['name'] !== '') {
-        $panel[] = ['name' => $liaison['name'], 'post' => $liaison['post'], 'role' => 'සම්බන්ධීකරණය'];
-    }
-    $panel[] = ['name' => 'අචිනි අප්සරා මෙනවිය', 'post' => '', 'role' => 'ගිණුම් අංශය'];
     $lecturers = [];
     for ($i = 1; $i <= 10; $i++) {
         $name = trim((string) ($plan['atp_resourcep' . $i] ?? ''));
@@ -8432,24 +10734,70 @@ function action_panelsign(): void
             $lecturers[] = $extra;
         }
     }
+    $resources = [];
     foreach (module_lecturers($lecturers) as $lecturer) {
-        if ($lecturer['name'] === '') {
+        if ($lecturer['name'] === '' && $lecturer['post'] === '') {
             continue;
         }
-        $panel[] = ['name' => $lecturer['name'], 'post' => $lecturer['post'], 'role' => 'දේශකයා'];
+        $resources[] = ['name' => $lecturer['name'], 'post' => $lecturer['post']];
     }
+    $signatory = signatory_profile();
+    $supervisorName = panel_staff_name((string) ($plan['atp_supervisor'] ?? ''));
+    $helpers = [];
     for ($i = 2; $i <= 6; $i++) {
         $helper = module_person((string) ($plan['atp_supportstaff' . $i] ?? ''));
         if ($helper['name'] !== '') {
-            $panel[] = ['name' => $helper['name'], 'post' => $helper['post'], 'role' => 'සහාය'];
+            $helpers[] = $helper;
         }
+    }
+    foreach (preg_split('/\R/', (string) ($plan['atp_moresupport'] ?? '')) as $extra) {
+        $extra = trim($extra);
+        if ($extra === '') {
+            continue;
+        }
+        $helper = module_person($extra);
+        if ($helper['name'] !== '') {
+            $helpers[] = $helper;
+        }
+    }
+    if (!$helpers) {
+        $helpers[] = ['name' => '', 'post' => 'පුහුණු වැඩමුළු සහායක'];
+    }
+    $panel = [
+        [
+            'name' => trim($signatory['name'] . ' ' . $signatory['title']),
+            'post' => 'නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)',
+            'role' => 'සමායෝජක',
+        ],
+        [
+            'name' => $supervisorName,
+            'post' => 'සහකාර ප්‍රධාන ලේකම් (පුහුණු)',
+            'role' => 'අධීක්ෂණ',
+        ],
+        [
+            'name' => panel_login_name($user),
+            'post' => 'සංවර්ධන නිලධාරී',
+            'role' => 'සම්බන්ධීකරණ',
+        ],
+        [
+            'name' => 'අචිනි අප්සරා මෙනවිය',
+            'post' => 'ගිණුම් සහකාර',
+            'role' => 'ගිණුම් අංශය සඳහා',
+        ],
+    ];
+    foreach ($helpers as $helper) {
+        $panel[] = [
+            'name' => $helper['name'],
+            'post' => trim((string) ($helper['post'] ?? '')) !== '' ? $helper['post'] : 'පුහුණු වැඩමුළු සහායක',
+            'role' => 'KKS',
+        ];
     }
     json_out([
         'ok' => true,
         'name' => split_plain((string) ($plan['atp_trname'] ?? '')),
         'place' => trim((string) ($plan['atp_location'] ?? '')),
         'days' => programme_days($plan, 'atp_day'),
-        'staff' => $staff,
+        'resources' => $resources,
         'panel' => $panel,
     ]);
 }
@@ -8489,6 +10837,77 @@ function action_selected_programmes(): void
         }
     }
     json_out(['ok' => true, 'ids' => $open]);
+}
+
+function officer_year_trainings(string $nid, string $year): array
+{
+    $nid = trim($nid);
+    $year = preg_replace('/\D/', '', $year) ?? '';
+    if ($nid === '' || !preg_match('/^(19|2[0-2])\d{2}$/', $year)) {
+        return ['count' => 0, 'names' => []];
+    }
+    $map = officer_year_trainings_map([$nid], $year);
+    return $map[$nid] ?? ['count' => 0, 'names' => []];
+}
+
+function officer_year_trainings_map(array $nids, string $year): array
+{
+    $year = preg_replace('/\D/', '', $year) ?? '';
+    $clean = [];
+    foreach ($nids as $nid) {
+        $nid = trim((string) $nid);
+        if ($nid !== '') {
+            $clean[$nid] = true;
+        }
+    }
+    $nids = array_keys($clean);
+    $out = [];
+    foreach ($nids as $nid) {
+        $out[$nid] = ['count' => 0, 'names' => []];
+    }
+    if ($nids === [] || !preg_match('/^(19|2[0-2])\d{2}$/', $year)) {
+        return $out;
+    }
+    $marks = implode(',', array_fill(0, count($nids), '?'));
+    $types = str_repeat('s', count($nids)) . 's';
+    $params = $nids;
+    $params[] = $year;
+    $rows = rows(
+        "SELECT a.tratt_empnid AS nid,
+                a.tratt_atpid AS atp,
+                COALESCE(NULLIF(TRIM(a.tratt_atpname), ''), NULLIF(TRIM(p.atp_trname), ''), '') AS name
+         FROM cp_trainingattendance a
+         LEFT JOIN cp_atp p ON p.atp_id = a.tratt_atpid
+         WHERE a.tratt_empnid IN ($marks)
+           AND (a.tratt_isparti IS NULL OR TRIM(a.tratt_isparti) = '' OR a.tratt_isparti NOT IN ('නැත', 'No', 'no'))
+           AND (
+                CASE
+                    WHEN p.atp_day1 IS NOT NULL AND CAST(p.atp_day1 AS CHAR) NOT LIKE '0000%' AND CAST(p.atp_day1 AS CHAR) NOT LIKE '1111%' THEN LEFT(CAST(p.atp_day1 AS CHAR), 4)
+                    ELSE LEFT(CAST(a.tratt_startdate AS CHAR), 4)
+                END
+           ) = ?",
+        $types,
+        $params
+    );
+    $seen = [];
+    foreach ($rows as $row) {
+        $nid = (string) ($row['nid'] ?? '');
+        if ($nid === '' || !isset($out[$nid])) {
+            continue;
+        }
+        $name = trim((string) ($row['name'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $key = trim((string) ($row['atp'] ?? '')) . '|' . $name;
+        if (isset($seen[$nid][$key])) {
+            continue;
+        }
+        $seen[$nid][$key] = true;
+        $out[$nid]['names'][] = $name;
+        $out[$nid]['count'] = count($out[$nid]['names']);
+    }
+    return $out;
 }
 
 function action_applicants(): void
@@ -8539,11 +10958,40 @@ function action_applicants(): void
     foreach (rows('SELECT bl_nid FROM cp_blacklist WHERE bl_until >= ?', 's', [$today]) as $row) {
         $blocked[(string) $row['bl_nid']] = true;
     }
+    $year = '';
+    if ($plan) {
+        $start = programme_first_day($plan);
+        if ($start === '') {
+            $start = substr((string) ($plan['atp_day1'] ?? ''), 0, 10);
+        }
+        $year = substr($start, 0, 4);
+    }
+    if (!preg_match('/^(19|2[0-2])\d{2}$/', $year)) {
+        $year = date('Y');
+    }
+    $nids = [];
+    foreach ($items as $item) {
+        $nids[] = (string) ($item['tapp_officerNid'] ?? '');
+    }
+    $history = officer_year_trainings_map($nids, $year);
     foreach ($items as &$item) {
-        $item['blacklisted'] = isset($blocked[(string) $item['tapp_officerNid']]) ? 'Yes' : '';
+        $nid = (string) ($item['tapp_officerNid'] ?? '');
+        $item['blacklisted'] = isset($blocked[$nid]) ? 'Yes' : '';
+        $info = $history[$nid] ?? ['count' => 0, 'names' => []];
+        $item['yearTrainings'] = (int) ($info['count'] ?? 0);
+        $item['yearTrainingNames'] = array_values($info['names'] ?? []);
+        $item['year'] = $year;
     }
     unset($item);
-    json_out(['ok' => true, 'items' => $items]);
+    usort($items, static function (array $a, array $b): int {
+        $left = (int) ($a['yearTrainings'] ?? 0);
+        $right = (int) ($b['yearTrainings'] ?? 0);
+        if ($left !== $right) {
+            return $left <=> $right;
+        }
+        return ((int) ($a['tapp_id'] ?? 0)) <=> ((int) ($b['tapp_id'] ?? 0));
+    });
+    json_out(['ok' => true, 'items' => $items, 'year' => $year]);
 }
 
 function enrol_officer(string $atpId, string $nid, string $present = 'Yes'): bool
