@@ -185,6 +185,18 @@ function mdtu_api(string $method, string $path): void
         }
         return true;
     };
+
+if ($is('GET', '/mdtu-magazine/') || $is('GET', '/mdtu-magazine')) {
+            // මුල් පිටුවට අදාළ හෝ සඟරා ලැයිස්තුව පෙන්වන කේතය (හෝ journal.html වෙත යොමු කිරීම)
+            header('Content-Type: text/html; charset=utf-8');
+            readfile(MDTU_PUBLIC . '/journal.html');
+            exit;
+        }
+
+
+
+
+    
     $body = request_body();
     try {
         if ($is('GET', '/api/health')) json_out(['ok' => true, 'service' => 'retreat']);
