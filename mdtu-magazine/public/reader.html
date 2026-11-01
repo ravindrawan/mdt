@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="reader_title">Reader</title>
+  <link rel="icon" href="/assets/emblem.svg">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,620;1,9..144,520&family=Outfit:wght@340;480;560&family=Noto+Sans+Sinhala:wght@400;600;700&family=Noto+Sans+Tamil:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/magazine.css">
+</head>
+<body>
+  <div class="reader">
+    <header class="reader-bar">
+      <a href="/journal.html" data-i18n="back">Close</a>
+      <strong id="readerTitle">The Trainer</strong>
+      <div class="langs">
+        <button type="button" data-set-lang="en">English</button>
+        <button type="button" data-set-lang="si">සිංහල</button>
+        <button type="button" data-set-lang="ta">தமிழ்</button>
+      </div>
+    </header>
+    <div class="reader-stage" id="stage">
+      <div class="fitbox" id="fitbox">
+        <div class="reader-scale" id="scale"></div>
+      </div>
+    </div>
+    <footer class="reader-controls">
+      <div class="cluster">
+        <button type="button" id="prev" data-i18n="prev">Previous</button>
+        <span id="pageCount">1 / 10</span>
+        <button type="button" id="next" data-i18n="next">Next</button>
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+      <div class="cluster">
+        <button type="button" id="full" data-i18n="fullscreen">Full screen</button>
+        <button type="button" id="download" data-i18n="download">Download PDF</button>
+      </div>
+      <p class="dev-note">web developer M A Wickramanayake · Email. Anurasiri123@gmail.com · call -0774940944</p>
+      <p class="dev-role">developer - M A Wickramanayake (Development Officer)</p>
+    </footer>
+  </div>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/reader.js"></script>
+</body>
+</html>

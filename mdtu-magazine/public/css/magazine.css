@@ -1,0 +1,317 @@
+@page { size: A4 portrait; margin: 0; }
+
+* { box-sizing: border-box; }
+
+.sheet {
+  width: 210mm;
+  height: 297mm;
+  position: relative;
+  overflow: hidden;
+  background: #fbf8f3;
+  color: #142033;
+  font-family: Outfit, "Segoe UI", "Nirmala UI", sans-serif;
+  font-size: 10.4pt;
+  line-height: 1.42;
+}
+.sheet h1, .sheet h2, .sheet h3, .cover-mast, .m-sign, .m-back-brand {
+  font-family: Fraunces, Georgia, "Nirmala UI", serif;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+.sheet.si, .sheet.si h1, .sheet.si h2, .sheet.si h3, .sheet.si .cover-mast, .sheet.si .m-sign, .sheet.si .m-back-brand {
+  font-family: "Noto Sans Sinhala", "Nirmala UI", "Iskoola Pota", sans-serif;
+  letter-spacing: 0;
+}
+.sheet.ta, .sheet.ta h1, .sheet.ta h2, .sheet.ta h3, .sheet.ta .cover-mast, .sheet.ta .m-sign, .sheet.ta .m-back-brand {
+  font-family: "Noto Sans Tamil", "Nirmala UI", sans-serif;
+  letter-spacing: 0;
+}
+.sheet p { margin: 0 0 2.2mm; }
+.sheet h2, .sheet h3 { margin: 0; }
+.m-pad {
+  height: 100%;
+  padding: 9mm 11mm 7mm;
+  display: flex;
+  flex-direction: column;
+}
+.m-frame {
+  position: absolute;
+  inset: 5.5mm;
+  border: 0.25mm solid rgba(184, 149, 106, 0.55);
+  pointer-events: none;
+}
+.m-runhead, .m-runfoot {
+  display: flex;
+  align-items: baseline;
+  gap: 2mm;
+  font-size: 8pt;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6d5a3a;
+}
+.sheet.si .m-runhead, .sheet.si .m-runfoot,
+.sheet.ta .m-runhead, .sheet.ta .m-runfoot { letter-spacing: 0; text-transform: none; font-size: 8.5pt; }
+.m-runsec { margin-left: auto; }
+.m-runfoot { margin-top: auto; padding-top: 3mm; border-top: 0.25mm solid rgba(18, 32, 51, 0.15); }
+.m-runfoot span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; }
+.m-kicker {
+  margin: 3mm 0 1mm;
+  color: #8a6232;
+  font-size: 8.5pt;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.sheet.si .m-kicker, .sheet.ta .m-kicker { letter-spacing: 0; text-transform: none; }
+.m-h2 { font-size: 22pt; line-height: 1.05; max-width: 170mm; }
+.sheet.si .m-h2, .sheet.ta .m-h2 { font-size: 16pt; line-height: 1.25; }
+.m-dek { color: #3d4c5c; max-width: 160mm; }
+.m-meta, .m-by, .m-quiet { color: #5c6b7a; font-size: 9pt; }
+.m-copy p:last-child { margin-bottom: 0; }
+.m-stack, .m-courses, .m-spread, .m-essay, .m-ed, .m-closing { flex: 1; min-height: 0; }
+.m-photo { position: relative; overflow: hidden; background: #d9d1c3; margin: 0; }
+.m-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.m-photo figcaption {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 5mm 3mm 2mm;
+  color: #f7f3ea;
+  font-size: 8pt;
+  background: linear-gradient(transparent, rgba(8, 18, 32, 0.78));
+}
+.m-ph { background:
+  radial-gradient(circle at 20% 20%, rgba(228, 201, 138, 0.7), transparent 40%),
+  linear-gradient(160deg, #1a4468, #0c2340 70%);
+}
+
+.cover { background: #0c2340; color: #f7f3ea; }
+.cover-bleed, .cover-shade, .cover-frame, .cover-banner, .cover-vol, .cover-mast, .cover-tri, .cover-bottom { position: absolute; }
+.cover-bleed { inset: 0; }
+.cover-bleed img { width: 100%; height: 100%; object-fit: cover; }
+.cover-shade {
+  inset: 0;
+  background: linear-gradient(180deg, rgba(8, 18, 32, 0.55) 0%, rgba(8, 18, 32, 0.12) 28%, rgba(8, 18, 32, 0.18) 52%, rgba(8, 18, 32, 0.88) 100%);
+}
+.cover-frame { inset: 6mm; border: 0.35mm solid rgba(228, 201, 138, 0.72); }
+.cover-top {
+  top: 12mm; left: 12mm; right: 12mm;
+  display: flex; gap: 4mm; align-items: center;
+  z-index: 1;
+}
+.cover-top img { width: 14mm; height: 14mm; }
+.cover-top strong, .cover-top em { display: block; font-style: normal; }
+.cover-top strong { font-size: 10pt; letter-spacing: 0.04em; }
+.cover-top em { color: #e4c98a; font-size: 8.5pt; margin-top: 1mm; }
+.cover-banner {
+  z-index: 3;
+  top: 8mm; left: 8mm; right: 8mm;
+  background: #fff;
+  padding: 1.6mm 2.4mm;
+}
+.cover-banner img { width: 100%; max-height: 18mm; object-fit: contain; object-position: center; display: block; }
+.cover-vol {
+  z-index: 2;
+  top: 34mm; right: 12mm;
+  text-align: right;
+  font-size: 9pt;
+  letter-spacing: 0.12em;
+  line-height: 1.35;
+  color: #f7f3ea;
+}
+.cover-mast {
+  z-index: 1;
+  left: 10mm; right: 10mm; top: 36%;
+  margin: 0;
+  text-align: center;
+  font-size: 42pt;
+  letter-spacing: 0.04em;
+  line-height: 0.95;
+  font-weight: 560;
+}
+.sheet.si .cover-mast, .sheet.ta .cover-mast { font-size: 36pt; letter-spacing: 0; top: 36%; }
+.cover-tri {
+  z-index: 1;
+  left: 10mm; right: 10mm; top: 46%;
+  margin: 0;
+  text-align: center;
+  font-size: 9pt;
+  color: #e4c98a;
+}
+.cover-bottom { z-index: 1; left: 14mm; right: 14mm; bottom: 14mm; }
+.cover-issue {
+  margin: 0 0 2mm;
+  color: #e4c98a;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 9pt;
+}
+.sheet.si .cover-issue, .sheet.ta .cover-issue { letter-spacing: 0; text-transform: none; }
+.cover-unit { margin: 0 0 3mm; font-size: 8.5pt; line-height: 1.35; color: #f4efe6; }
+.cover-title { margin: 0 0 4mm; font-size: 22pt; line-height: 1.1; font-weight: 520; }
+.sheet.si .cover-title, .sheet.ta .cover-title { font-size: 16pt; }
+.cover-lines { list-style: none; margin: 0; padding: 0; }
+.cover-lines li {
+  border-top: 0.25mm solid rgba(228, 201, 138, 0.7);
+  padding: 1.8mm 0;
+  font-size: 10.5pt;
+}
+.cover.front .cover-bottom {
+  left: 13mm;
+  right: 13mm;
+  bottom: 12mm;
+}
+.cover.front .cover-issue { margin: 0 0 2.2mm; line-height: 1.4; }
+.cover.front .cover-unit { margin: 0 0 3.6mm; line-height: 1.5; }
+.cover.front .cover-title { margin: 0 0 3mm; line-height: 1.25; }
+.cover.front .cover-lines li { padding: 2.4mm 0 1.8mm; line-height: 1.45; }
+.sheet.si.front .cover-issue,
+.sheet.ta.front .cover-issue {
+  font-size: 10pt;
+  line-height: 1.7;
+  margin-bottom: 2.4mm;
+}
+.sheet.si.front .cover-unit,
+.sheet.ta.front .cover-unit {
+  font-size: 10pt;
+  line-height: 1.75;
+  margin-bottom: 4mm;
+}
+.sheet.si.front .cover-title,
+.sheet.ta.front .cover-title {
+  font-size: 18pt;
+  line-height: 1.55;
+  margin-bottom: 3.5mm;
+}
+.sheet.si.front .cover-lines li,
+.sheet.ta.front .cover-lines li {
+  font-size: 11.5pt;
+  line-height: 1.8;
+  padding: 3mm 0 2.4mm;
+}
+
+.m-ed { display: grid; grid-template-columns: 1.32fr 0.78fr; gap: 6mm; }
+.m-portrait { display: flex; gap: 4mm; align-items: center; margin: 3mm 0; }
+.m-portrait img { width: 24mm; height: 30mm; object-fit: cover; background: #e7d7be; }
+.m-portrait strong, .m-portrait span { display: block; }
+.m-portrait span { color: #5c6b7a; font-size: 8.5pt; }
+.m-sign { margin: 4mm 0 0; font-style: italic; font-size: 16pt; color: #0c2340; }
+.m-aside-h { font-size: 13pt; margin-bottom: 2mm; }
+.m-toc { list-style: none; margin: 0 0 5mm; padding: 0; }
+.m-toc li { display: flex; gap: 2mm; align-items: baseline; margin: 1.6mm 0; font-size: 9pt; }
+.m-toc-title {
+  flex: 1;
+  background-image: radial-gradient(circle, rgba(18, 32, 51, 0.45) 0.4px, transparent 0.8px);
+  background-position: left bottom;
+  background-repeat: repeat-x;
+  background-size: 5px 5px;
+}
+.m-toc-title span { background: #fbf8f3; padding-right: 1.5mm; }
+.m-toc-page { color: #8a6232; }
+.m-note { border-left: 0.7mm solid #c4a46a; padding-left: 3.5mm; }
+.m-note h3 { font-size: 12.5pt; margin-bottom: 2mm; }
+
+.m-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2.5mm; margin: 3mm 0 4mm; }
+.m-stats div { background: #0c2340; color: #f7f3ea; padding: 3mm 3mm 2.5mm; }
+.m-stats b { display: block; font-family: Fraunces, Georgia, serif; font-size: 16pt; font-weight: 560; color: #e4c98a; }
+.sheet.si .m-stats b { font-family: "Noto Sans Sinhala", "Nirmala UI", sans-serif; }
+.m-stats span { font-size: 7.5pt; letter-spacing: 0.08em; text-transform: uppercase; }
+.sheet.si .m-stats span { letter-spacing: 0; text-transform: none; }
+.m-stack, .m-flow { display: flex; flex-direction: column; gap: 4mm; }
+.m-flow { flex: 0 1 auto; }
+.m-break {
+  margin: 1.5mm 0 0;
+  padding-top: 2.4mm;
+  border-top: 0.3mm solid rgba(184, 149, 106, 0.8);
+}
+.m-lead, .m-row { display: grid; gap: 4mm; min-height: 0; }
+.m-lead { grid-template-columns: 1.05fr 0.95fr; }
+.m-row { grid-template-columns: 42mm 1fr; }
+.m-lead .m-photo { height: 62mm; }
+.m-row .m-photo { height: 32mm; }
+.m-lead h3, .m-row h3, .m-course h3 { font-size: 13.5pt; line-height: 1.15; margin-bottom: 1mm; }
+.sheet.si .m-lead h3, .sheet.si .m-row h3, .sheet.si .m-course h3 { font-size: 11.5pt; }
+.m-metrics { display: flex; gap: 3mm; list-style: none; padding: 0; margin: 2mm 0 0; }
+.m-metrics li { min-width: 18mm; }
+.m-metrics b { display: block; color: #0c2340; }
+.m-metrics span { font-size: 7.5pt; letter-spacing: 0.08em; text-transform: uppercase; color: #6d5a3a; }
+.sheet.si .m-metrics span, .sheet.ta .m-metrics span { letter-spacing: 0; text-transform: none; }
+
+.m-courses { display: flex; flex-direction: column; gap: 4mm; }
+.m-course { display: grid; grid-template-columns: 48mm 1fr; gap: 4mm; }
+.m-course .m-photo { height: 36mm; }
+.m-outcome { margin: 2mm 0 0; padding-top: 1.5mm; border-top: 0.2mm solid rgba(196, 164, 106, 0.8); color: #0c2340; }
+
+.m-spread { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 6mm; }
+.m-poem p { font-family: Fraunces, Georgia, serif; font-style: italic; font-size: 12.5pt; line-height: 1.35; }
+.sheet.si .m-poem p { font-family: "Noto Sans Sinhala", "Nirmala UI", sans-serif; font-style: normal; font-size: 11pt; }
+.sheet.ta .m-poem p { font-family: "Noto Sans Tamil", "Nirmala UI", sans-serif; font-style: normal; font-size: 11pt; }
+.m-wide { height: 48mm; margin-top: 4mm; }
+.m-sidepiece { background: #0c2340; color: #f7f3ea; padding: 5mm; }
+.m-sidepiece .m-kicker, .m-sidepiece .m-by, .m-sidepiece .m-copy { color: #e4c98a; }
+.m-sidepiece h3 { font-size: 14pt; margin-bottom: 2mm; }
+.m-grid { display: grid; grid-template-columns: 1.3fr 1fr; grid-template-rows: 52mm 52mm; gap: 3mm; }
+.m-grid .m-photo:first-child { grid-row: 1 / span 2; }
+.m-essay .m-copy { max-width: 170mm; }
+
+.m-close-pad { padding-bottom: 0; }
+.m-closing { display: grid; grid-template-rows: 1fr 118mm; min-height: 0; }
+.m-agenda { list-style: none; margin: 3mm 0 0; padding: 0; }
+.m-agenda li { display: grid; grid-template-columns: 52mm 1fr; gap: 3mm; padding: 2.2mm 0; border-top: 0.2mm solid rgba(18, 32, 51, 0.15); }
+.m-agenda strong, .m-agenda em { display: block; font-style: normal; }
+.m-agenda em { color: #5c6b7a; font-size: 9pt; }
+.m-when { color: #8a6232; font-size: 9pt; }
+.m-back {
+  margin: 0 -11mm;
+  background: #0c2340;
+  color: #f4efe6;
+  padding: 8mm 11mm;
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 6mm;
+}
+.m-back .m-banner-wrap img { width: 100%; height: auto; }
+.m-banner-wrap { background: #fff; padding: 1.4mm; margin-bottom: 2mm; }
+.m-banner-wrap img { width: 100%; height: auto; display: block; }
+.m-back-brand { font-size: 16pt; margin: 2mm 0 0; letter-spacing: 0.02em; }
+.m-tri { margin: 0 0 2mm; font-size: 7.5pt; color: #e4c98a; }
+.sheet.si .m-back-brand, .sheet.ta .m-back-brand { letter-spacing: 0; }
+.m-mail { color: #e4c98a; }
+.m-free { font-size: 9pt; color: rgba(244, 239, 230, 0.78); }
+.m-kicker-light { color: #e4c98a; }
+.m-credits { list-style: none; margin: 0; padding: 0; columns: 1; font-size: 8.5pt; }
+.m-credits li { margin: 0.8mm 0; }
+
+body.print-preview { margin: 0; background: #2a261f; }
+body.print-preview .sheet { margin: 8mm auto; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+.m-toolbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  padding: 12px 18px; background: #0c2340; color: #f4efe6;
+  font-family: Outfit, "Nirmala UI", sans-serif;
+}
+.m-toolbar a, .m-toolbar button {
+  color: #f4efe6; background: transparent; border: 1px solid rgba(228, 201, 138, 0.5);
+  padding: 6px 10px; text-decoration: none; cursor: pointer; font: inherit;
+}
+.m-toolbar .m-solid { background: #c4a46a; color: #0c2340; border-color: #c4a46a; }
+
+@media print {
+  html, body { margin: 0 !important; padding: 0 !important; }
+  body.print-preview { background: white; }
+  body.print-preview .sheet {
+    margin: 0;
+    box-shadow: none;
+    width: 210mm;
+    height: 296.5mm;
+    max-height: 296.5mm;
+    overflow: hidden;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    break-after: page;
+    page-break-after: always;
+  }
+  body.print-preview .sheet:last-child { break-after: auto; page-break-after: auto; }
+  .noprint, .m-toolbar { display: none !important; }
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

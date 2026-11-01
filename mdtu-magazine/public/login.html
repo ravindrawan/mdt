@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="login_title">Staff entrance</title>
+  <link rel="icon" href="/assets/emblem.svg">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,560&family=Outfit:wght@380;520&family=Noto+Sans+Sinhala:wght@400;600&family=Noto+Sans+Tamil:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="auth-page">
+    <section class="auth-art">
+      <a href="/" class="brand" style="align-items:flex-start;color:inherit">
+        <img src="/assets/emblem.svg" alt="" style="width:56px;height:56px">
+        <h1 class="display" data-i18n="word">The Trainer</h1>
+        <p class="tri">The Trainer · පුහුණුකරු · பயிற்சியாளர்</p>
+      </a>
+      <p data-i18n="login_lead">Contributors file the month’s work. Editors assemble the issue. Readers never need a password.</p>
+    </section>
+    <section class="auth-card">
+      <form id="loginForm">
+        <div class="langs">
+          <button type="button" data-set-lang="en">English</button>
+          <button type="button" data-set-lang="si">සිංහල</button>
+          <button type="button" data-set-lang="ta">தமிழ்</button>
+        </div>
+        <h2 data-i18n="login_title">Staff entrance</h2>
+        <label><span data-i18n="login_user">Username</span><input name="email" type="text" autocomplete="username" required value="admin"></label>
+        <label><span data-i18n="password">Password</span><input name="password" type="password" autocomplete="current-password" required value="123"></label>
+        <button class="btn" type="submit" data-i18n="sign_in">Sign in</button>
+        <p id="loginError" class="danger"></p>
+      </form>
+    </section>
+  </div>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const error = document.getElementById('loginError');
+      error.textContent = '';
+      try {
+        const data = await api('/api/auth/login', {
+          method: 'POST',
+          body: Object.fromEntries(new FormData(event.target).entries())
+        });
+        location.href = data.user.role === 'admin' ? '/admin.html' : '/dashboard.html';
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

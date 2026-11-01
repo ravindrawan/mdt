@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="doc_title">The Trainer</title>
+  <link rel="icon" href="/assets/emblem.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,620;1,9..144,560&family=Outfit:wght@360;480;580&family=Noto+Sans+Sinhala:wght@400;600;700&family=Noto+Sans+Tamil:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="topbar">
+    <div class="wrap">
+      <a href="https://mdtu.nw.gov.lk/" target="_blank" rel="noopener" data-i18n="visit">Visit the Unit</a>
+      <div class="cluster">
+        <div class="langs">
+          <button type="button" data-set-lang="en">English</button>
+          <button type="button" data-set-lang="si">සිංහල</button>
+          <button type="button" data-set-lang="ta">தமிழ்</button>
+        </div>
+        <a href="/login.html" data-session data-i18n="staff_login">Staff login</a>
+      </div>
+    </div>
+  </div>
+  <header class="mast">
+    <div class="wrap">
+      <img class="official-banner" src="/assets/official-header.jpg" alt="කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය · වයඹ පළාත් සභාව">
+      <a class="brand" href="/">
+        <p class="display word" data-i18n="word">The Trainer</p>
+        <p class="tri">The Trainer · පුහුණුකරු · பயிற்சியாளர்</p>
+        <p class="tag" data-i18n="tagline">The monthly journal of training, language, overseas study and staff writing.</p>
+      </a>
+    </div>
+  </header>
+  <nav class="nav">
+    <div class="wrap">
+      <a href="https://mdtu.nw.gov.lk/" target="_blank" rel="noopener" data-i18n="visit">Visit the Unit</a>
+      <a href="#main" data-i18n="nav_current">Current issue</a>
+      <a href="#archive-section" data-i18n="nav_archive">Archive</a>
+      <a href="#about" data-i18n="nav_about">About</a>
+    </div>
+  </nav>
+  <main id="main">
+    <section class="hero" id="hero" aria-live="polite">
+      <p class="hero-copy" data-i18n="loading">Opening the current issue…</p>
+    </section>
+    <section class="stats" id="stats"></section>
+    <section class="section">
+      <div class="wrap">
+        <p class="kicker" data-i18n="highlights">In this issue</p>
+        <div class="highlights" id="highlights"></div>
+      </div>
+    </section>
+    <section class="section" id="archive-section" style="padding-top:0">
+      <div class="wrap">
+        <div class="archive-head">
+          <div>
+            <h2 data-i18n="archive_title">Earlier editions</h2>
+            <p class="sub" data-i18n="archive_lead">Every published issue stays open. No account is required to read or download.</p>
+          </div>
+          <input class="search" id="archiveSearch" data-i18n-placeholder="search_archive" placeholder="Search by month or title">
+        </div>
+        <div class="grid" id="archive"></div>
+      </div>
+    </section>
+    <section class="section" id="about">
+      <div class="wrap about">
+        <div>
+          <p class="kicker" data-i18n="word">The Trainer</p>
+          <h2 data-i18n="about_title">A public record of the month</h2>
+        </div>
+        <p data-i18n="about_body">The Trainer is a monthly journal of training, language study, overseas exposure and staff writing. Every published edition is free to read and download.</p>
+      </div>
+    </section>
+  </main>
+  <footer class="footer">
+    <div class="wrap">
+      <div>
+        <strong data-i18n="word">The Trainer</strong>
+        <p>The Trainer · පුහුණුකරු · பயிற்சியாளர்</p>
+      </div>
+      <div>
+        <p><a href="#archive-section" data-i18n="nav_archive">Archive</a></p>
+      </div>
+      <div>
+        <p data-i18n="archive_lead">Every published issue stays open.</p>
+      </div>
+    </div>
+    <div class="wrap dev-block">
+      <small data-i18n="rights">Published for the public service.</small>
+      <p class="dev-note">web developer M A Wickramanayake · Email. Anurasiri123@gmail.com · call -0774940944</p>
+      <p class="dev-role">developer - M A Wickramanayake (Development Officer)</p>
+    </div>
+  </footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/public.js"></script>
+</body>
+</html>

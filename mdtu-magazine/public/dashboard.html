@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="my_work">My submissions</title>
+  <link rel="icon" href="/assets/emblem.svg">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560&family=Outfit:wght@380;520&family=Noto+Sans+Sinhala:wght@400;600&family=Noto+Sans+Tamil:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="side">
+      <a href="/journal.html" class="word" data-i18n="word">The Trainer</a>
+      <p id="who"></p>
+      <button type="button" data-go="list" data-i18n="my_work">My submissions</button>
+      <button type="button" data-go="composer" data-i18n="new_piece">New submission</button>
+      <button type="button" data-go="profile" data-i18n="profile">Profile</button>
+      <div class="grow">
+        <a id="adminLink" class="hidden" href="/admin.html" data-i18n="admin_link">Admin desk</a>
+        <div class="langs">
+          <button type="button" data-set-lang="en">English</button>
+          <button type="button" data-set-lang="si">සිංහල</button>
+          <button type="button" data-set-lang="ta">தமிழ்</button>
+        </div>
+        <button type="button" id="logout" data-logout data-i18n="logout">Sign out</button>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="desk-bar">
+        <button type="button" class="btn line" data-logout data-i18n="logout">Sign out</button>
+      </div>
+      <section data-panel="list" id="pieceList"></section>
+      <section data-panel="composer" class="hidden">
+        <form id="pieceForm" class="composer">
+          <h2 data-i18n="new_piece">New submission</h2>
+          <p class="form-note" data-i18n="both_languages">File every piece in Sinhala and English.</p>
+          <p class="form-note" id="streamHelp"></p>
+          <label><span data-i18n="stream">Stream</span><select name="category_id" required></select></label>
+          <div class="row2">
+            <label><span data-i18n="month">Month</span><select name="target_month" required></select></label>
+            <label><span data-i18n="year">Year</span><input name="target_year" type="number" min="2024" max="2100" required></label>
+          </div>
+          <div class="row2">
+            <label><span data-i18n="title_en">Title in English</span><input name="title_en" required></label>
+            <label><span data-i18n="title_si">Title in Sinhala</span><input name="title_si" required></label>
+          </div>
+          <div class="row2">
+            <label><span data-i18n="excerpt_en">Cover line in English</span><input name="excerpt_en"></label>
+            <label><span data-i18n="excerpt_si">Cover line in Sinhala</span><input name="excerpt_si"></label>
+          </div>
+          <label><span data-i18n="body_en">Piece in English</span><textarea name="body_en" required></textarea></label>
+          <label><span data-i18n="body_si">Piece in Sinhala</span><textarea name="body_si" required></textarea></label>
+          <div id="programBlock">
+            <div class="row2">
+              <label><span data-i18n="start">Start date</span><input name="start_date" type="date"></label>
+              <label><span data-i18n="end">End date</span><input name="end_date" type="date"></label>
+            </div>
+            <div class="row2">
+              <label><span data-i18n="target_en">Target group in English</span><input name="target_group_en"></label>
+              <label><span data-i18n="target_si">Target group in Sinhala</span><input name="target_group_si"></label>
+            </div>
+            <div class="row2">
+              <label><span data-i18n="venue_en">Venue in English</span><input name="venue_en"></label>
+              <label><span data-i18n="venue_si">Venue in Sinhala</span><input name="venue_si"></label>
+            </div>
+            <div class="row3">
+              <label><span data-i18n="participants_n">Participants</span><input name="participants" type="number" min="0"></label>
+              <label><span data-i18n="sessions">Sessions</span><input name="sessions" type="number" min="0"></label>
+              <label><span data-i18n="hours">Hours</span><input name="hours" type="number" min="0"></label>
+            </div>
+            <label><span data-i18n="satisfaction">Satisfaction %</span><input name="satisfaction" type="number" min="0" max="100"></label>
+            <label><span data-i18n="outcomes_en">Outcomes in English</span><textarea name="outcomes_en"></textarea></label>
+            <label><span data-i18n="outcomes_si">Outcomes in Sinhala</span><textarea name="outcomes_si"></textarea></label>
+          </div>
+          <div id="existingPhotos"></div>
+          <label><span data-i18n="photos">Photographs</span><input name="photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple></label>
+          <div class="actions">
+            <button class="btn line" type="submit" data-act="draft" data-i18n="save_draft">Save draft</button>
+            <button class="btn" type="submit" data-act="submit" data-i18n="submit">Submit for review</button>
+          </div>
+        </form>
+      </section>
+      <section data-panel="profile" class="hidden">
+        <form id="profileForm" class="composer">
+          <h2 data-i18n="profile">Profile</h2>
+          <label><span data-i18n="name_en">Name in English</span><input name="full_name_en" required></label>
+          <label><span data-i18n="name_si">Name in Sinhala</span><input name="full_name_si" required></label>
+          <label><span data-i18n="designation_en">Designation in English</span><input name="designation_en"></label>
+          <label><span data-i18n="designation_si">Designation in Sinhala</span><input name="designation_si"></label>
+          <label><span data-i18n="phone">Phone</span><input name="phone"></label>
+          <button class="btn" type="submit" data-i18n="save">Save</button>
+        </form>
+        <form id="passwordForm" class="composer" style="margin-top:16px">
+          <h2 data-i18n="change_password">Change password</h2>
+          <label><span data-i18n="current_password">Current password</span><input name="current_password" type="password" required></label>
+          <label><span data-i18n="new_password">New password</span><input name="password" type="password" minlength="8" required></label>
+          <button class="btn line" type="submit" data-i18n="change_password">Change password</button>
+        </form>
+      </section>
+    </main>
+  </div>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>
