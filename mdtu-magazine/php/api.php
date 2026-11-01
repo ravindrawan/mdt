@@ -168,7 +168,7 @@ function pdf_fallback(string $slug, string $lang, bool $auto): void
     $suffix = $auto ? '&autoprint=1' : '';
     json_out([
         'error' => 'This host opens the print view so the browser can save the PDF.',
-        'fallback' => "/magazine/{$slug}/print?lang={$lang}{$suffix}",
+        'fallback' => "/mdtu-magazine/{$slug}/print?lang={$lang}{$suffix}",
     ], 503);
 }
 
@@ -214,7 +214,7 @@ function mdtu_api(string $method, string $path): void
             ]);
         }
 
-        if ($is('GET', '/magazine/:slug/print')) {
+        if ($is('GET', '/mdtu-magazine/:slug/print')) {
             $bundle = load_bundle($params['slug']);
             if (!$bundle) {
                 http_response_code(404);
@@ -554,217 +554,84 @@ function mdtu_api(string $method, string $path): void
                 $filters[] = 'c.slug = ?';
                 $sqlParams[] = $category;
             }
+            $where = 'WHERE ' . implode(' AND ', $filters);
             $rows = db_all(
-                'SELECT a.* FROM articles a JOIN categories c ON c.id = a.category_id WHERE ' . implode(' AND ', $filters) . ' ORDER BY a.updated_at DESC LIMIT 200',
+                "SELECT a.* FROM articles a JOIN categories c ON c.id = a.category_id {$where} ORDER BY a.updated_at DESC",
                 $sqlParams
             );
             json_out(['articles' => array_map('hydrate_article', $rows)]);
         }
 
-        if ($is('POST', '/api/admin/articles/:id/review')) {
-            $actor = require_admin();
+        if ($is('POST', '/api/admin/articles/:id/reject')) {
+            $user = require_admin();
             $article = db_get('SELECT * FROM articles WHERE id = ?', [$params['id']]);
             if (!$article) json_out(['error' => 'Piece not found.'], 404);
-            if ($article['status'] === 'published') json_out(['error' => 'Unpublish the issue before changing a published piece.'], 409);
-            $decision = in_array($body['decision'] ?? '', ['reject', 'rejected'], true) ? 'rejected' : 'approved';
-            $notes = clean($body['notes'] ?? '', 1000);
-            if ($decision === 'rejected' && (function_exists('mb_strlen') ? mb_strlen($notes) : strlen($notes)) < 3) {
-                json_out(['error' => 'Write a short note explaining the return.'], 400);
-            }
+            $notes = clean($body['reviewer_notes'] ?? '', 2000);
+            if (strlen($notes) < 3) json_out(['error' => 'Provide a note explaining what needs revision.'], 400);
             $now = now_iso();
-            db_run('UPDATE articles SET status=?, reviewer_notes=?, reviewed_at=?, updated_at=? WHERE id=?', [$decision, $notes, $now, $now, $article['id']]);
-            audit($actor['id'], $decision, 'article', $article['id'], $article['title_en']);
+            db_run("UPDATE articles SET status='rejected', reviewer_notes=?, reviewed_at=?, updated_at=? WHERE id=?", [$notes, $now, $now, $article['id']]);
+            audit($user['id'], 'reject', 'article', $article['id'], $article['title_en']);
             json_out(['article' => hydrate_article(db_get('SELECT * FROM articles WHERE id = ?', [$article['id']]))]);
         }
 
         if ($is('GET', '/api/admin/magazines')) {
             require_admin();
-            $magazines = db_all('SELECT * FROM magazines ORDER BY year DESC, month DESC');
-            json_out(['magazines' => array_map(function ($magazine) {
-                return magazine_card($magazine, articles_for_magazine($magazine['id'])) + [
-                    'summary_en' => $magazine['summary_en'],
-                    'summary_si' => $magazine['summary_si'],
-                ];
-            }, $magazines)]);
+            $rows = db_all('SELECT * FROM magazines ORDER BY year DESC, month DESC');
+            json_out(['magazines' => array_map(fn($m) => magazine_card($m, articles_for_magazine($m['id'])), $rows)]);
         }
 
         if ($is('POST', '/api/admin/magazines')) {
             $actor = require_admin();
-            $month = (int) ($body['month'] ?? 0);
-            $year = (int) ($body['year'] ?? 0);
-            $titleEn = clean($body['title_en'] ?? '', 200);
-            $titleSi = clean($body['title_si'] ?? '', 200);
+            $month = (int) ($body['target_month'] ?? 0);
+            $year = (int) ($body['target_year'] ?? 0);
             if ($month < 1 || $month > 12 || $year < 2024 || $year > 2100) json_out(['error' => 'Choose a valid month and year.'], 400);
-            if (strlen($titleEn) < 3 || (function_exists('mb_strlen') ? mb_strlen($titleSi) : strlen($titleSi)) < 2) json_out(['error' => 'The issue needs a title in both languages.'], 400);
-            $slug = $year . '-' . str_pad((string) $month, 2, '0', STR_PAD_LEFT);
-            if (db_get('SELECT id FROM magazines WHERE slug = ?', [$slug])) json_out(['error' => 'That month already has an issue.'], 409);
-            $highlights = [];
-            if (is_array($body['highlights'] ?? null)) {
-                foreach (array_slice($body['highlights'], 0, 4) as $item) {
-                    $row = ['en' => clean($item['en'] ?? '', 240), 'si' => clean($item['si'] ?? '', 240)];
-                    if ($row['en'] || $row['si']) $highlights[] = $row;
-                }
+            if (db_get('SELECT id FROM magazines WHERE year = ? AND month = ?', [$year, $month])) {
+                json_out(['error' => 'An issue for this month already exists.'], 409);
             }
+            $slug = sprintf('%04d-%02d', $year, $month);
+            $titleEn = clean($body['title_en'] ?? '', 220) ?: (month_name($month, 'en') . ' ' . $year . ' Issue');
+            $titleSi = clean($body['title_si'] ?? '', 220) ?: (month_name($month, 'si') . ' ' . $year . ' සංස්කරණය');
+            $summaryEn = clean($body['summary_en'] ?? '', 1000);
+            $summarySi = clean($body['summary_si'] ?? '', 1000);
+            $highlights = parse_json($body['highlights_json'] ?? '[]', []);
             $now = now_iso();
             $result = db_run(
-                "INSERT INTO magazines (slug, month, year, title_en, title_si, summary_en, summary_si, highlights_json, cover_path, back_path, cover_copy_json, status, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 'draft', NULL, ?, ?)",
-                [$slug, $month, $year, $titleEn, $titleSi, clean($body['summary_en'] ?? '', 2000), clean($body['summary_si'] ?? '', 2000), json_encode($highlights), "/assets/covers/{$slug}.svg", $now, $now]
+                'INSERT INTO magazines (slug, year, month, title_en, title_si, summary_en, summary_si, highlights_json, cover_path, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$slug, $year, $month, $titleEn, $titleSi, $summaryEn, $summarySi, json_encode($highlights), '', 'draft', $now, $now]
             );
             audit($actor['id'], 'create', 'magazine', $result['id'], $slug);
-            json_out(['magazine' => db_get('SELECT * FROM magazines WHERE id = ?', [$result['id']])], 201);
+            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$result['id']]);
+            json_out(['magazine' => magazine_card($magazine, [])], 201);
         }
 
         if ($is('PUT', '/api/admin/magazines/:id')) {
-            require_admin();
+            $actor = require_admin();
             $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
             if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
-            if (is_array($body['highlights'] ?? null)) {
-                $highlights = [];
-                foreach (array_slice($body['highlights'], 0, 4) as $item) {
-                    $row = ['en' => clean($item['en'] ?? '', 240), 'si' => clean($item['si'] ?? '', 240)];
-                    if ($row['en'] || $row['si']) $highlights[] = $row;
-                }
-            } else {
-                $highlights = parse_json($magazine['highlights_json'], []);
-            }
+            $titleEn = clean($body['title_en'] ?? '', 220) ?: $magazine['title_en'];
+            $titleSi = clean($body['title_si'] ?? '', 220) ?: $magazine['title_si'];
+            $summaryEn = clean($body['summary_en'] ?? '', 1000);
+            $summarySi = clean($body['summary_si'] ?? '', 1000);
+            $highlights = parse_json($body['highlights_json'] ?? '[]', []);
             db_run(
                 'UPDATE magazines SET title_en=?, title_si=?, summary_en=?, summary_si=?, highlights_json=?, updated_at=? WHERE id=?',
-                [clean($body['title_en'] ?? '', 200) ?: $magazine['title_en'], clean($body['title_si'] ?? '', 200) ?: $magazine['title_si'], clean($body['summary_en'] ?? '', 2000), clean($body['summary_si'] ?? '', 2000), json_encode($highlights), now_iso(), $magazine['id']]
+                [$titleEn, $titleSi, $summaryEn, $summarySi, json_encode($highlights), now_iso(), $magazine['id']]
             );
-            json_out(['magazine' => db_get('SELECT * FROM magazines WHERE id = ?', [$magazine['id']])]);
-        }
-
-        if ($is('POST', '/api/admin/magazines/:id/cover-text')) {
-            require_admin();
-            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
-            if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
-            $series = series_of($magazine);
-            $articles = db_all(
-                'SELECT a.*, c.slug AS category_slug FROM articles a JOIN categories c ON c.id = a.category_id WHERE a.magazine_id = ? ORDER BY a.page_number, a.sort_order, a.id',
-                [$magazine['id']]
-            );
-            $view = $magazine;
-            $view['volume'] = $series['volume'];
-            $view['number'] = $series['number'];
-            $auto = cover_fields($view, $articles)['auto'];
-            $saved = !empty($body['reset']) ? [] : cover_payload($body, $auto);
-            $json = json_encode($saved, JSON_UNESCAPED_UNICODE);
-            db_run('UPDATE magazines SET cover_copy_json = ?, updated_at = ? WHERE id = ?', [$json, now_iso(), $magazine['id']]);
-            $view['cover_copy_json'] = $json;
-            json_out(['cover' => cover_fields($view, $articles)]);
-        }
-
-        if ($is('POST', '/api/admin/magazines/:id/cover') || $is('POST', '/api/admin/magazines/:id/back')) {
-            $actor = require_admin();
-            $column = str_ends_with($path, '/back') ? 'back_path' : 'cover_path';
-            $file = save_upload('file');
-            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
-            if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
-            if (!$file) json_out(['error' => 'Choose a photograph.'], 400);
-            db_run("UPDATE magazines SET {$column}=?, updated_at=? WHERE id=?", [$file['path'], now_iso(), $magazine['id']]);
-            db_run(
-                "INSERT INTO media (article_id, magazine_id, user_id, filename, path, mime, caption_en, caption_si, created_at) VALUES (NULL, ?, ?, ?, ?, ?, '', '', ?)",
-                [$magazine['id'], $actor['id'], $file['filename'], $file['path'], $file['mime'], now_iso()]
-            );
-            json_out(['path' => $file['path'], $column => $file['path']]);
-        }
-
-        if ($is('POST', '/api/admin/magazines/:id/assemble')) {
-            $actor = require_admin();
-            $result = assemble_magazine((int) $params['id']);
-            audit($actor['id'], 'assemble', 'magazine', (int) $params['id'], $result['placed'] . ' pieces');
-            json_out($result);
-        }
-
-        if ($is('POST', '/api/admin/magazines/:id/assign')) {
-            require_admin();
-            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
-            $article = db_get('SELECT * FROM articles WHERE id = ?', [$body['articleId'] ?? 0]);
-            if (!$magazine || !$article) json_out(['error' => 'Issue or piece not found.'], 404);
-            if ($magazine['status'] !== 'draft') json_out(['error' => 'Unpublish the issue before changing its layout.'], 409);
-            if (!in_array($article['status'], ['approved', 'submitted'], true) && (int) $article['magazine_id'] !== (int) $magazine['id']) {
-                json_out(['error' => 'Approve the piece before placing it.'], 409);
-            }
-            $page = (int) ($body['page'] ?? 0);
-            if ($page < 2 || $page > 48) json_out(['error' => 'Inner pages start at 2. The cover is page 1 and is built from the photograph and featured stories.'], 400);
-            $category = db_get('SELECT slug FROM categories WHERE id = ?', [$article['category_id']]);
-            $onPage = db_all(
-                'SELECT a.*, c.slug AS category_slug FROM articles a JOIN categories c ON c.id = a.category_id WHERE a.magazine_id = ? AND a.page_number = ? AND a.id != ? ORDER BY a.sort_order, a.id',
-                [$magazine['id'], $page, $article['id']]
-            );
-            $incoming = $category['slug'] ?? '';
-            $hasEditorial = false;
-            $hasOther = false;
-            foreach ($onPage as $row) {
-                if ($row['category_slug'] === 'editorial') $hasEditorial = true;
-                else $hasOther = true;
-            }
-            if ($incoming === 'editorial' && ($hasOther || count($onPage) >= page_size('editorial'))) {
-                json_out(['error' => 'The leadership page holds its own pieces. Start the next piece on a new page.'], 409);
-            }
-            if ($incoming !== 'editorial' && $hasEditorial) json_out(['error' => 'The leadership page is already full. Start this piece on a new page.'], 409);
-            if (count($onPage) >= 6) json_out(['error' => 'This page is full. Start the next piece on a new page.'], 409);
-            if ($onPage && $incoming !== 'editorial') {
-                $photoMap = photo_map_for($onPage);
-                $openers = db_all(
-                    'SELECT a.page_number, c.slug AS category_slug FROM articles a JOIN categories c ON c.id = a.category_id WHERE a.magazine_id = ? AND a.page_number >= 2 AND a.page_number < ? ORDER BY a.page_number, a.sort_order, a.id',
-                    [$magazine['id'], $page]
-                );
-                $seen = [];
-                $statsUsed = false;
-                foreach ($openers as $row) {
-                    if (isset($seen[$row['page_number']])) continue;
-                    $seen[$row['page_number']] = true;
-                    if ($row['category_slug'] === 'training') $statsUsed = true;
-                }
-                $article['category_slug'] = $incoming;
-                if (fits($onPage, $article, $photoMap, $statsUsed) === 'new') {
-                    json_out(['error' => 'Only a small gap is left on this page. Start this piece on a new page.'], 409);
-                }
-            }
-            $sort = (int) db_get('SELECT COALESCE(MAX(sort_order), -1) AS n FROM articles WHERE magazine_id = ? AND page_number = ?', [$magazine['id'], $page])['n'] + 1;
-            db_run(
-                "UPDATE articles SET magazine_id=?, page_number=?, sort_order=?, status=CASE WHEN status='submitted' THEN 'approved' ELSE status END, updated_at=? WHERE id=?",
-                [$magazine['id'], $page, $sort, now_iso(), $article['id']]
-            );
-            json_out(['article' => hydrate_article(db_get('SELECT * FROM articles WHERE id = ?', [$article['id']]))]);
-        }
-
-        if ($is('POST', '/api/admin/magazines/:id/feature')) {
-            require_admin();
-            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
-            $article = db_get('SELECT * FROM articles WHERE id = ? AND magazine_id = ?', [$body['articleId'] ?? 0, $params['id']]);
-            if (!$magazine || !$article) json_out(['error' => 'Place the piece in this issue first.'], 404);
-            if ($magazine['status'] !== 'draft') json_out(['error' => 'Unpublish the issue before changing the cover lines.'], 409);
-            $featured = !empty($body['featured']) ? 1 : 0;
-            if ($featured) {
-                $count = (int) db_get('SELECT COUNT(*) AS n FROM articles WHERE magazine_id = ? AND featured = 1 AND id != ?', [$magazine['id'], $article['id']])['n'];
-                if ($count >= 3) json_out(['error' => 'The cover holds three lines. Remove one first.'], 409);
-            }
-            db_run('UPDATE articles SET featured=?, updated_at=? WHERE id=?', [$featured, now_iso(), $article['id']]);
-            json_out(['ok' => true]);
-        }
-
-        if ($is('POST', '/api/admin/magazines/:id/unassign')) {
-            require_admin();
-            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
-            if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
-            if ($magazine['status'] !== 'draft') json_out(['error' => 'Unpublish the issue before changing its layout.'], 409);
-            db_run('UPDATE articles SET magazine_id=NULL, page_number=NULL, featured=0, updated_at=? WHERE id=? AND magazine_id=?', [now_iso(), $body['articleId'] ?? 0, $magazine['id']]);
-            json_out(['ok' => true]);
+            audit($actor['id'], 'update', 'magazine', $magazine['id'], $magazine['slug']);
+            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$magazine['id']]);
+            json_out(['magazine' => magazine_card($magazine, articles_for_magazine($magazine['id']))]);
         }
 
         if ($is('POST', '/api/admin/magazines/:id/publish')) {
             $actor = require_admin();
             $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
             if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
-            $placed = (int) db_get('SELECT COUNT(*) AS n FROM articles WHERE magazine_id = ?', [$magazine['id']])['n'];
-            if (!$placed) json_out(['error' => 'Assemble or place at least one piece before publishing.'], 409);
             $now = now_iso();
-            db_run("UPDATE magazines SET status='published', published_at=?, updated_at=? WHERE id=?", [$now, $now, $magazine['id']]);
-            db_run("UPDATE articles SET status='published', updated_at=? WHERE magazine_id=?", [$now, $magazine['id']]);
+            db_run("UPDATE magazines SET status='published', updated_at=? WHERE id=?", [$now, $magazine['id']]);
+            db_run("UPDATE articles SET status='published', updated_at=? WHERE magazine_id = ? AND status = 'approved'", [$now, $magazine['id']]);
             audit($actor['id'], 'publish', 'magazine', $magazine['id'], $magazine['slug']);
-            json_out(['ok' => true]);
+            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$magazine['id']]);
+            json_out(['magazine' => magazine_card($magazine, articles_for_magazine($magazine['id']))]);
         }
 
         if ($is('POST', '/api/admin/magazines/:id/unpublish')) {
@@ -773,73 +640,45 @@ function mdtu_api(string $method, string $path): void
             if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
             $now = now_iso();
             db_run("UPDATE magazines SET status='draft', updated_at=? WHERE id=?", [$now, $magazine['id']]);
-            db_run("UPDATE articles SET status='approved', updated_at=? WHERE magazine_id=? AND status='published'", [$now, $magazine['id']]);
+            db_run("UPDATE articles SET status='approved', updated_at=? WHERE magazine_id = ? AND status = 'published'", [$now, $magazine['id']]);
             audit($actor['id'], 'unpublish', 'magazine', $magazine['id'], $magazine['slug']);
+            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$magazine['id']]);
+            json_out(['magazine' => magazine_card($magazine, articles_for_magazine($magazine['id']))]);
+        }
+
+        if ($is('POST', '/api/admin/magazines/:id/cover')) {
+            $actor = require_admin();
+            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
+            if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
+            $file = save_upload('file');
+            if (!$file) json_out(['error' => 'Choose a cover image.'], 400);
+            if ($magazine['cover_path'] && str_starts_with($magazine['cover_path'], '/uploads/')) {
+                $old = MDTU_PUBLIC . $magazine['cover_path'];
+                if (is_file($old)) @unlink($old);
+            }
+            db_run('UPDATE magazines SET cover_path = ?, updated_at = ? WHERE id = ?', [$file['path'], now_iso(), $magazine['id']]);
+            audit($actor['id'], 'cover', 'magazine', $magazine['id'], $magazine['slug']);
+            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$magazine['id']]);
+            json_out(['magazine' => magazine_card($magazine, articles_for_magazine($magazine['id']))]);
+        }
+
+        if ($is('DELETE', '/api/admin/magazines/:id')) {
+            $actor = require_admin();
+            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
+            if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
+            $count = (int) db_get('SELECT COUNT(*) AS n FROM articles WHERE magazine_id = ?', [$magazine['id']])['n'];
+            if ($count) json_out(['error' => 'Remove assigned pieces before deleting the issue.'], 409);
+            if ($magazine['cover_path'] && str_starts_with($magazine['cover_path'], '/uploads/')) {
+                $old = MDTU_PUBLIC . $magazine['cover_path'];
+                if (is_file($old)) @unlink($old);
+            }
+            db_run('DELETE FROM magazines WHERE id = ?', [$magazine['id']]);
+            audit($actor['id'], 'delete', 'magazine', $magazine['id'], $magazine['slug']);
             json_out(['ok' => true]);
         }
 
-        if ($is('GET', '/api/admin/magazines/:slug/pages')) {
-            require_admin();
-            $bundle = load_bundle($params['slug']);
-            if (!$bundle) json_out(['error' => 'Issue not found.'], 404);
-            $lang = lang_query();
-            json_out(['slug' => $bundle['magazine']['slug'], 'lang' => $lang, 'pages' => render_pages($bundle, $lang)]);
-        }
-
-        if ($is('GET', '/api/admin/magazines/:id/pdf')) {
-            require_admin();
-            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
-            if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
-            pdf_fallback($magazine['slug'], lang_query(), false);
-        }
-
-        if ($is('GET', '/api/admin/issue/:id')) {
-            require_admin();
-            $magazine = db_get('SELECT * FROM magazines WHERE id = ?', [$params['id']]);
-            if (!$magazine) json_out(['error' => 'Issue not found.'], 404);
-            $placed = db_all(
-                'SELECT a.*, c.slug AS category_slug, u.full_name_en AS author_en FROM articles a JOIN categories c ON c.id = a.category_id JOIN users u ON u.id = a.user_id WHERE a.magazine_id = ? ORDER BY a.page_number, a.sort_order',
-                [$magazine['id']]
-            );
-            $pool = db_all(
-                "SELECT a.*, c.slug AS category_slug, u.full_name_en AS author_en FROM articles a JOIN categories c ON c.id = a.category_id JOIN users u ON u.id = a.user_id WHERE a.magazine_id IS NULL AND a.status IN ('approved', 'submitted') AND a.target_year = ? AND a.target_month = ? ORDER BY a.status, a.title_en",
-                [$magazine['year'], $magazine['month']]
-            );
-            $series = series_of($magazine);
-            $view = $magazine;
-            $view['highlights'] = parse_json($magazine['highlights_json'], []);
-            $view['volume'] = $series['volume'];
-            $view['number'] = $series['number'];
-            json_out(['magazine' => $view, 'placed' => $placed, 'pool' => $pool, 'cover' => cover_fields($view, $placed)]);
-        }
-
-        json_out(['error' => 'Not found.'], 404);
-    } catch (HttpError $error) {
-        json_out(['error' => $error->getMessage()], $error->getCode() ?: 400);
-    } catch (Throwable $error) {
-        $line = date('c') . ' ' . $error->getMessage() . ' @ ' . $error->getFile() . ':' . $error->getLine() . PHP_EOL;
-        @file_put_contents(MDTU_ROOT . '/data/php-error.log', $line, FILE_APPEND);
-        json_out(['error' => 'Unexpected server error.'], 500);
+        fail(404, 'Not found.');
+    } catch (Throwable $e) {
+        fail(500, 'Server error: ' . $e->getMessage());
     }
-}
-
-function cover_payload(array $body, array $auto): array
-{
-    $saved = [];
-    foreach (['mast_en', 'mast_si', 'mast_ta', 'tri', 'vol', 'issue_en', 'issue_si', 'issue_ta', 'unit_en', 'unit_si', 'unit_ta', 'title_en', 'title_si', 'title_ta'] as $key) {
-        $value = clean($body[$key] ?? '', 400);
-        if ($value !== '' && $value !== trim((string) ($auto[$key] ?? ''))) $saved[$key] = $value;
-    }
-    foreach (['en', 'si', 'ta'] as $lang) {
-        $key = "lines_{$lang}";
-        $lines = [];
-        foreach ([0, 1, 2] as $index) $lines[] = clean($body["line_{$lang}_{$index}"] ?? '', 300);
-        $automatic = array_map(fn($line) => trim((string) $line), array_slice(array_merge($auto[$key] ?? [], ['', '', '']), 0, 3));
-        $same = true;
-        foreach ($lines as $index => $line) {
-            if ($line !== ($automatic[$index] ?? '')) $same = false;
-        }
-        if (!$same) $saved[$key] = $lines;
-    }
-    return $saved;
 }
