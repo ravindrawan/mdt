@@ -6,11 +6,13 @@ require MDTU_ROOT . '/php/boot.php';
 $path = mdtu_path();
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+
 if (str_starts_with($path, '/api/') || str_starts_with($path, '/mdtu-magazine/')) {
     require MDTU_ROOT . '/php/api.php';
     mdtu_api($method, $path);
     exit;
 }
+
 
 $redirects = ['/index.html', '/about.html', '/programmes.html', '/courses.html', '/scholarships.html', '/downloads.html', '/contact.html'];
 if (in_array($path, $redirects, true)) {
