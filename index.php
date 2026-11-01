@@ -43,7 +43,7 @@ $csrf = csrf_token();
     <div class="menu-tools">
     <div class="portals">
       <a href="https://mdtu.nw.gov.lk/spcnew/" target="_blank" rel="noopener">SPC</a>
-      <a class="trainer-link" href="#trainer">The Trainer (online magazine)</a>
+      <a class="trainer-link" href="https://mdtu.nw.gov.lk/mdtu-magazine">The Trainer (online magazine)</a>
       <a href="#register" data-i18n="lectureLogin">දේශක ලියාපදිංචිය</a>
       <a href="https://mdtu.nw.gov.lk/attandence/" target="_blank" rel="noopener" data-i18n="programLogin">ඇගයීම</a>
     </div>
