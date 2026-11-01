@@ -4,6 +4,7 @@ require_once __DIR__ . '/security.php';
 mdtu_security_headers();
 $code = strtoupper(trim($_GET['code'] ?? ''));
 $record = null;
+$staff = null;
 $settings = [];
 $error = null;
 
@@ -13,9 +14,15 @@ try {
         $settings[$row['k']] = $row['v'];
     }
     if ($code !== '') {
-        $st = $pdo->prepare("SELECT r.*, p.dates AS programDates, p.fileNo AS programFileNo FROM training_records r LEFT JOIN programs p ON p.id = r.programId WHERE r.certSerial = ?");
+        $st = $pdo->prepare("SELECT r.*, p.dates AS programDates, p.fileNo AS programFileNo, p.issueCompletion, p.issueAttendance FROM training_records r LEFT JOIN programs p ON p.id = r.programId WHERE r.certSerial = ?");
         $st->execute([$code]);
         $record = $st->fetch() ?: null;
+        if (!$record) {
+            $st = $pdo->prepare("SELECT s.*, p.name AS trainingName, p.venue, p.dates AS programDates, p.fileNo AS programFileNo, p.hours, p.firstDate AS date, p.issueAttendance
+                FROM staff_certs s INNER JOIN programs p ON p.id = s.programId WHERE s.certSerial = ?");
+            $st->execute([$code]);
+            $staff = $st->fetch() ?: null;
+        }
     }
 } catch (Throwable $e) {
     $error = 'The verification service is temporarily unavailable. Please try again later.';
@@ -35,13 +42,63 @@ function mask_nic($nic)
 $dates = [];
 $absent = [];
 $hours = 0;
+$valid = false;
+$hidden = false;
+$kind = '';
+$showCompletion = false;
+$showAttendance = false;
+$display = null;
+
 if ($record) {
+    $kind = 'participant';
+    $display = $record;
     $dates = json_decode((string) $record['programDates'], true) ?: [$record['date']];
     $absent = array_filter(array_map('trim', explode(',', (string) $record['absentDates'])));
     $hours = max(0, (int) $record['hours'] - 6 * count($absent));
+    $showCompletion = (int) ($record['issueCompletion'] ?? 0) === 1 && (int) ($record['showCompletion'] ?? 0) === 1;
+    $showAttendance = (int) ($record['issueAttendance'] ?? 0) === 1 && (int) ($record['showAttendance'] ?? 0) === 1;
+    $valid = (int) $record['confirmed'] === 1 && ($showCompletion || $showAttendance);
+    $hidden = (int) $record['confirmed'] === 1 && !$showCompletion && !$showAttendance;
+} elseif ($staff) {
+    if ($staff['role'] === 'coordinator') {
+        $kind = 'coordinator';
+    } elseif ($staff['role'] === 'assistant') {
+        $kind = 'assistant';
+    } elseif ($staff['role'] === 'kks') {
+        $kind = 'kks';
+    } else {
+        $kind = 'lecturer';
+    }
+    $display = $staff;
+    if (isset($pdo) && function_exists('mdtu_staff_posting_from_db')) {
+        $post = mdtu_staff_posting_from_db(
+            $pdo,
+            (string) ($staff['nic'] ?? ''),
+            (string) ($staff['role'] ?? 'lecturer'),
+            (string) ($staff['name'] ?? ''),
+            (string) ($staff['designation'] ?? ''),
+            (string) ($staff['office'] ?? '')
+        );
+        if ($post['name'] !== '') {
+            $display['name'] = $post['name'];
+        }
+        $display['designation'] = $post['designation'];
+        $display['office'] = $post['office'] !== '' ? $post['office'] : '-';
+    }
+    $dates = json_decode((string) $staff['programDates'], true) ?: [$staff['date']];
+    $hours = (int) $staff['hours'];
+    $showAttendance = (int) ($staff['issueAttendance'] ?? 0) === 1 && (int) ($staff['showAttendance'] ?? 0) === 1;
+    $valid = $showAttendance;
+    $hidden = !$showAttendance;
 }
-$valid = $record && (int) $record['confirmed'] === 1;
 $logo = $settings['logo'] ?? '';
+$roleLabel = [
+    'participant' => 'Training participant',
+    'coordinator' => 'Training coordinating officer',
+    'assistant' => 'Assistant coordinating officer',
+    'kks' => 'Training support worker / කම්කරු (KKS)',
+    'lecturer' => 'Resource person / lecturer',
+][$kind] ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -86,7 +143,13 @@ $logo = $settings['logo'] ?? '';
             <div class="bg-white rounded-xl shadow border p-6 text-center text-slate-500 text-sm">
                 Scan the QR code on an MDTU certificate, or enter the verification code printed on it.
             </div>
-        <?php elseif (!$record): ?>
+        <?php elseif ($hidden): ?>
+            <div class="bg-slate-50 border-2 border-slate-400 rounded-xl p-6 text-center space-y-2">
+                <div class="text-5xl">—</div>
+                <h2 class="text-lg font-black text-slate-800 uppercase">Not Published</h2>
+                <p class="text-sm text-slate-600">MDTU has not published this certificate for public verification.</p>
+            </div>
+        <?php elseif (!$display): ?>
             <div class="bg-rose-50 border-2 border-rose-500 rounded-xl p-6 text-center space-y-2">
                 <div class="text-5xl">✖</div>
                 <h2 class="text-lg font-black text-rose-800 uppercase">Certificate Not Found</h2>
@@ -101,7 +164,7 @@ $logo = $settings['logo'] ?? '';
                     </h2>
                     <p class="text-xs sm:text-sm <?= $valid ? 'text-emerald-700' : 'text-amber-700' ?>">
                         <?= $valid
-                            ? 'This certificate was issued by MDTU - NWP and matches the official training record.'
+                            ? 'This certificate was issued by MDTU - NWP and matches the official training record. Role: ' . e($roleLabel) . '.'
                             : 'This training record exists, but MDTU has not yet confirmed the attendance. A certificate should not be issued yet.' ?>
                     </p>
                 </div>
@@ -112,20 +175,26 @@ $logo = $settings['logo'] ?? '';
                 <dl class="divide-y text-sm">
                     <?php
                     $rows = [
-                        'Verification Code' => '<span class="font-mono font-bold">' . e($record['certSerial']) . '</span>',
-                        'Officer Name'      => '<span class="font-bold text-indigo-950">' . e($record['name']) . '</span>',
-                        'NIC'               => '<span class="font-mono">' . e(mask_nic($record['nic'])) . '</span>',
-                        'Designation'       => e($record['designation']),
-                        'Office'            => e($record['office']),
-                        'Training Program'  => '<span class="font-bold">' . e($record['trainingName']) . '</span>',
-                        'File No'           => '<span class="font-mono">' . e($record['programFileNo'] ?: '-') . '</span>',
-                        'Venue'             => e($record['venue'] ?: '-'),
+                        'Verification Code' => '<span class="font-mono font-bold">' . e($display['certSerial']) . '</span>',
+                        'Certificate For'   => e($roleLabel),
+                        'Officer Name'      => '<span class="font-bold text-indigo-950">' . e($display['name']) . '</span>',
+                        'NIC'               => '<span class="font-mono">' . e(mask_nic($display['nic'])) . '</span>',
+                        'Designation'       => e($display['designation'] ?? ''),
+                        'Office'            => e($display['office'] ?? '-'),
+                        'Subject Field'     => e($display['field'] ?? '') ?: null,
+                        'Training Program'  => '<span class="font-bold">' . e($display['trainingName']) . '</span>',
+                        'File No'           => '<span class="font-mono">' . e($display['programFileNo'] ?: '-') . '</span>',
+                        'Venue'             => e($display['venue'] ?: '-'),
                         'Program Dates'     => e(implode(', ', $dates)),
-                        'Absent Dates'      => $absent ? '<span class="text-rose-700 font-semibold">' . e(implode(', ', $absent)) . '</span>' : 'None',
+                        'Absent Dates'      => $kind === 'participant' ? ($absent ? '<span class="text-rose-700 font-semibold">' . e(implode(', ', $absent)) . '</span>' : 'None') : null,
                         'Hours Completed'   => '<span class="font-bold text-emerald-700">' . $hours . ' Hours</span>',
-                        'Confirmed'         => $valid ? (e(trim(($record['confirmedAt'] ? date('Y-m-d', strtotime($record['confirmedAt'])) : '') . ($record['confirmedBy'] ? ' by ' . $record['confirmedBy'] : ''))) ?: 'Yes') : 'Pending',
+                        'Confirmed'         => $valid ? 'Yes' : 'Pending',
                     ];
-                    foreach ($rows as $label => $value): ?>
+                    foreach ($rows as $label => $value):
+                        if ($value === null || $value === '') {
+                            continue;
+                        }
+                        ?>
                         <div class="px-5 py-3 grid grid-cols-1 sm:grid-cols-3 gap-1">
                             <dt class="text-xs font-bold text-slate-500 uppercase"><?= e($label) ?></dt>
                             <dd class="sm:col-span-2 text-slate-800 break-words"><?= $value ?></dd>

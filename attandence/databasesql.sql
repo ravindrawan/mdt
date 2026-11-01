@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL,
+    nic VARCHAR(20) NULL,
+    officerName VARCHAR(255) NULL,
+    designation VARCHAR(255) NULL,
+    office VARCHAR(255) NULL,
     mustChangePassword TINYINT(1) NOT NULL DEFAULT 0,
     passwordChangedAt DATETIME NULL,
     lastLoginAt DATETIME NULL,
@@ -30,6 +34,11 @@ CREATE TABLE IF NOT EXISTS programs (
     firstDate DATE NOT NULL,
     hours INT NOT NULL DEFAULT 6,
     resourcePersons TEXT,
+    coordinators TEXT,
+    assistantCoordinators TEXT,
+    kksHelpers TEXT,
+    issueCompletion TINYINT(1) NOT NULL DEFAULT 0,
+    issueAttendance TINYINT(1) NOT NULL DEFAULT 0,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_program_name_date (name(191), firstDate),
     KEY idx_program_first_date (firstDate)
@@ -67,6 +76,8 @@ CREATE TABLE IF NOT EXISTS training_records (
     confirmed TINYINT(1) NOT NULL DEFAULT 0,
     confirmedBy VARCHAR(100),
     confirmedAt DATETIME,
+    showCompletion TINYINT(1) NOT NULL DEFAULT 1,
+    showAttendance TINYINT(1) NOT NULL DEFAULT 1,
     certSerial VARCHAR(40),
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_cert_serial (certSerial),
@@ -120,10 +131,30 @@ CREATE TABLE IF NOT EXISTS staff_matrix (
 CREATE TABLE IF NOT EXISTS resource_persons (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    nic VARCHAR(20) NULL,
     field VARCHAR(255),
     institution VARCHAR(255),
     contact VARCHAR(50),
     email VARCHAR(150)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Attendance certificates for coordinating officers and lecturers (QR verified)
+CREATE TABLE IF NOT EXISTS staff_certs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    programId INT NOT NULL,
+    role VARCHAR(20) NOT NULL,
+    nic VARCHAR(20) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    designation VARCHAR(255) NULL,
+    office VARCHAR(255) NULL,
+    field VARCHAR(255) NULL,
+    certSerial VARCHAR(40) NOT NULL,
+    showAttendance TINYINT(1) NOT NULL DEFAULT 0,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_cert_serial (certSerial),
+    UNIQUE KEY uq_staff_prog_role_nic (programId, role, nic),
+    KEY idx_staff_nic (nic),
+    KEY idx_staff_program (programId)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Official notifications and user inquiries
@@ -187,7 +218,8 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 -- Every certificate downloaded or printed (register of issued certificates)
 CREATE TABLE IF NOT EXISTS certificate_issues (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    recordId INT NOT NULL,
+    recordId INT NOT NULL DEFAULT 0,
+    staffCertId INT NULL,
     certSerial VARCHAR(40) NULL,
     certType VARCHAR(20) NOT NULL,
     mode VARCHAR(10) NOT NULL,
@@ -195,5 +227,6 @@ CREATE TABLE IF NOT EXISTS certificate_issues (
     issuedBy VARCHAR(100) NULL,
     ip VARCHAR(45) NULL,
     KEY idx_issue_record (recordId, certType),
+    KEY idx_issue_staff (staffCertId, certType),
     KEY idx_issue_date (issuedAt)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

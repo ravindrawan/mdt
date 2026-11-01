@@ -14,6 +14,8 @@ mdtu_security_headers();
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- html2pdf.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- pdf.js — render progress attachment PDFs (photos/pages) into presentation slides -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <!-- jsPDF + AutoTable (multi-page text PDF registers) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -107,11 +109,79 @@ mdtu_security_headers();
             width: 100%;
             max-width: 280mm;
             min-height: 157mm;
-            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-            color: #ffffff;
+            background: linear-gradient(135deg, var(--pres-bg1, #0f172a) 0%, var(--pres-bg2, #1e1b4b) 100%);
+            color: var(--pres-text, #ffffff);
+            border-color: color-mix(in srgb, var(--pres-accent, #f59e0b) 45%, transparent) !important;
             box-sizing: border-box;
             page-break-after: always;
         }
+        #presentationSlidesArea {
+            --pres-bg1: #0f172a;
+            --pres-bg2: #1e1b4b;
+            --pres-text: #f8fafc;
+            --pres-muted: #94a3b8;
+            --pres-accent: #f59e0b;
+            --pres-accent-text: #1e1b4b;
+            --pres-panel: rgba(15, 23, 42, 0.72);
+            --pres-line: rgba(99, 102, 241, 0.35);
+            --pres-radius: 1rem;
+        }
+        #presentationSlidesArea .pres-slide { border-radius: var(--pres-radius); }
+        #presentationSlidesArea .pres-title { color: var(--pres-accent) !important; }
+        #presentationSlidesArea .pres-heading { color: var(--pres-text) !important; }
+        #presentationSlidesArea .pres-muted { color: var(--pres-muted) !important; }
+        #presentationSlidesArea .pres-panel {
+            background: var(--pres-panel) !important;
+            color: var(--pres-text) !important;
+            border-radius: calc(var(--pres-radius) * 0.75);
+        }
+        #presentationSlidesArea .pres-panel-label { color: var(--pres-accent) !important; }
+        #presentationSlidesArea .pres-divider { border-color: var(--pres-line) !important; }
+        #presentationSlidesArea .pres-badge {
+            background: color-mix(in srgb, var(--pres-accent) 85%, white) !important;
+            color: var(--pres-accent-text) !important;
+        }
+        #presentationSlidesArea .pres-chip {
+            background: color-mix(in srgb, var(--pres-accent) 22%, transparent) !important;
+            color: var(--pres-accent) !important;
+        }
+        #presentationSlidesArea .pres-hero { color: var(--pres-accent) !important; }
+        #presentationSlidesArea[data-pres-template="classic"] { --pres-radius: 1rem; }
+        #presentationSlidesArea[data-pres-template="executive"] {
+            --pres-radius: 0.35rem;
+            --pres-bg1: #0b1220;
+            --pres-bg2: #152238;
+        }
+        #presentationSlidesArea[data-pres-template="executive"] .pres-slide {
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pres-accent) 35%, transparent);
+        }
+        #presentationSlidesArea[data-pres-template="light"] {
+            --pres-bg1: #f8fafc;
+            --pres-bg2: #eef2ff;
+            --pres-text: #0f172a;
+            --pres-muted: #64748b;
+            --pres-panel: rgba(255, 255, 255, 0.92);
+            --pres-line: rgba(15, 23, 42, 0.12);
+            --pres-radius: 0.85rem;
+            --pres-accent-text: #ffffff;
+        }
+        #presentationSlidesArea[data-pres-template="light"] .pres-slide {
+            border-width: 2px !important;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+        }
+        #presentationSlidesArea[data-pres-template="ribbon"] .pres-slide {
+            border-left-width: 14px !important;
+            border-radius: 0.65rem;
+            padding-left: 1.35rem !important;
+        }
+        #presentationSlidesArea[data-pres-theme="amber"] { --pres-accent: #f59e0b; --pres-accent-text: #1e1b4b; }
+        #presentationSlidesArea[data-pres-theme="teal"] { --pres-accent: #14b8a6; --pres-accent-text: #042f2e; }
+        #presentationSlidesArea[data-pres-theme="emerald"] { --pres-accent: #10b981; --pres-accent-text: #022c22; }
+        #presentationSlidesArea[data-pres-theme="crimson"] { --pres-accent: #e11d48; --pres-accent-text: #fff1f2; }
+        #presentationSlidesArea[data-pres-theme="sky"] { --pres-accent: #0ea5e9; --pres-accent-text: #082f49; }
+        #presentationSlidesArea[data-pres-theme="gold"] { --pres-accent: #d4a017; --pres-accent-text: #1c1917; }
+        #presentationSlidesArea[data-pres-template="light"][data-pres-theme="crimson"] { --pres-accent-text: #ffffff; }
+        #presentationSlidesArea[data-pres-template="light"][data-pres-theme="amber"] { --pres-accent-text: #1e1b4b; }
 
         @media print {
             .no-print { display: none !important; }
@@ -126,6 +196,11 @@ mdtu_security_headers();
         }
         
         .print-only { display: none; }
+        .password-eye { position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%); width: 1.75rem; height: 1.75rem; display: flex; align-items: center; justify-content: center; color: #475569; border-radius: 0.35rem; }
+        .password-eye:hover { background: #e2e8f0; color: #1e1b4b; }
+        .password-eye svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        form[data-submitting="1"] { cursor: wait; }
+        button:disabled { cursor: not-allowed; }
         .nav-heading { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; padding: 0 0.5rem 0.25rem; }
         .tab-btn { display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; font-size: 0.75rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; border-left: 4px solid transparent; transition: background-color 0.15s; }
         .tab-btn:hover { background-color: #1e1b4b; }
@@ -281,18 +356,21 @@ mdtu_security_headers();
             <button onclick="switchTab('duty-report')" id="tab-duty-report" class="tab-btn">📋 Duty Hours Report</button>
             <button onclick="switchTab('pending')" id="tab-pending" class="tab-btn">⚠️ Incomplete Officers</button>
             <button onclick="switchTab('completed')" id="tab-completed" class="tab-btn">🟢 Completed Officers</button>
-            <button onclick="switchTab('progress-reports')" id="tab-progress-reports" class="tab-btn text-amber-300">📑 Monthly Progress (All Months)</button>
+            <button onclick="switchTab('progress-detail-report')" id="tab-progress-detail-report" class="tab-btn text-amber-200">📑 Progress Detail Report</button>
         </details>
 
         <details class="nav-group super-user-only hidden" data-tile-color="amber">
             <summary class="nav-heading text-amber-400">Superuser Data Entry</summary>
             <button onclick="switchTab('progress-entry')" id="tab-progress-entry" class="tab-btn text-amber-200">📈 Monthly Progress Entry</button>
+            <button onclick="switchTab('progress-reports')" class="tab-btn text-amber-200">📽️ My Progress Presentation</button>
             <button onclick="switchTab('training-plan-entry')" id="tab-training-plan-entry" class="tab-btn text-teal-200">📝 Annual Training Plan Entry</button>
         </details>
 
         <details class="nav-group logged-in-only hidden" data-tile-color="indigo">
             <summary class="nav-heading text-indigo-300">Shared Reports</summary>
             <button onclick="switchTab('participation-list')" id="tab-participation-list" class="tab-btn text-amber-200">📋 Participations List</button>
+            <button onclick="switchTab('progress-reports')" id="tab-progress-reports" class="tab-btn text-amber-200">📽️ Progress Presentation</button>
+            <button onclick="switchTab('office-count-report')" id="tab-office-count-report" class="tab-btn text-emerald-200">🏢 Office Cadre &amp; Training</button>
             <button onclick="switchTab('training-plan-report')" id="tab-training-plan-report" class="tab-btn text-teal-300">📋 Annual Training Plan Report</button>
             <button onclick="switchTab('resource-persons-master-report')" id="tab-resource-persons-master-report" class="tab-btn text-purple-300">👥 Resource Persons Directory</button>
             <button onclick="switchTab('office-report')" id="tab-office-report" class="tab-btn">🏢 Office 12h Status</button>
@@ -304,7 +382,6 @@ mdtu_security_headers();
             <button onclick="switchTab('template-settings')" id="tab-template-settings" class="tab-btn">🔒 Certificate Templates</button>
             <button onclick="switchTab('user-management')" id="tab-user-management" class="tab-btn">👑 User Accounts</button>
             <button onclick="switchTab('audit-log')" id="tab-audit-log" class="tab-btn text-emerald-300">🛡️ Audit Log & Security</button>
-            <button onclick="switchTab('resource-upload')" id="tab-resource-upload" class="tab-btn">👥 Upload Resource Master</button>
             <button onclick="switchTab('annual-excel-upload')" id="tab-annual-excel-upload" class="tab-btn">📁 Annual Staff Matrix</button>
             <button onclick="switchTab('archive-tab')" id="tab-archive-tab" class="tab-btn text-indigo-300">🏛️ Database Backup</button>
         </details>
@@ -535,6 +612,7 @@ mdtu_security_headers();
                             <select id="trainingNameSelect" required onchange="onProgramSelected()" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
                                 <option value="">-- Select the program you attended --</option>
                             </select>
+                            <p class="text-[10px] text-slate-500 mt-1">A program stays in this list from its last day until one week later, then it is removed.</p>
                         </div>
 
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -584,7 +662,8 @@ mdtu_security_headers();
                         </div>
 
                         <div>
-                            <label class="block text-xs font-semibold text-slate-700 mb-1">Feedback / Constructive Comments</label>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Feedback / Constructive Comments <span class="text-rose-600">*</span></label>
+                            <p class="text-[10px] text-slate-500 mb-1.5">Required — pick a phrase or type your own. Submit is blocked if this is empty.</p>
                             <div id="feedbackSuggestions" class="flex flex-wrap gap-1.5 mb-2">
                                 <button type="button" onclick="useFeedbackPhrase('Good')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Good</button>
                                 <button type="button" onclick="useFeedbackPhrase('Very good')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Very good</button>
@@ -592,8 +671,10 @@ mdtu_security_headers();
                                 <button type="button" onclick="useFeedbackPhrase('Satisfactory')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Satisfactory</button>
                                 <button type="button" onclick="useFeedbackPhrase('Very useful')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Very useful</button>
                                 <button type="button" onclick="useFeedbackPhrase('Well organized')" class="px-2.5 py-1 rounded-full bg-white border border-indigo-200 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50">Well organized</button>
+                                <button type="button" onclick="useFeedbackPhrase('Bad')" class="px-2.5 py-1 rounded-full bg-rose-50 border border-rose-300 text-[11px] font-bold text-rose-800 hover:bg-rose-100">Bad</button>
+                                <button type="button" onclick="useFeedbackPhrase('Very bad')" class="px-2.5 py-1 rounded-full bg-rose-50 border border-rose-300 text-[11px] font-bold text-rose-800 hover:bg-rose-100">Very bad</button>
                             </div>
-                            <textarea id="feedbackInput" rows="2" list="feedbackPhrases" placeholder="Choose a phrase above, or type your own comment..." class="w-full p-2.5 text-xs border rounded-lg outline-none"></textarea>
+                            <textarea id="feedbackInput" rows="2" required list="feedbackPhrases" placeholder="Choose a phrase above, or type your own comment..." class="w-full p-2.5 text-xs border rounded-lg outline-none"></textarea>
                             <datalist id="feedbackPhrases">
                                 <option value="Good">
                                 <option value="Very good">
@@ -601,6 +682,8 @@ mdtu_security_headers();
                                 <option value="Satisfactory">
                                 <option value="Very useful">
                                 <option value="Well organized">
+                                <option value="Bad">
+                                <option value="Very bad">
                             </datalist>
                         </div>
                     </div>
@@ -630,7 +713,7 @@ mdtu_security_headers();
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Office / Department</label>
-                            <input type="text" id="progUserOffice" required list="officeDatalist" onchange="autoCalculateOfficeStaffProgress(); populateAutoMdtuPrograms(readOfficerField('progUserOffice'))" placeholder="Auto-filled / type office" class="notranslate w-full p-2.5 text-xs border rounded bg-white font-bold text-indigo-950">
+                            <input type="text" id="progUserOffice" required list="officeDatalist" onchange="refreshProgressEntryPanels()" placeholder="Auto-filled / type office" class="notranslate w-full p-2.5 text-xs border rounded bg-white font-bold text-indigo-950">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Designation</label>
@@ -638,7 +721,7 @@ mdtu_security_headers();
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Reporting Month *</label>
-                            <select id="progMonth" required class="w-full p-2.5 text-xs border rounded bg-white font-bold">
+                            <select id="progMonth" required onchange="refreshProgressEntryPanels()" class="w-full p-2.5 text-xs border rounded bg-white font-bold">
                                 <option value="January">January</option><option value="February">February</option>
                                 <option value="March">March</option><option value="April">April</option>
                                 <option value="May">May</option><option value="June">June</option>
@@ -670,23 +753,36 @@ mdtu_security_headers();
                                 </tbody>
                             </table>
                         </div>
+                        <div id="progHoursCoverage" class="pt-1"></div>
                     </div>
 
                     <div class="bg-slate-50 p-3 sm:p-4 rounded-lg border space-y-4">
-                        <h3 class="text-xs font-bold text-indigo-900 uppercase">🏫 MDTU Training Attendance & In-House Trainings</h3>
+                        <h3 class="text-xs font-bold text-indigo-900 uppercase">🏫 MDTU Training Attendance &amp; Office Trainings</h3>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">MDTU Auto-Linked Official Programs</label>
+                            <p class="text-[11px] text-slate-500 mb-1">තෝරාගත් <strong>මාසය</strong> තුළ මෙම කාර්යාලයේ තහවුරු කළ MDTU වැඩසටහන් සහ එක් එක් වැඩසටහනේ සහභාගී ගණන.</p>
                             <div id="progAutoProgramsList" class="p-3 bg-white border rounded text-xs text-slate-700 space-y-1 overflow-x-auto">
                                 <span>Enter ID to load official programs.</span>
                             </div>
                         </div>
 
                         <div class="border-t pt-3 space-y-2">
-                            <div class="flex justify-between items-center flex-wrap gap-2">
-                                <label class="text-xs font-bold text-slate-700">Internal Trainings Conducted within Office:</label>
-                                <button type="button" onclick="addOtherTrainingRow()" class="bg-indigo-900 text-white text-xs font-bold px-2.5 py-1 rounded">+ Add In-House Program</button>
+                            <label class="block text-xs font-bold text-teal-900 mb-1">කාර්යාලීය පුහුණු (MDTU ප්‍රතිපාදන භාවිතා නොකර) — මේ වසරේ ඇතුළත් කළ තොරතුරු</label>
+                            <p class="text-[11px] text-slate-500">MDTU ලැයිස්තුවෙන් වෙනම. මාසිකව save කළ පැය (සහභාගී × වැඩසටහන් පැය) වසර අවසානයේ එකතු වේ.</p>
+                            <div id="progOfficeTrainingsHistory" class="p-3 bg-teal-50/80 border border-teal-200 rounded text-xs text-slate-700 space-y-2 overflow-x-auto">
+                                <span class="text-slate-400">කාර්යාලය තෝරා මෙහි පෙර ඇතුළත් කිරීම් පෙනේ.</span>
                             </div>
-                            <div id="otherTrainingsContainer" class="space-y-2"></div>
+                        </div>
+
+                        <div class="border-t pt-3 space-y-2">
+                            <div class="flex justify-between items-center flex-wrap gap-2">
+                                <div>
+                                    <label class="text-xs font-bold text-slate-700">මෙම මාසයේ කාර්යාලීය පුහුණු</label>
+                                    <p class="text-[11px] text-slate-500">උඩින් වැඩසටහන් <strong>පැය</strong>; පහතින් තනතුරු අනුව <strong>සහභාගී ගණන</strong> පමණි. කාඩර් 0 තනතුරු නොපෙන්වයි.</p>
+                                </div>
+                                <button type="button" onclick="addOtherTrainingRow()" class="bg-teal-800 hover:bg-teal-700 text-white text-xs font-bold px-2.5 py-1 rounded">+ Add Office Training</button>
+                            </div>
+                            <div id="otherTrainingsContainer" class="space-y-3"></div>
                         </div>
                     </div>
 
@@ -709,39 +805,153 @@ mdtu_security_headers();
                     <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-lg shadow-lg text-xs uppercase tracking-wider">
                         🚀 Submit Progress & Prepare Presentation Slides
                     </button>
+                    <button type="button" onclick="openMyProgressPresentation()" class="w-full bg-indigo-900 hover:bg-indigo-800 text-white font-bold py-3 rounded-lg text-xs">
+                        📽️ Download this month's presentation (PDF / Excel)
+                    </button>
                 </form>
             </div>
         </div>
 
-        <!-- PROGRESS PRESENTATION SLIDES & REPORTS TAB -->
-        <div id="view-progress-reports" class="tab-view hidden space-y-6 admin-only w-full">
+        <!-- ADMIN / SUPER ADMIN: ALL USERS PROGRESS DETAIL REPORT (not slides) -->
+        <div id="view-progress-detail-report" class="tab-view hidden space-y-6 admin-only w-full">
             <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
                 <div class="border-b-2 border-indigo-900 pb-4 text-center">
                     <h3 class="text-xs font-black text-amber-600 uppercase tracking-widest">Management Development and Training Unit - NWP</h3>
-                    <h2 class="text-base sm:text-xl font-black text-indigo-950 uppercase mt-0.5">Monthly Progress — All Months</h2>
-                    <p class="text-xs text-slate-500">Admin and Super Admin only. January to December in one table, ready for PDF.</p>
+                    <h2 class="text-base sm:text-xl font-black text-indigo-950 uppercase mt-0.5">Progress Detail Report</h2>
+                    <p class="text-xs text-slate-500">සියලු Superuser submissions එකතුව — මාසය / අවුරුද්ද. Presentation නොවේ; විස්තර report + PDF.</p>
                 </div>
 
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 no-print">
-                    <p class="text-xs text-slate-600 font-medium">Every month is listed for each office. Months with no submission stay in the table.</p>
+                    <p class="text-xs text-slate-600 font-medium">Admin සහ Super Admin පමණයි. සියලු usersගේ remarks, productivity, MDTU/කාර්යාලීය පුහුණු, ගණන්, attachment links මෙහි එකතුවෙන් පෙනේ.</p>
                     <div class="flex gap-2 flex-wrap">
-                        <button onclick="downloadPresentationPDF()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📄 Download PDF</button>
-                        <button onclick="exportTableToExcel('progressMonthTable', 'Monthly_Progress_All_Months')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📊 Export Excel</button>
+                        <button onclick="downloadProgressDetailPDF()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📄 Download PDF</button>
+                        <button onclick="exportProgressDetailExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📊 Export Excel</button>
                     </div>
                 </div>
 
-                <div class="bg-slate-50 p-3 sm:p-4 rounded-lg border no-print max-w-md">
-                    <label class="block text-xs font-bold text-slate-700 mb-1">Office</label>
-                    <select id="presOfficeSelect" onchange="renderProgressPresentations()" class="w-full p-2 text-xs border rounded bg-white">
-                        <option value="all">All Offices</option>
-                    </select>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50 p-3 sm:p-4 rounded-lg border no-print">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">කාලය</label>
+                        <select id="pdrViewType" onchange="renderProgressDetailReport()" class="w-full p-2 text-xs border rounded bg-white font-bold">
+                            <option value="monthly">මාසය අනුව</option>
+                            <option value="yearly">අවුරුද්ද මුළුල්ල (සියලු මාස)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Superuser</label>
+                        <select id="pdrUserSelect" onchange="renderProgressDetailReport()" class="w-full p-2 text-xs border rounded bg-white">
+                            <option value="all">සියලු Superusers</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Office</label>
+                        <select id="pdrOfficeSelect" onchange="renderProgressDetailReport()" class="w-full p-2 text-xs border rounded bg-white">
+                            <option value="all">සියලු කාර්යාල</option>
+                        </select>
+                    </div>
+                    <div id="pdrMonthWrapper">
+                        <label class="block text-xs font-bold text-slate-700 mb-1">මාසය</label>
+                        <select id="pdrMonthSelect" onchange="renderProgressDetailReport()" class="w-full p-2 text-xs border rounded bg-white font-bold">
+                            <option value="all">සියලු මාස</option>
+                            <option value="January">January</option><option value="February">February</option>
+                            <option value="March">March</option><option value="April">April</option>
+                            <option value="May">May</option><option value="June">June</option>
+                            <option value="July">July</option><option value="August">August</option>
+                            <option value="September">September</option><option value="October">October</option>
+                            <option value="November">November</option><option value="December">December</option>
+                        </select>
+                    </div>
                 </div>
+                <label class="no-print inline-flex items-center gap-2 text-xs text-slate-700 font-medium">
+                    <input type="checkbox" id="pdrIncludePdfPages" onchange="renderProgressDetailReport()" class="rounded border-slate-300">
+                    Attachment PDF පිටු / ඡායාරූප report එකට ඇතුළත් කරන්න (PDF විශාල විය හැක)
+                </label>
+
+                <div class="overflow-x-auto">
+                    <div id="progressDetailReportArea" class="space-y-4 bg-white"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PROGRESS PRESENTATION SLIDES & REPORTS TAB -->
+        <div id="view-progress-reports" class="tab-view hidden space-y-6 logged-in-only w-full">
+            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
+                <div class="border-b-2 border-indigo-900 pb-4 text-center">
+                    <h3 class="text-xs font-black text-amber-600 uppercase tracking-widest">Management Development and Training Unit - NWP</h3>
+                    <h2 class="text-base sm:text-xl font-black text-indigo-950 uppercase mt-0.5">Progress Presentation</h2>
+                    <p class="text-xs text-slate-500">Pick one superuser account, one office, every office for one month, or the whole year. PDF is the slide presentation.</p>
+                </div>
+
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 no-print">
+                    <p class="text-xs text-slate-600 font-medium">Superuser downloads their own progress. Template + colour theme තෝරලා PDF presentation ලස්සනට download කරන්න. Admin / Super Admin can filter by account, office, month or year.</p>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="downloadPresentationPDF()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📄 Download PDF</button>
+                        <button onclick="exportProgressExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📊 Export Excel</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 bg-slate-50 p-3 sm:p-4 rounded-lg border no-print">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Report</label>
+                        <select id="presViewType" onchange="renderProgressPresentations()" class="w-full p-2 text-xs border rounded bg-white font-bold">
+                            <option value="monthly">One month — all or one office</option>
+                            <option value="yearly">Yearly — every month</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Superuser account</label>
+                        <select id="presUserSelect" onchange="onProgressUserChange()" class="w-full p-2 text-xs border rounded bg-white">
+                            <option value="all">All superusers</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Office</label>
+                        <select id="presOfficeSelect" onchange="onProgressOfficeChange()" class="w-full p-2 text-xs border rounded bg-white">
+                            <option value="all">All offices</option>
+                        </select>
+                    </div>
+                    <div id="presMonthWrapper">
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Month</label>
+                        <select id="presMonthSelect" onchange="renderProgressPresentations()" class="w-full p-2 text-xs border rounded bg-white font-bold">
+                            <option value="all">All months</option>
+                            <option value="January">January</option><option value="February">February</option>
+                            <option value="March">March</option><option value="April">April</option>
+                            <option value="May">May</option><option value="June">June</option>
+                            <option value="July">July</option><option value="August">August</option>
+                            <option value="September">September</option><option value="October">October</option>
+                            <option value="November">November</option><option value="December">December</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">PDF Template</label>
+                        <select id="presTemplateSelect" onchange="onPresentationStyleChange()" class="w-full p-2 text-xs border rounded bg-white font-bold">
+                            <option value="classic">Classic dark</option>
+                            <option value="executive">Executive sharp</option>
+                            <option value="light">Light / print-friendly</option>
+                            <option value="ribbon">Accent ribbon</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Colour theme</label>
+                        <select id="presColorSelect" onchange="onPresentationStyleChange()" class="w-full p-2 text-xs border rounded bg-white font-bold">
+                            <option value="amber">Amber gold</option>
+                            <option value="teal">Teal</option>
+                            <option value="emerald">Emerald</option>
+                            <option value="sky">Sky blue</option>
+                            <option value="crimson">Crimson</option>
+                            <option value="gold">Deep gold</option>
+                        </select>
+                    </div>
+                </div>
+                <p id="presStyleHint" class="no-print text-[11px] text-slate-500 -mt-2">Theme preview updates on the slides below. Download PDF uses the same look.</p>
+
+                <div id="presentationSlidesArea" data-pres-template="classic" data-pres-theme="amber" class="space-y-6 flex flex-col items-center w-full overflow-x-auto"></div>
 
                 <div class="overflow-x-auto">
                 <div id="presentationPdfContainer" class="space-y-3">
                     <div class="text-center border-b pb-3">
                         <h3 class="text-xs font-black text-amber-600 uppercase">Management Development and Training Unit - NWP</h3>
-                        <h4 class="text-base font-black text-indigo-950 uppercase">Monthly Progress Report — All Months</h4>
+                        <h4 class="text-base font-black text-indigo-950 uppercase">Progress Report</h4>
                         <p id="presReportSubtitle" class="text-xs font-semibold text-slate-500 mt-1"></p>
                     </div>
                     <div>
@@ -752,7 +962,7 @@ mdtu_security_headers();
                                     <th class="p-2 border border-indigo-800">Month</th>
                                     <th class="p-2 border border-indigo-800">Special Remarks</th>
                                     <th class="p-2 border border-indigo-800">Productivity</th>
-                                    <th class="p-2 border border-indigo-800">In-house Trainings</th>
+                                    <th class="p-2 border border-indigo-800">MDTU + කාර්යාලීය පුහුණු / ගණන්</th>
                                     <th class="p-2 border border-indigo-800 text-center">Submitted</th>
                                 </tr>
                             </thead>
@@ -882,6 +1092,7 @@ mdtu_security_headers();
                             <thead class="bg-purple-900 text-white font-bold">
                                 <tr>
                                     <th class="p-2.5">Resource Person Name</th>
+                                    <th class="p-2.5">NIC / Officer ID</th>
                                     <th class="p-2.5">Specialization / Domain</th>
                                     <th class="p-2.5">Designation & Institution</th>
                                     <th class="p-2.5">Contact Number</th>
@@ -892,25 +1103,41 @@ mdtu_security_headers();
                         </table>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- SUPER ADMIN RESOURCE PERSON LIST EXCEL UPLOAD TAB -->
-        <div id="view-resource-upload" class="tab-view hidden max-w-4xl mx-auto super-admin-only space-y-6 w-full">
-            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-purple-300 space-y-6">
-                <div class="border-b pb-4">
-                    <h2 class="text-lg sm:text-xl font-bold text-purple-950 flex items-center gap-2">
-                        <span>👥</span> Super Admin Resource Persons Master Upload
-                    </h2>
-                    <p class="text-xs text-slate-500">Upload master Excel file containing resource persons.</p>
-                </div>
-
-                <div class="space-y-3 bg-purple-50 p-4 rounded-lg border border-purple-200">
-                    <label class="block text-xs font-bold text-purple-950 mb-1">Select Excel File (.xlsx, .xls):</label>
+                <div class="super-admin-only hidden space-y-3 bg-purple-50 p-4 rounded-lg border border-purple-200 no-print">
+                    <h3 class="text-sm font-bold text-purple-950">Upload resource person details</h3>
+                    <p class="text-xs text-slate-600">Use these columns. Name is required. NIC / Officer ID is optional but needed for the lecturer attendance certificate. Old 9-digit + V/X NICs are converted to the 12-digit form. Names then appear in the lecturer list under Programs &amp; Venues.</p>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-[11px] border-collapse border border-purple-200 min-w-[640px]">
+                            <thead class="bg-purple-900 text-white">
+                                <tr>
+                                    <th class="p-2">Resource Person Name *</th>
+                                    <th class="p-2">NIC / Officer ID</th>
+                                    <th class="p-2">Specialization / Domain</th>
+                                    <th class="p-2">Designation &amp; Institution</th>
+                                    <th class="p-2">Contact Number</th>
+                                    <th class="p-2">Email Address</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="bg-white text-slate-600">
+                                    <td class="p-2">Required</td>
+                                    <td class="p-2">Optional</td>
+                                    <td class="p-2">Optional</td>
+                                    <td class="p-2">Optional</td>
+                                    <td class="p-2">Optional</td>
+                                    <td class="p-2">Optional</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" onclick="downloadResourcePersonTemplate()" class="bg-white border border-purple-300 text-purple-950 font-bold text-xs px-3.5 py-2 rounded shadow">📥 Download column template</button>
+                        <button type="button" onclick="downloadResourcePersonsExcel()" class="bg-emerald-600 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📊 Download database list</button>
+                    </div>
+                    <label class="block text-xs font-bold text-purple-950">Select Excel File (.xlsx, .xls)</label>
                     <input type="file" id="resourcePersonsExcelInput" accept=".xlsx, .xls" class="w-full p-2 text-xs border rounded bg-white">
-                    <button onclick="uploadResourcePersonsExcel()" class="bg-purple-900 hover:bg-purple-800 text-white font-bold text-xs px-5 py-2.5 rounded shadow">
-                        📤 Process & Update Resource Persons
-                    </button>
+                    <button type="button" id="resourceUploadBtn" onclick="uploadResourcePersonsExcel()" class="bg-purple-900 hover:bg-purple-800 disabled:opacity-60 text-white font-bold text-xs px-5 py-2.5 rounded shadow">📤 Upload resource persons</button>
                 </div>
             </div>
         </div>
@@ -1113,8 +1340,8 @@ mdtu_security_headers();
                         <div class="sm:col-span-2">
                             <label for="progFileNoConfig" class="block text-xs font-bold text-slate-700 mb-1">File No (My No): <span class="font-normal text-slate-500">printed as "My No" on the attendance certificate letterhead</span></label>
                             <div class="flex rounded border overflow-hidden focus-within:ring-2 focus-within:ring-indigo-300 bg-white">
-                                <span class="px-3 py-2.5 text-xs font-mono font-bold bg-indigo-900 text-amber-300 select-none shrink-0">NWP/CS/T/2/</span>
-                                <input type="text" id="progFileNoConfig" maxlength="80" placeholder="type the rest e.g. 1/5/2026" class="flex-1 min-w-0 p-2.5 text-xs font-mono outline-none uppercase">
+                                <span class="px-3 py-2.5 text-xs font-mono font-bold bg-indigo-900 text-amber-300 select-none shrink-0">NWP/CS/T/</span>
+                                <input type="text" id="progFileNoConfig" maxlength="80" placeholder="type the number and the rest, e.g. 2/1/5/2026" class="flex-1 min-w-0 p-2.5 text-xs font-mono outline-none uppercase">
                             </div>
                         </div>
                     </div>
@@ -1141,13 +1368,62 @@ mdtu_security_headers();
                         </div>
                     </div>
 
+                    <div class="border-t pt-4 space-y-2">
+                        <p class="text-xs font-bold text-slate-700">Certificates for this program</p>
+                        <p class="text-[10px] text-slate-500">A certificate is generated only after its tick is saved. The attendance certificate date is this program's last day.</p>
+                        <label class="flex items-start gap-2 text-xs text-slate-700">
+                            <input type="checkbox" id="progIssueCompletion" class="mt-0.5 w-4 h-4 accent-emerald-700">
+                            <span><strong>Completion certificate</strong> — prepare the e-certificate for officers who completed this training.</span>
+                        </label>
+                        <label class="flex items-start gap-2 text-xs text-slate-700">
+                            <input type="checkbox" id="progIssueAttendance" class="mt-0.5 w-4 h-4 accent-amber-600">
+                            <span><strong>Attendance certificate</strong> — prepare it for officers who attended, and also for coordinating officers, assistant coordinating officers, සහායක (KKS) and lecturers listed below. The letter date is the program's last day. Each certificate has a QR code.</span>
+                        </label>
+                    </div>
+
                     <div class="border-t pt-4 space-y-3">
-                        <div class="flex justify-between items-center">
-                            <label class="text-xs font-bold text-slate-700">Resource Persons / Lecturers:</label>
+                        <div class="flex justify-between items-center flex-wrap gap-2">
+                            <label class="text-xs font-bold text-slate-700">Training Coordinating Officers: <span class="font-normal text-slate-500">enter NIC to auto-fill name. Their attendance certificate is prepared with this program when Attendance is ticked.</span></label>
+                            <button type="button" onclick="addCoordinatorConfigRow()" class="bg-teal-700 text-white text-xs font-bold px-3 py-1 rounded">+ Add Coordinating Officer</button>
+                        </div>
+                        <div id="progCoordinatorsContainer" class="space-y-2"></div>
+                    </div>
+
+                    <div class="border-t pt-4 space-y-3">
+                        <div class="flex justify-between items-center flex-wrap gap-2">
+                            <label class="text-xs font-bold text-slate-700">Assistant Coordinating Officers: <span class="font-normal text-slate-500">NIC / Officer ID and name only. Up to 20 people. Their attendance certificate is prepared when Attendance is ticked.</span></label>
+                            <button type="button" onclick="addAssistantCoordinatorConfigRow()" class="bg-cyan-700 text-white text-xs font-bold px-3 py-1 rounded">+ Add Assistant Coordinator</button>
+                        </div>
+                        <p id="progAssistantCount" class="text-[10px] text-slate-500">0 / 20 added</p>
+                        <div id="progAssistantCoordinatorsContainer" class="space-y-2"></div>
+                    </div>
+
+                    <div class="border-t pt-4 space-y-3 bg-amber-50/60 -mx-2 sm:mx-0 px-3 py-3 rounded-xl border border-amber-200">
+                        <div class="flex justify-between items-center flex-wrap gap-2">
+                            <div>
+                                <label class="text-xs font-bold text-amber-950">සහායක (KKS) — Training support workers</label>
+                                <p class="text-[10px] text-amber-900/80 mt-0.5">Up to <strong>5</strong> per program. Type or pick an NIC from the list; name / permanent designation / office auto-fill from the officer directory (or type if missing). Attendance certificate is prepared when Attendance is ticked — duty shown as කම්කරු (KKS).</p>
+                            </div>
+                            <button type="button" onclick="addKksHelperConfigRow()" class="bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded shadow">+ Add සහායක (KKS)</button>
+                        </div>
+                        <p id="progKksCount" class="text-[10px] font-semibold text-amber-900">0 / 5 added</p>
+                        <div id="progKksHelpersContainer" class="space-y-2"></div>
+                        <datalist id="officerNicDatalist"></datalist>
+                    </div>
+
+                    <div class="border-t pt-4 space-y-3">
+                        <div class="flex justify-between items-center flex-wrap gap-2">
+                            <label class="text-xs font-bold text-slate-700">Resource Persons / Lecturers: <span class="font-normal text-slate-500">pick a saved name or type a new one. NIC fills from the directory when known; type it if missing. With Attendance ticked, the lecturer can download their attendance certificate by NIC (QR verified).</span></label>
                             <button type="button" onclick="addResourcePersonConfigRow()" class="bg-indigo-900 text-white text-xs font-bold px-3 py-1 rounded">+ Add Lecturer</button>
                         </div>
                         <div id="progResourcePersonsContainer" class="space-y-2"></div>
                         <datalist id="resourcePersonDatalist"></datalist>
+                    </div>
+
+                    <div id="progStaffCertPanel" class="hidden border-t pt-4 space-y-2">
+                        <p class="text-xs font-bold text-slate-700">Staff attendance certificates for this program</p>
+                        <p class="text-[10px] text-slate-500">Save the program with Attendance ticked first. Then download or print each coordinating officer, assistant coordinating officer, සහායක (KKS) and lecturer certificate here.</p>
+                        <div id="progStaffCertList" class="space-y-2"></div>
                     </div>
 
                     <div class="flex flex-col sm:flex-row gap-2">
@@ -1165,7 +1441,7 @@ mdtu_security_headers();
                     <div class="overflow-x-auto">
                         <table class="w-full text-left text-xs border-collapse border min-w-[760px]">
                             <thead>
-                                <tr class="bg-indigo-900 text-white"><th class="p-2">Program</th><th class="p-2">Venue</th><th class="p-2">Dates</th><th class="p-2 text-center">Hours</th><th class="p-2">Resource Persons</th><th class="p-2 text-center">Registered</th><th class="p-2 text-center">Actions</th></tr>
+                                <tr class="bg-indigo-900 text-white"><th class="p-2">Program</th><th class="p-2">Venue</th><th class="p-2">Dates</th><th class="p-2 text-center">Hours</th><th class="p-2">Resource Persons</th><th class="p-2 text-center">Certificates</th><th class="p-2 text-center">Registered</th><th class="p-2 text-center">Actions</th></tr>
                             </thead>
                             <tbody id="configuredProgramsTableBody"></tbody>
                         </table>
@@ -1186,14 +1462,17 @@ mdtu_security_headers();
 
                 <form onsubmit="handleCreateUser(event)" class="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 space-y-4">
                     <h3 class="text-xs font-bold text-indigo-900 uppercase tracking-wider">➕ Create User Account</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Username *</label>
                             <input type="text" id="newUsername" required placeholder="e.g. officer1" class="w-full p-2 text-xs border rounded outline-none bg-white">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1">Password *</label>
-                            <input type="text" id="newPassword" required minlength="8" autocomplete="off" placeholder="Min 8 chars, letters + numbers" class="w-full p-2 text-xs border rounded outline-none bg-white font-mono">
+                            <div class="relative">
+                                <input type="password" id="newPassword" required minlength="8" autocomplete="new-password" placeholder="Min 8 chars, letters + numbers" class="w-full p-2 pr-10 text-xs border rounded outline-none bg-white font-mono">
+                                <button type="button" onclick="togglePasswordVisibility('newPassword', this)" class="password-eye" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                            </div>
                             <p class="text-[10px] text-slate-500 mt-1">The user must change it at the first login.</p>
                         </div>
                         <div>
@@ -1204,7 +1483,23 @@ mdtu_security_headers();
                                 <option value="super">SUPERADMIN</option>
                             </select>
                         </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">NIC / Officer ID</label>
+                            <input type="text" id="newUserNic" oninput="handleNewUserNicLookup(this.value)" placeholder="e.g. 198331601750" class="w-full p-2 text-xs border rounded outline-none bg-white font-mono uppercase">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Officer Name * (Auto-filled / Editable)</label>
+                            <input type="text" id="newUserOfficerName" placeholder="Auto-filled from NIC" class="w-full p-2 text-xs border rounded outline-none bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 mb-1">Designation / Office</label>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <input type="text" id="newUserDesignation" placeholder="Designation" class="w-full p-2 text-xs border rounded outline-none bg-white">
+                                <input type="text" id="newUserOffice" placeholder="Office" class="w-full p-2 text-xs border rounded outline-none bg-white">
+                            </div>
+                        </div>
                     </div>
+                    <p class="text-[10px] text-slate-500">NIC and name help Admin / Super Admin prepare coordinating-officer and lecturer attendance certificates under Programs &amp; Venues.</p>
                     <button type="submit" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-5 py-2.5 rounded-lg shadow transition">
                         ➕ Register Account
                     </button>
@@ -1217,6 +1512,7 @@ mdtu_security_headers();
                             <thead>
                                 <tr class="bg-indigo-900 text-white font-bold">
                                     <th class="p-2.5">Username</th>
+                                    <th class="p-2.5">Officer</th>
                                     <th class="p-2.5">System Role</th>
                                     <th class="p-2.5">Password</th>
                                     <th class="p-2.5">Last Login</th>
@@ -1236,17 +1532,19 @@ mdtu_security_headers();
             <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
                 <div class="border-b pb-4">
                     <h2 class="text-lg sm:text-xl font-bold text-indigo-900">📁 Annual Office Staff Matrix Excel Update</h2>
-                    <p class="text-xs text-slate-500">Super Admin facility to upload office-wise cadre headcounts by designation.</p>
+                    <p class="text-xs text-slate-500">Super Admin facility to upload office-wise cadre headcounts by designation for the year selected at the top of the page.</p>
                 </div>
 
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-1">Select Staff Matrix Excel (.xlsx / .xls):</label>
-                        <input type="file" id="annualStaffExcelFile" accept=".xlsx, .xls" class="w-full p-2 text-xs border rounded bg-white">
+                <div class="space-y-3 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+                    <p class="text-xs text-slate-600">The first column must be <b>Office Name</b>. Every other column is a designation, and the cell is how many officers hold that post. Uploading replaces this year's matrix.</p>
+                    <div id="staffMatrixColumnGuide" class="overflow-x-auto"></div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" onclick="downloadStaffMatrixTemplate()" class="bg-white border border-indigo-300 text-indigo-950 font-bold text-xs px-3.5 py-2 rounded shadow">📥 Download column template</button>
+                        <button type="button" onclick="downloadStaffMatrixExcel()" class="bg-emerald-600 text-white font-bold text-xs px-3.5 py-2 rounded shadow">📊 Download database list</button>
                     </div>
-                    <button onclick="uploadAnnualStaffExcel()" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-5 py-3 rounded-lg shadow transition">
-                        📤 Process & Update Matrix
-                    </button>
+                    <label class="block text-xs font-bold text-slate-700">Select Staff Matrix Excel (.xlsx / .xls)</label>
+                    <input type="file" id="annualStaffExcelFile" accept=".xlsx, .xls" class="w-full p-2 text-xs border rounded bg-white">
+                    <button type="button" id="staffUploadBtn" onclick="uploadAnnualStaffExcel()" class="bg-indigo-900 hover:bg-indigo-800 disabled:opacity-60 text-white font-bold text-xs px-5 py-3 rounded-lg shadow transition">📤 Upload staff matrix</button>
                 </div>
 
                 <div class="pt-6 border-t">
@@ -1313,27 +1611,13 @@ mdtu_security_headers();
                             <img src="assets/nwp-logo.png" alt="" style="width:400px; height:auto;">
             </div>
                         <div style="position:absolute; inset:28px 34px 20px 34px; display:flex; flex-direction:column;">
-                            <!-- Letterhead -->
-                            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                                <img class="tpl-emblem" src="assets/sl-emblem.png" alt="Emblem of Sri Lanka" style="height:96px; width:auto; max-width:110px; object-fit:contain;">
-                                <div style="flex:1; text-align:center; line-height:1.15;">
-                                    <p class="lh-si lh-maroon" style="font-size:27px; font-weight:800;">ප්‍රධාන ලේකම් කාර්යාලය - වයඹ පළාත</p>
-                                    <p class="lh-ta lh-maroon" style="font-size:15px; font-weight:700; margin-top:3px;">பிரதம செயலாளர் அலுவலகம் - வடமேல் மாகாணம்</p>
-                                    <p class="lh-en lh-maroon" style="font-size:22px; font-weight:700; margin-top:4px;">Chief Secretary’s Office – North Western Province</p>
-                                </div>
-                                <img src="assets/nwp-logo.png" alt="North Western Provincial Council Emblem" style="height:96px; width:auto;">
+                            <!-- Official letterhead top (same as සම්පත්දායක ලිපි). Fixed-width PNG so PDF export matches preview. -->
+                            <div class="lh-top-img" style="flex-shrink:0; width:100%; overflow:hidden;">
+                                <img src="assets/letterhead-top.png"
+                                     width="725" height="183"
+                                     alt="ප්‍රධාන ලේකම් කාර්යාලය - වයඹ පළාත / Chief Secretary’s Office – North Western Province"
+                                     style="width:100%; max-width:100%; height:auto; display:block; object-fit:contain;">
                             </div>
-                            <p class="lh-maroon" style="text-align:center; font-size:9.5px; font-weight:700; margin-top:12px; white-space:nowrap;">
-                                <span class="lh-si">පළාත් සභා කාර්යාල සංකීර්ණය, කුරුණෑගල</span>
-                                <span class="lh-ta">மாகாண சபை அலுவலகத் தொகுதி, குருநாகல்</span>
-                                <span class="lh-en">Provincial Council Office Complex, Kurunegala</span>
-                            </p>
-                            <p style="text-align:center; font-size:10.5px; color:#111827; margin-top:6px; white-space:nowrap;">
-                                <span class="lh-si" style="font-weight:700;">කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය</span>
-                                <span class="lh-ta" style="font-weight:500;">முகாமை அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு</span>
-                                <span class="lh-en">Management Development &amp; Training Unit</span>
-                            </p>
-                            <div class="lh-rule" style="margin-top:10px;"></div>
 
                             <!-- My No / Your No / Date -->
                             <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 18px 0;">
@@ -1367,6 +1651,7 @@ mdtu_security_headers();
                                     <div class="lh-row"><span>Officer Name</span><span id="attSlipName" class="notranslate" style="color:#1e1b4b; text-transform:uppercase;"></span></div>
                                     <div class="lh-row"><span>Designation</span><span id="attSlipDesignation" class="notranslate"></span></div>
                                     <div class="lh-row"><span>Office / Department</span><span id="attSlipOffice" class="notranslate"></span></div>
+                                    <div id="attSlipFieldRow" class="lh-row hidden"><span>Subject Field</span><span id="attSlipField" class="notranslate"></span></div>
                                     <div class="lh-row"><span>National ID Number</span><span id="attSlipNic" style="font-family:'Courier New', monospace; letter-spacing:1px;"></span></div>
                     </div>
 
@@ -1378,10 +1663,10 @@ mdtu_security_headers();
                                     <p><strong>Total Completed Duration:</strong> <span id="attSlipHours" style="font-weight:700; color:#047857;"></span> Hours</p>
                     </div>
 
-                                <p style="font-size:15px; line-height:1.7; text-align:justify;">
+                                <p id="attSlipBodyText" style="font-size:15px; line-height:1.7; text-align:justify;">
                                     This is to certify that the above-named officer has successfully participated in the above program organized by the Management Development and Training Unit, Chief Secretary’s Office, North Western Province.
                     </p>
-                                <p style="font-size:13px; font-weight:700; color:#065f46; margin-top:12px;">✓ Participation officially confirmed and verified by the Deputy Chief Secretary (Training).</p>
+                                <p id="attSlipConfirmText" style="font-size:13px; font-weight:700; color:#065f46; margin-top:12px;">✓ Participation officially confirmed and verified by the Deputy Chief Secretary (Training).</p>
                 </div>
 
                             <!-- Signature -->
@@ -1471,6 +1756,8 @@ mdtu_security_headers();
                         <thead>
                             <tr class="bg-indigo-900 text-white font-bold">
                                 <th class="p-3 text-center">Confirm (✓)</th>
+                                <th class="p-3 text-center">Completion certificate<br><span class="font-normal text-amber-200">Show to public</span></th>
+                                <th class="p-3 text-center">Attendance certificate<br><span class="font-normal text-amber-200">පැමිණුම් සහතිකය</span></th>
                                 <th class="p-3">NIC</th>
                                 <th class="p-3">Officer Name</th>
                                 <th class="p-3">Office</th>
@@ -1707,6 +1994,27 @@ mdtu_security_headers();
 
         <!-- DASHBOARD TAB -->
         <div id="view-dashboard" class="tab-view hidden space-y-6 admin-only w-full">
+            <div class="super-admin-only hidden bg-white p-4 sm:p-6 rounded-xl shadow-md border-2 border-violet-300 space-y-4 no-print">
+                <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                    <div>
+                        <h2 class="text-base sm:text-lg font-bold text-violet-950">👥 Officer Directory Update (Karyamandala)</h2>
+                        <p class="text-xs text-slate-600 mt-1">Super Admin only. Server එකට CSV upload කරලා officers database update කරන්න. තියෙන NIC නම් <strong>update</strong> වෙනවා — duplicate නෙවෙයි. පැරණි ID සහ අලුත් 12-digit ID දෙකම හඳුනනවා.</p>
+                    </div>
+                    <p id="officerDirCountBadge" class="text-xs font-bold bg-violet-100 text-violet-900 px-3 py-1.5 rounded-lg self-start">Officers: —</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 bg-violet-50 border border-violet-200 rounded-lg p-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">karyamandala-lekhanaya-upload.csv</label>
+                        <input type="file" id="officerDirCsvFile" accept=".csv,text/csv" class="w-full text-xs bg-white border rounded p-2">
+                        <p class="text-[10px] text-slate-500 mt-1">අවශ්‍ය columns: National ID, Name, Gender, Designation, Office, Mobile · Old National ID (optional, merge සඳහා)</p>
+                    </div>
+                    <div class="flex flex-col justify-end gap-2">
+                        <button type="button" id="officerDirUploadBtn" onclick="uploadOfficerDirectoryCsv()" class="bg-violet-800 hover:bg-violet-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg shadow">📤 Upload &amp; Update Officers</button>
+                        <p id="officerDirUploadStatus" class="text-[11px] text-slate-600 font-medium min-h-[1.25rem]"></p>
+                    </div>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 no-print">
                 <div class="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                     <div>
@@ -1841,7 +2149,7 @@ mdtu_security_headers();
                 <div class="mb-6">
                     <label class="block text-xs font-bold text-slate-700 mb-1">Select Office:</label>
                     <select id="officeDesignationSelect" onchange="generateOfficeDesignationReport()" class="w-full max-w-md p-2.5 text-xs border rounded-lg bg-white">
-                        <option value="">-- Select Office --</option>
+                        <option value="all">All offices</option>
                     </select>
                 </div>
 
@@ -1853,17 +2161,57 @@ mdtu_security_headers();
                     </div>
 
                     <div class="overflow-x-auto">
-                        <table id="officeDesignationTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[600px]">
+                        <table id="officeDesignationTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[780px]">
                             <thead>
                                 <tr class="bg-indigo-900 text-white font-bold">
+                                    <th class="p-3">Office</th>
                                     <th class="p-3">Designation Title</th>
                                     <th class="p-3 text-center">Cadre Strength</th>
                                     <th class="p-3 text-center text-emerald-300">12h Completed</th>
                                     <th class="p-3 text-center text-rose-300">Incomplete</th>
                                     <th class="p-3 text-center text-amber-300">6h Completed</th>
+                                    <th class="p-3 text-center text-indigo-200">MDTU පැය</th>
+                                    <th class="p-3 text-center text-teal-200">කාර්යාලීය පැය</th>
                                 </tr>
                             </thead>
                             <tbody id="officeDesignationTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- OFFICE CADRE & HOURS COUNT (no designation split) -->
+        <div id="view-office-count-report" class="tab-view hidden space-y-6 logged-in-only w-full">
+            <div class="bg-white p-4 sm:p-8 rounded-xl shadow-md border border-slate-200">
+                <div class="flex justify-between items-center border-b pb-4 mb-6 flex-wrap gap-2">
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold text-indigo-900">🏢 Office-wise Cadre &amp; Training Hours</h2>
+                        <p class="text-xs text-slate-500">කාර්යාලය අනුව කාඩර් ගණන සහ පුහුණු සම්පූර්ණ කළ නිලධාරී ගණන (පැය 12 / 6 / 0) — MDTU, කාර්යාලීය, හෝ දෙකම (ALL).</p>
+                    </div>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="exportTableToExcel('officeCountTable', 'Office_Cadre_Training_Count')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow">📊 Export Excel</button>
+                        <button onclick="downloadOfficialReportPDF('officeCountContainer', 'Office_Cadre_Training_Count')" class="bg-indigo-900 hover:bg-indigo-800 text-white font-bold text-xs px-4 py-2.5 rounded-lg">📄 Download PDF</button>
+                    </div>
+                </div>
+                <div class="mb-4 no-print">
+                    <label class="block text-xs font-bold text-slate-700 mb-1" for="officeCountHoursMode">පුහුණු තොරතුරු වර්ගය තෝරන්න</label>
+                    <select id="officeCountHoursMode" onchange="renderOfficeCountReport()" class="w-full max-w-2xl p-2.5 text-xs border rounded-lg bg-white font-semibold">
+                        <option value="mdtu">1) MDTU ප්‍රතිපාදන වලින් පුහුණුව ලැබූ නිලධාරීන්ගේ තොරතුරු</option>
+                        <option value="office">2) MDTU නොවන (කාර්යාලීය) ප්‍රතිපාදන වලින් පුහුණුව ලැබූ නිලධාරීන්ගේ තොරතුරු</option>
+                        <option value="all" selected>3) පුහුණු තොරතුරු (ALL) — දෙවර්ගයෙන්ම සම්පූර්ණ කළ ගණන</option>
+                    </select>
+                </div>
+                <div id="officeCountContainer" class="space-y-4">
+                    <div class="text-center border-b pb-3">
+                        <h3 class="text-xs font-black text-amber-600 uppercase">Management Development and Training Unit - NWP</h3>
+                        <h4 class="text-base font-black text-indigo-950 uppercase">Office-wise Cadre &amp; Training Completion</h4>
+                        <p id="officeCountSubtitle" class="text-xs font-bold text-slate-500 mt-0.5"></p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table id="officeCountTable" class="w-full text-left text-xs border-collapse border border-slate-200 min-w-[640px]">
+                            <thead id="officeCountTableHead"></thead>
+                            <tbody id="officeCountTableBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -1969,12 +2317,21 @@ mdtu_security_headers();
         <div id="view-duty-report" class="tab-view hidden space-y-6 admin-only w-full">
             <div class="bg-white p-4 sm:p-6 rounded-xl shadow-md border border-slate-200">
                 <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                    <h2 class="text-lg sm:text-xl font-bold text-indigo-900">📋 Duty Hours Official Summary</h2>
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold text-indigo-900">📋 Duty Hours Official Summary</h2>
+                        <p class="text-xs text-slate-500">කාර්යාලය තෝරාගත් විට එහි නිලධාරීන්: පැය 12+ → පැය 6 → නැති අය අනුපිළිවෙලින්.</p>
+                    </div>
                     <button onclick="exportTableToExcel('attendanceTable', 'Duty_Hours_Report')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow transition">📊 Export Excel</button>
                 </div>
+                <div class="mb-4">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">කාර්යාලය තෝරන්න</label>
+                    <select id="dutyOfficeSelect" onchange="renderDutyReport()" class="w-full max-w-md p-2.5 text-xs border rounded-lg bg-white">
+                        <option value="">-- Choose Office --</option>
+                    </select>
+                </div>
                 <div class="overflow-x-auto">
-                    <table id="attendanceTable" class="w-full text-left text-xs border-collapse border min-w-[500px]">
-                        <thead><tr class="bg-indigo-900 text-white"><th class="p-3">Office</th><th class="p-3">Designation & Name</th><th class="p-3 text-center">Hours</th><th class="p-3 text-center">Status</th></tr></thead>
+                    <table id="attendanceTable" class="w-full text-left text-xs border-collapse border min-w-[560px]">
+                        <thead><tr class="bg-indigo-900 text-white"><th class="p-3">#</th><th class="p-3">NIC</th><th class="p-3">Name</th><th class="p-3">Designation</th><th class="p-3 text-center">Hours</th><th class="p-3 text-center">Status</th></tr></thead>
                         <tbody id="dutyReportTableBody"></tbody>
                     </table>
                 </div>
@@ -2112,12 +2469,22 @@ mdtu_security_headers();
         <div id="view-pending" class="tab-view hidden space-y-6 admin-only w-full">
             <div class="bg-white p-4 sm:p-6 rounded-xl shadow-md border">
                 <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                    <h2 class="text-lg sm:text-xl font-bold text-rose-900">⚠️ Incomplete Training Officers (&lt;12 Hours)</h2>
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold text-rose-900">⚠️ Incomplete Training Officers (&lt;12 Hours)</h2>
+                        <p class="text-xs text-slate-500">කාර්යාලය තෝරාගත් විට එහි පැය 12 සම්පූර්ණ නොකළ නිලධාරීන්ගේ තොරතුරු.</p>
+                    </div>
                     <button onclick="exportTableToExcel('pendingGroupedTable', 'Incomplete_Officers_Report')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow transition">📊 Export Excel</button>
                 </div>
+                <div class="mb-4">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">කාර්යාලය තෝරන්න</label>
+                    <select id="pendingOfficeSelect" onchange="renderPendingReport()" class="w-full max-w-md p-2.5 text-xs border rounded-lg bg-white">
+                        <option value="">-- Choose Office --</option>
+                    </select>
+                </div>
+                <p id="pendingReportMeta" class="text-xs font-semibold text-slate-500 mb-2"></p>
                 <div class="overflow-x-auto">
-                    <table id="pendingGroupedTable" class="w-full text-left text-xs border-collapse min-w-[500px]">
-                        <thead><tr class="bg-rose-50 text-rose-900"><th class="p-3">Office</th><th class="p-3 text-center">Incomplete Officers</th><th class="p-3">Officer List</th></tr></thead>
+                    <table id="pendingGroupedTable" class="w-full text-left text-xs border-collapse min-w-[560px]">
+                        <thead><tr class="bg-rose-50 text-rose-900"><th class="p-3">#</th><th class="p-3">NIC</th><th class="p-3">Name</th><th class="p-3">Designation</th><th class="p-3 text-center">Hours</th></tr></thead>
                         <tbody id="pendingGroupedTableBody"></tbody>
                     </table>
                 </div>
@@ -2128,12 +2495,22 @@ mdtu_security_headers();
         <div id="view-completed" class="tab-view hidden space-y-6 admin-only w-full">
             <div class="bg-white p-4 sm:p-6 rounded-xl shadow-md border">
                 <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                    <h2 class="text-lg sm:text-xl font-bold text-emerald-900">🟢 Fully Completed Officers (12+ Hours)</h2>
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold text-emerald-900">🟢 Fully Completed Officers (12+ Hours)</h2>
+                        <p class="text-xs text-slate-500">කාර්යාලය තෝරාගත් විට එහි පැය 12+ සම්පූර්ණ කළ නිලධාරීන්ගේ තොරතුරු.</p>
+                    </div>
                     <button onclick="exportTableToExcel('completedTable', 'Completed_Officers_Summary')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow transition">📊 Export Excel</button>
                 </div>
+                <div class="mb-4">
+                    <label class="block text-xs font-bold text-slate-700 mb-1">කාර්යාලය තෝරන්න</label>
+                    <select id="completedOfficeSelect" onchange="renderCompletedReport()" class="w-full max-w-md p-2.5 text-xs border rounded-lg bg-white">
+                        <option value="">-- Choose Office --</option>
+                    </select>
+                </div>
+                <p id="completedReportMeta" class="text-xs font-semibold text-slate-500 mb-2"></p>
                 <div class="overflow-x-auto">
-                    <table id="completedTable" class="w-full text-left text-xs border-collapse min-w-[500px]">
-                        <thead><tr class="bg-emerald-50 text-emerald-900"><th class="p-3">Office</th><th class="p-3">NIC</th><th class="p-3">Name</th><th class="p-3 text-center">Hours</th></tr></thead>
+                    <table id="completedTable" class="w-full text-left text-xs border-collapse min-w-[560px]">
+                        <thead><tr class="bg-emerald-50 text-emerald-900"><th class="p-3">#</th><th class="p-3">NIC</th><th class="p-3">Name</th><th class="p-3">Designation</th><th class="p-3 text-center">Hours</th></tr></thead>
                         <tbody id="completedTableBody"></tbody>
                     </table>
                 </div>
@@ -2233,7 +2610,10 @@ mdtu_security_headers();
         <h3 class="text-lg font-bold text-indigo-950 mb-4 text-center">User Authentication</h3>
         <form onsubmit="handleLogin(event)" class="space-y-4">
             <input type="text" id="loginUsername" placeholder="Username" required autocomplete="username" class="w-full p-2.5 text-xs border rounded">
-            <input type="password" id="loginPassword" placeholder="Password" required autocomplete="current-password" class="w-full p-2.5 text-xs border rounded">
+            <div class="relative">
+                <input type="password" id="loginPassword" placeholder="Password" required autocomplete="current-password" class="w-full p-2.5 pr-10 text-xs border rounded">
+                <button type="button" onclick="togglePasswordVisibility('loginPassword', this)" class="password-eye" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
             <button type="submit" class="w-full bg-indigo-900 text-white font-bold py-2.5 rounded text-xs">Sign In</button>
             <button type="button" onclick="toggleAuthModal()" class="w-full bg-slate-200 text-slate-700 font-bold py-2 rounded text-xs mt-1">Cancel</button>
         </form>
@@ -2247,9 +2627,18 @@ mdtu_security_headers();
         <p id="changePasswordReason" class="hidden text-xs text-rose-700 font-semibold text-center mb-3">For security you must choose your own new password before using the system.</p>
         <form onsubmit="handleChangePassword(event)" class="space-y-3 mt-3">
             <input type="text" autocomplete="username" id="cpUsername" class="hidden" tabindex="-1" aria-hidden="true">
-            <input type="password" id="cpCurrent" placeholder="Current password" required autocomplete="current-password" class="w-full p-2.5 text-xs border rounded">
-            <input type="password" id="cpNew" placeholder="New password" required minlength="8" autocomplete="new-password" class="w-full p-2.5 text-xs border rounded">
-            <input type="password" id="cpConfirm" placeholder="Type the new password again" required minlength="8" autocomplete="new-password" class="w-full p-2.5 text-xs border rounded">
+            <div class="relative">
+                <input type="password" id="cpCurrent" placeholder="Current password" required autocomplete="current-password" class="w-full p-2.5 pr-10 text-xs border rounded">
+                <button type="button" onclick="togglePasswordVisibility('cpCurrent', this)" class="password-eye" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
+            <div class="relative">
+                <input type="password" id="cpNew" placeholder="New password" required minlength="8" autocomplete="new-password" class="w-full p-2.5 pr-10 text-xs border rounded">
+                <button type="button" onclick="togglePasswordVisibility('cpNew', this)" class="password-eye" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
+            <div class="relative">
+                <input type="password" id="cpConfirm" placeholder="Type the new password again" required minlength="8" autocomplete="new-password" class="w-full p-2.5 pr-10 text-xs border rounded">
+                <button type="button" onclick="togglePasswordVisibility('cpConfirm', this)" class="password-eye" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
             <p class="text-[11px] text-slate-500">At least 8 characters, with both letters and numbers. Do not share your password.</p>
             <button type="submit" class="w-full bg-indigo-900 text-white font-bold py-2.5 rounded text-xs">Save New Password</button>
             <button type="button" id="cpCancelBtn" onclick="closeChangePasswordModal()" class="w-full bg-slate-200 text-slate-700 font-bold py-2 rounded text-xs">Cancel</button>

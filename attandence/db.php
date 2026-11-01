@@ -7,7 +7,7 @@ date_default_timezone_set(APP_TIMEZONE);
 
 $db = DB_NAME;
 
-const MDTU_SCHEMA_VERSION = 8;
+const MDTU_SCHEMA_VERSION = 15;
 
 $options = [
     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -40,6 +40,10 @@ try {
 $repaired = mdtu_repair_orphan_tables($pdo);
 mdtu_ensure_schema($pdo, $repaired);
 mdtu_import_officer_seed($pdo);
+mdtu_import_resource_seed($pdo);
+require_once __DIR__ . '/name_romanize.php';
+mdtu_english_resource_names($pdo);
+mdtu_import_resource_nics($pdo);
 try {
     $pdo->query('SELECT 1 FROM audit_log LIMIT 0');
     mdtu_protect_audit_log($pdo);
@@ -50,7 +54,7 @@ try {
 function mdtu_expected_tables()
 {
     return ['users', 'programs', 'officers', 'training_records', 'progress_submissions', 'training_plans',
-        'staff_matrix', 'resource_persons', 'notifications', 'chat_messages', 'settings', 'audit_log',
+        'staff_matrix', 'resource_persons', 'staff_certs', 'notifications', 'chat_messages', 'settings', 'audit_log',
         'login_attempts', 'certificate_issues'];
 }
 
@@ -304,6 +308,54 @@ function mdtu_copy_orphan_files(PDO $pdo, $table)
     }
 }
 
+function mdtu_person_key_local($name)
+{
+    $s = mb_strtolower(trim((string) $name));
+    $s = str_replace('.', ' ', $s);
+    $s = preg_replace('/\b(mr|mrs|ms|miss|dr|prof|rev|sir)\b/u', ' ', $s);
+    $s = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $s);
+    return preg_replace('/\s+/u', ' ', trim($s));
+}
+
+function mdtu_merge_duplicate_resource_names(PDO $pdo)
+{
+    try {
+        $rows = $pdo->query("SELECT id, resourcePersons FROM programs")->fetchAll();
+    } catch (Throwable $e) {
+        return;
+    }
+    $canon = [];
+    $lists = [];
+    foreach ($rows as $row) {
+        $list = json_decode((string) $row['resourcePersons'], true) ?: [];
+        $lists[$row['id']] = $list;
+        foreach ($list as $name) {
+            $key = mdtu_person_key_local($name);
+            if ($key !== '' && !isset($canon[$key])) {
+                $canon[$key] = $name;
+            }
+        }
+    }
+    $upd = $pdo->prepare("UPDATE programs SET resourcePersons = ? WHERE id = ?");
+    foreach ($lists as $id => $list) {
+        $next = [];
+        $changed = false;
+        foreach ($list as $name) {
+            $key = mdtu_person_key_local($name);
+            $keep = ($key !== '' && isset($canon[$key])) ? $canon[$key] : $name;
+            if ($keep !== $name) {
+                $changed = true;
+            }
+            if ($keep !== '' && !in_array($keep, $next, true)) {
+                $next[] = $keep;
+            }
+        }
+        if ($changed || count($next) !== count($list)) {
+            $upd->execute([json_encode($next, JSON_UNESCAPED_UNICODE), $id]);
+        }
+    }
+}
+
 function mdtu_ensure_schema(PDO $pdo, $force = false)
 {
     if (!$force) {
@@ -343,12 +395,25 @@ function mdtu_ensure_schema(PDO $pdo, $force = false)
     mdtu_add_column($pdo, 'users', 'mustChangePassword', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER role');
     mdtu_add_column($pdo, 'users', 'passwordChangedAt', 'DATETIME NULL AFTER mustChangePassword');
     mdtu_add_column($pdo, 'users', 'lastLoginAt', 'DATETIME NULL AFTER passwordChangedAt');
+    mdtu_add_column($pdo, 'users', 'nic', 'VARCHAR(20) NULL AFTER role');
+    mdtu_add_column($pdo, 'users', 'officerName', 'VARCHAR(255) NULL AFTER nic');
+    mdtu_add_column($pdo, 'users', 'designation', 'VARCHAR(255) NULL AFTER officerName');
+    mdtu_add_column($pdo, 'users', 'office', 'VARCHAR(255) NULL AFTER designation');
     mdtu_add_column($pdo, 'programs', 'fileNo', 'VARCHAR(100) NULL AFTER venue');
+    mdtu_add_column($pdo, 'programs', 'coordinators', 'TEXT NULL AFTER resourcePersons');
+    mdtu_add_column($pdo, 'programs', 'assistantCoordinators', 'TEXT NULL AFTER coordinators');
+    mdtu_add_column($pdo, 'programs', 'kksHelpers', 'TEXT NULL AFTER assistantCoordinators');
+    mdtu_add_column($pdo, 'programs', 'issueCompletion', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER kksHelpers');
+    mdtu_add_column($pdo, 'programs', 'issueAttendance', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER issueCompletion');
+    mdtu_add_column($pdo, 'resource_persons', 'nic', 'VARCHAR(20) NULL AFTER name');
+    mdtu_add_column($pdo, 'certificate_issues', 'staffCertId', 'INT NULL AFTER recordId');
     mdtu_add_column($pdo, 'training_records', 'programId', 'INT NULL AFTER year');
     mdtu_add_column($pdo, 'training_records', 'venue', 'VARCHAR(255) NULL AFTER trainingName');
     mdtu_add_column($pdo, 'training_records', 'confirmedBy', 'VARCHAR(100) NULL');
     mdtu_add_column($pdo, 'training_records', 'confirmedAt', 'DATETIME NULL');
     mdtu_add_column($pdo, 'training_records', 'certSerial', 'VARCHAR(40) NULL');
+    mdtu_add_column($pdo, 'training_records', 'showCompletion', 'TINYINT(1) NOT NULL DEFAULT 1');
+    mdtu_add_column($pdo, 'training_records', 'showAttendance', 'TINYINT(1) NOT NULL DEFAULT 1');
     mdtu_add_column($pdo, 'training_records', 'createdAt', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
     mdtu_add_column($pdo, 'training_plans', 'createdAt', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
     mdtu_add_column($pdo, 'officers', 'phone', 'VARCHAR(20) NULL AFTER office');
@@ -358,6 +423,9 @@ function mdtu_ensure_schema(PDO $pdo, $force = false)
     mdtu_add_index($pdo, 'training_records', 'idx_records_year', 'KEY idx_records_year (year)');
     mdtu_add_index($pdo, 'training_records', 'idx_records_nic', 'KEY idx_records_nic (nic)');
     mdtu_add_index($pdo, 'training_records', 'idx_records_program', 'KEY idx_records_program (programId)');
+    mdtu_add_index($pdo, 'officers', 'idx_officers_name', 'KEY idx_officers_name (name(191))');
+    mdtu_add_index($pdo, 'officers', 'idx_officers_office', 'KEY idx_officers_office (office(191))');
+    mdtu_add_index($pdo, 'officers', 'idx_officers_designation', 'KEY idx_officers_designation (designation(191))');
 
     // Every record needs a unique certificate verification code for its QR code
     $missing = $pdo->query("SELECT id, year FROM training_records WHERE certSerial IS NULL OR certSerial = ''")->fetchAll();
@@ -398,6 +466,8 @@ function mdtu_ensure_schema(PDO $pdo, $force = false)
     foreach ($defaults as $k => $v) {
         $insSetting->execute([$k, $v]);
     }
+
+    mdtu_merge_duplicate_resource_names($pdo);
 
     $pdo->prepare("REPLACE INTO settings (k, v) VALUES ('schema_version', ?)")->execute([MDTU_SCHEMA_VERSION]);
     mdtu_audit($pdo, 'system.schema_upgrade', 'database', null, ['from' => $current ?? 0, 'to' => MDTU_SCHEMA_VERSION], 'system');
@@ -443,6 +513,147 @@ function mdtu_import_officer_seed(PDO $pdo)
             $pdo->rollBack();
         }
         error_log('MDTU officer seed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Fill empty resource_persons.nic from data/resource_persons_nic_map.sql
+ * (legacy cp_resourcepersons NICs, already converted to 12-digit form).
+ * Also copies those NICs into saved program lecturer rows when missing.
+ */
+function mdtu_import_resource_nics(PDO $pdo)
+{
+    try {
+        $flag = $pdo->query("SELECT v FROM settings WHERE k = 'resource_persons_nic_imported'")->fetchColumn();
+    } catch (PDOException $e) {
+        return;
+    }
+    if ($flag === '1') {
+        return;
+    }
+    $path = __DIR__ . '/data/resource_persons_nic_map.sql';
+    if (is_readable($path)) {
+        $sql = preg_replace('/^--.*\R/m', '', file_get_contents($path));
+        try {
+            $pdo->beginTransaction();
+            foreach (preg_split("/;\\r?\\n/", $sql) as $stmt) {
+                $stmt = trim($stmt);
+                if ($stmt === '' || strncmp($stmt, '--', 2) === 0) {
+                    continue;
+                }
+                $pdo->exec($stmt);
+            }
+            $pdo->commit();
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('MDTU resource person NIC map: ' . $e->getMessage());
+        }
+    }
+    mdtu_fill_program_lecturer_nics($pdo);
+    try {
+        $pdo->exec("REPLACE INTO settings (k, v) VALUES ('resource_persons_nic_imported', '1')");
+    } catch (PDOException $e) {
+        error_log('MDTU resource person NIC flag: ' . $e->getMessage());
+    }
+}
+
+/** Copy directory NIC/field onto program.resourcePersons JSON entries that still lack a NIC. */
+function mdtu_fill_program_lecturer_nics(PDO $pdo)
+{
+    $byKey = [];
+    foreach ($pdo->query('SELECT name, nic, field FROM resource_persons')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $key = mdtu_person_key_local($r['name']);
+        if ($key === '' || trim((string) ($r['nic'] ?? '')) === '') {
+            continue;
+        }
+        $byKey[$key] = $r;
+    }
+    if (!$byKey) {
+        return;
+    }
+    $rows = $pdo->query('SELECT id, resourcePersons FROM programs')->fetchAll(PDO::FETCH_ASSOC);
+    $upd = $pdo->prepare('UPDATE programs SET resourcePersons = ? WHERE id = ?');
+    foreach ($rows as $row) {
+        $list = json_decode((string) ($row['resourcePersons'] ?? ''), true);
+        if (!is_array($list) || !$list) {
+            continue;
+        }
+        $changed = false;
+        foreach ($list as &$item) {
+            if (is_string($item)) {
+                $key = mdtu_person_key_local($item);
+                if ($key !== '' && isset($byKey[$key])) {
+                    $item = [
+                        'name' => $byKey[$key]['name'],
+                        'nic' => trim((string) $byKey[$key]['nic']),
+                        'field' => trim((string) ($byKey[$key]['field'] ?? '')),
+                    ];
+                    $changed = true;
+                }
+                continue;
+            }
+            if (!is_array($item)) {
+                continue;
+            }
+            $name = trim((string) ($item['name'] ?? ''));
+            $nic = trim((string) ($item['nic'] ?? ''));
+            $key = mdtu_person_key_local($name);
+            if ($nic === '' && $key !== '' && isset($byKey[$key])) {
+                $item['nic'] = trim((string) $byKey[$key]['nic']);
+                if (trim((string) ($item['field'] ?? '')) === '' && trim((string) ($byKey[$key]['field'] ?? '')) !== '') {
+                    $item['field'] = trim((string) $byKey[$key]['field']);
+                }
+                $changed = true;
+            }
+        }
+        unset($item);
+        if ($changed) {
+            $upd->execute([json_encode($list, JSON_UNESCAPED_UNICODE), (int) $row['id']]);
+        }
+    }
+}
+
+/**
+ * A new SLT database has the tables but not the resource-person directory.
+ * The first visit loads data/resource_persons_seed.sql. An existing directory is left as it is.
+ */
+function mdtu_import_resource_seed(PDO $pdo)
+{
+    try {
+        $flag = $pdo->query("SELECT v FROM settings WHERE k = 'resource_persons_seeded'")->fetchColumn();
+    } catch (PDOException $e) {
+        return;
+    }
+    if ($flag === '1') {
+        return;
+    }
+    if ((int) $pdo->query('SELECT COUNT(*) FROM resource_persons')->fetchColumn() > 0) {
+        $pdo->exec("REPLACE INTO settings (k, v) VALUES ('resource_persons_seeded', '1')");
+        return;
+    }
+    $path = __DIR__ . '/data/resource_persons_seed.sql';
+    if (!is_readable($path)) {
+        return;
+    }
+    $sql = preg_replace('/^--.*\R/m', '', file_get_contents($path));
+    $pdo->beginTransaction();
+    try {
+        foreach (preg_split("/;\\r?\\n/", $sql) as $stmt) {
+            $stmt = trim($stmt);
+            if ($stmt === '' || strncmp($stmt, '--', 2) === 0) {
+                continue;
+            }
+            $pdo->exec($stmt);
+        }
+        $pdo->exec("REPLACE INTO settings (k, v) VALUES ('resource_persons_seeded', '1')");
+        $pdo->commit();
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('MDTU resource person seed: ' . $e->getMessage());
     }
 }
 
@@ -492,4 +703,364 @@ function mdtu_add_index(PDO $pdo, $table, $index, $definition)
 function mdtu_cert_serial($year, $id)
 {
     return sprintf('MDTU-%d-%05d-%s', $year, $id, strtoupper(bin2hex(random_bytes(2))));
+}
+
+function mdtu_staff_cert_serial($year, $id)
+{
+    return sprintf('MDTU-S-%d-%05d-%s', $year, $id, strtoupper(bin2hex(random_bytes(2))));
+}
+
+/** Century for old 9-digit NIC year-of-birth (YY): 00–currentYY → 20, else 19. */
+function mdtu_nic_century($yy)
+{
+    $yy = (int) $yy;
+    $nowYy = (int) (new DateTime('now', new DateTimeZone(APP_TIMEZONE)))->format('y');
+    return ($yy > $nowYy) ? '19' : '20';
+}
+
+/** Convert old 9-digit+V/X NIC to the 12-digit form used in this system. */
+function normalize_nic($nic)
+{
+    $clean = strtoupper(preg_replace('/\s+/', '', (string) $nic));
+    if ($clean === '' || strpos($clean, '*') !== false) {
+        return '';
+    }
+    if (preg_match('/^(\d{12})$/', $clean, $m)) {
+        return $m[1];
+    }
+    if (preg_match('/^(\d{2})(\d{3})(\d{4})[VX]$/', $clean, $m)) {
+        return mdtu_nic_century($m[1]) . $m[1] . $m[2] . '0' . $m[3];
+    }
+    $digits = preg_replace('/\D+/', '', $clean);
+    if (strlen($digits) === 12) {
+        return $digits;
+    }
+    if (strlen($digits) === 9 && (preg_match('/[VX]/', $clean) || preg_match('/^\d{9}.+/u', $clean))) {
+        return mdtu_nic_century(substr($digits, 0, 2))
+            . substr($digits, 0, 2) . substr($digits, 2, 3) . '0' . substr($digits, 5, 4);
+    }
+    return preg_replace('/[^0-9A-Z]/', '', $clean);
+}
+
+/** New 12-digit form plus old 9+V / 9+X forms so lookups work either way. */
+function nic_lookup_values($nic)
+{
+    $n = normalize_nic($nic);
+    if ($n === '') {
+        return [];
+    }
+    $out = [$n];
+    $raw = strtoupper(preg_replace('/\s+/', '', (string) $nic));
+    if ($raw !== '' && $raw !== $n) {
+        $out[] = $raw;
+    }
+    if (preg_match('/^(19|20)(\d{2})(\d{3})0(\d{4})$/', $n, $m)) {
+        $body = $m[2] . $m[3] . $m[4];
+        $out[] = $body . 'V';
+        $out[] = $body . 'X';
+    }
+    if (preg_match('/^(\d{9})[VX]$/', $raw, $m)) {
+        $out[] = $m[1] . 'V';
+        $out[] = $m[1] . 'X';
+        $out[] = normalize_nic($m[1] . 'V');
+    }
+    return array_values(array_unique(array_filter($out)));
+}
+
+/** Expand abbreviated / misspelt designations to full cadre titles. */
+function mdtu_canonical_designation($raw)
+{
+    $s = trim(preg_replace('/\s+/u', ' ', (string) $raw));
+    if ($s === '') {
+        return '';
+    }
+    $s = preg_replace('/[*#«»]+/u', '', $s);
+    do {
+        $prev = $s;
+        $s = trim(preg_replace('/\s*[\(\[][^\)\]]*[\)\]]\s*$/u', '', $s));
+    } while ($s !== $prev);
+    $s = trim(preg_replace('/\s*[-–—]\s*\d{4}(\s*\(.*\))?\s*$/iu', '', $s));
+    $s = trim(preg_replace('/\s*[-–—]\s*(new|gt|old)\s*$/iu', '', $s));
+    $lookup = strtolower(trim(preg_replace('/\s+/', ' ', str_replace('.', ' ', $s))));
+    $aliases = [
+        'dev officer' => 'Development Officer',
+        'dev. officer' => 'Development Officer',
+        'devo off' => 'Development Officer',
+        'development off' => 'Development Officer',
+        'development oficer' => 'Development Officer',
+        'developmet officer' => 'Development Officer',
+        'deverlopment officer' => 'Development Officer',
+        'devolopment officer' => 'Development Officer',
+        'mana ass' => 'Management Assistant',
+        'mana. ass' => 'Management Assistant',
+        'managment assistant' => 'Management Assistant',
+        'mangement assistant' => 'Management Assistant',
+        'management servise officer' => 'Management Service Officer',
+        'mangement service officer' => 'Management Service Officer',
+        'agri instructor' => 'Agriculture Instructor',
+        'p k s' => 'Office Assistant',
+        'pks' => 'Office Assistant',
+        'k k s' => 'Office Assistant',
+        'kks' => 'Office Assistant',
+        'labrary assistant' => 'Library Assistant',
+        'sanitory labourer' => 'Sanitary Labourer',
+        'health labour' => 'Health Labourer',
+        'co-perativedevelopmentofficer' => 'Co-operative Development Officer',
+    ];
+    if (isset($aliases[$lookup])) {
+        return $aliases[$lookup];
+    }
+    $compact = str_replace(' ', '', $lookup);
+    foreach ($aliases as $k => $v) {
+        if (str_replace(' ', '', $k) === $compact) {
+            return $v;
+        }
+    }
+    return $s;
+}
+
+/** Roll Ayurveda sub-units + spelling twins into one office name. */
+function mdtu_canonical_office($raw)
+{
+    $s = trim(preg_replace('/\s+/u', ' ', (string) $raw));
+    if ($s === '') {
+        return '';
+    }
+    $s = str_ireplace(['Personel', 'Duputy', 'Departhment'], ['Personnel', 'Deputy', 'Department'], $s);
+    $fp = strtolower(str_replace('&', ' and ', $s));
+    $fp = trim(preg_replace('/\s+/u', ' ', preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $fp)));
+    if ($fp === '') {
+        return $s;
+    }
+    $isAyur = (bool) preg_match('/ayurveda|ayurvedic|ආයුර්වේද/u', $fp);
+    if ($isAyur) {
+        if (preg_match('/^department of (provincial )?ayurveda$/u', $fp)
+            || preg_match('/dispensary|hospital|drugs? manufacturing|welagedara|central dispensary/u', $fp)
+            || preg_match('/^department of (provincial )?ayurveda /u', $fp)
+            || preg_match('/^ayurveda (central )?dispensary/u', $fp)
+            || preg_match('/^ayurveda hospital/u', $fp)) {
+            return 'Department of Provincial Ayurveda';
+        }
+    }
+    $aliases = [
+        'department of ayurveda' => 'Department of Provincial Ayurveda',
+        'department of provincial ayurveda' => 'Department of Provincial Ayurveda',
+        'duputy chief secretarys officepersoneltraining' => "Deputy Chief Secretary's Office (Personnel & Training)",
+        'deputy chief secretarys office personnel training' => "Deputy Chief Secretary's Office (Personnel & Training)",
+        'deputy chief secretarys office personel training' => "Deputy Chief Secretary's Office (Personnel & Training)",
+    ];
+    if (isset($aliases[$fp])) {
+        return $aliases[$fp];
+    }
+    $glued = str_replace(' ', '', $fp);
+    foreach ($aliases as $k => $v) {
+        if (str_replace(' ', '', $k) === $glued) {
+            return $v;
+        }
+    }
+    return $s;
+}
+
+/** Map CSV / form gender text (Sinhala or English) to Male|Female|null. */
+function mdtu_map_officer_gender($raw)
+{
+    $g = trim((string) $raw);
+    if ($g === '') {
+        return null;
+    }
+    if ($g === 'Male' || $g === 'Female') {
+        return $g;
+    }
+    $u = mb_strtolower($g, 'UTF-8');
+    if (strpos($u, 'female') !== false || strpos($u, 'ස්ත්') !== false || $u === 'f') {
+        return 'Female';
+    }
+    if (strpos($u, 'male') !== false || strpos($u, 'පුරුෂ') !== false || $u === 'm') {
+        return 'Male';
+    }
+    return null;
+}
+
+/**
+ * Upsert one officer from karyamandala-style row.
+ * Uses National ID + Old National ID so old/new forms merge to one 12-digit row (no duplicates).
+ * Remaps training_records / staff_certs / users NIC keys to the canonical 12-digit form.
+ *
+ * @return string 'inserted'|'updated'|'skipped'
+ */
+function mdtu_upsert_officer_import(PDO $pdo, array $row)
+{
+    $rawNew = strtoupper(preg_replace('/\s+/', '', (string) ($row['nic'] ?? $row['nationalId'] ?? '')));
+    $rawOld = strtoupper(preg_replace('/\s+/', '', (string) ($row['oldNic'] ?? $row['oldNationalId'] ?? '')));
+    $name = trim((string) ($row['name'] ?? ''));
+    if ($name === '') {
+        return 'skipped';
+    }
+
+    $canon = normalize_nic($rawNew !== '' ? $rawNew : $rawOld);
+    if ($canon === '' || !preg_match('/^\d{12}$/', $canon)) {
+        // Prefer explicit 12-digit National ID even if normalize failed oddly
+        if (preg_match('/^\d{12}$/', $rawNew)) {
+            $canon = $rawNew;
+        } elseif (preg_match('/^\d{12}$/', normalize_nic($rawOld))) {
+            $canon = normalize_nic($rawOld);
+        } else {
+            return 'skipped';
+        }
+    }
+
+    $candidates = array_values(array_unique(array_filter(array_merge(
+        nic_lookup_values($rawNew),
+        nic_lookup_values($rawOld),
+        nic_lookup_values($canon),
+        [$rawNew, $rawOld, $canon]
+    ))));
+    if (!$candidates) {
+        return 'skipped';
+    }
+
+    $ph = implode(',', array_fill(0, count($candidates), '?'));
+    $st = $pdo->prepare("SELECT nic, name, designation, office, phone, gender FROM officers WHERE nic IN ($ph)");
+    $st->execute($candidates);
+    $existing = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    $designation = mdtu_canonical_designation(trim((string) ($row['designation'] ?? '')));
+    $office = mdtu_canonical_office(trim((string) ($row['office'] ?? '')));
+    $phone = preg_replace('/[^\d+]/', '', (string) ($row['phone'] ?? ''));
+    if (strlen($phone) > 20) {
+        $phone = substr($phone, 0, 20);
+    }
+    $gender = mdtu_map_officer_gender($row['gender'] ?? '');
+
+    $merged = [
+        'name' => $name,
+        'designation' => $designation,
+        'office' => $office,
+        'phone' => $phone,
+        'gender' => $gender,
+    ];
+    foreach ($existing as $ex) {
+        foreach (['name', 'designation', 'office', 'phone', 'gender'] as $f) {
+            if (($merged[$f] === null || $merged[$f] === '') && trim((string) ($ex[$f] ?? '')) !== '') {
+                $merged[$f] = $ex[$f];
+            }
+        }
+    }
+
+    $ins = $pdo->prepare("INSERT INTO officers (nic, name, designation, office, phone, gender) VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            name = VALUES(name),
+            designation = IF(VALUES(designation) IS NULL OR VALUES(designation) = '', designation, VALUES(designation)),
+            office = IF(VALUES(office) IS NULL OR VALUES(office) = '', office, VALUES(office)),
+            phone = IF(VALUES(phone) IS NULL OR VALUES(phone) = '', phone, VALUES(phone)),
+            gender = IF(VALUES(gender) IS NULL OR VALUES(gender) = '', gender, VALUES(gender))");
+    $ins->execute([
+        $canon,
+        mb_substr($merged['name'], 0, 255, 'UTF-8'),
+        $merged['designation'] !== '' ? mb_substr($merged['designation'], 0, 255, 'UTF-8') : null,
+        $merged['office'] !== '' ? mb_substr($merged['office'], 0, 255, 'UTF-8') : null,
+        $merged['phone'] !== '' ? $merged['phone'] : null,
+        $merged['gender'],
+    ]);
+
+    $wasNew = !$existing;
+    $oldKeys = [];
+    foreach ($existing as $ex) {
+        if ($ex['nic'] !== $canon) {
+            $oldKeys[] = $ex['nic'];
+        }
+    }
+    // Also remap any candidate keys that are not the canonical row
+    foreach ($candidates as $c) {
+        if ($c !== $canon) {
+            $oldKeys[] = $c;
+        }
+    }
+    $oldKeys = array_values(array_unique($oldKeys));
+
+    if ($oldKeys) {
+        $phOld = implode(',', array_fill(0, count($oldKeys), '?'));
+        $params = array_merge([$canon], $oldKeys);
+        try {
+            $pdo->prepare("UPDATE training_records SET nic = ? WHERE nic IN ($phOld)")->execute($params);
+        } catch (PDOException $e) {
+            // Unique (nic, trainingName, date) clash: drop obsolete key rows only after remap attempt
+        }
+        try {
+            $pdo->prepare("UPDATE staff_certs SET nic = ? WHERE nic IN ($phOld)")->execute($params);
+        } catch (PDOException $e) {
+        }
+        try {
+            $pdo->prepare("UPDATE users SET nic = ? WHERE nic IN ($phOld)")->execute($params);
+        } catch (PDOException $e) {
+        }
+        $pdo->prepare("DELETE FROM officers WHERE nic IN ($phOld) AND nic <> ?")->execute(array_merge($oldKeys, [$canon]));
+    }
+
+    return $wasNew ? 'inserted' : 'updated';
+}
+
+function mdtu_officer_by_nic(PDO $pdo, $nic)
+{
+    $vals = nic_lookup_values($nic);
+    if (!$vals) {
+        return null;
+    }
+    $ph = implode(',', array_fill(0, count($vals), '?'));
+    $st = $pdo->prepare("SELECT nic, name, designation, office, phone, gender FROM officers WHERE nic IN ($ph) LIMIT 1");
+    $st->execute($vals);
+    $row = $st->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Permanent designation + office for staff attendance certificates.
+ * Prefer officers master data (e.g. Development Officer + office name).
+ * Lecturers with no master record get designation "Lecturer" only.
+ */
+function mdtu_staff_posting_from_db(PDO $pdo, $nic, $role, $fallbackName = '', $fallbackDesig = '', $fallbackOffice = '')
+{
+    $officer = mdtu_officer_by_nic($pdo, $nic);
+    $name = trim((string) ($officer['name'] ?? ''));
+    $desig = trim((string) ($officer['designation'] ?? ''));
+    $office = trim((string) ($officer['office'] ?? ''));
+    if ($name === '') {
+        $name = trim((string) $fallbackName);
+    }
+    if ($role === 'lecturer') {
+        if ($desig === '') {
+            $desig = 'Lecturer';
+        }
+    } elseif ($role === 'kks') {
+        // Permanent post from officer directory; fallback label if directory has none.
+        if ($desig === '') {
+            $desig = trim((string) $fallbackDesig);
+            if ($desig === '') {
+                $desig = 'කම්කරු (KKS)';
+            }
+        }
+        if (function_exists('mdtu_canonical_designation')) {
+            $canon = mdtu_canonical_designation($desig);
+            if ($canon !== '') {
+                $desig = $canon;
+            }
+        }
+        if ($office === '') {
+            $office = trim((string) $fallbackOffice);
+        }
+        if (function_exists('mdtu_canonical_office') && $office !== '') {
+            $office = mdtu_canonical_office($office) ?: $office;
+        }
+    } else {
+        if ($desig === '') {
+            $desig = trim((string) $fallbackDesig);
+            if ($desig === '') {
+                $desig = $role === 'assistant' ? 'Assistant Coordinating Officer' : 'Training Coordinating Officer';
+            }
+        }
+        if ($office === '') {
+            $office = trim((string) $fallbackOffice);
+        }
+    }
+    return ['name' => $name, 'designation' => $desig, 'office' => $office];
 }

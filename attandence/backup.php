@@ -5,7 +5,7 @@
 const MDTU_BACKUP_KEEP_DAYS = 40;
 const MDTU_BACKUP_DIR = __DIR__ . '/backups';
 const MDTU_BACKUP_TABLES = ['users', 'programs', 'training_records', 'officers', 'progress_submissions', 'training_plans',
-    'staff_matrix', 'resource_persons', 'notifications', 'chat_messages', 'settings', 'certificate_issues', 'audit_log'];
+    'staff_matrix', 'resource_persons', 'staff_certs', 'notifications', 'chat_messages', 'settings', 'certificate_issues', 'audit_log'];
 
 const BACKUPS_HTACCESS = <<<'HTACCESS'
 # Backups contain the whole database: never serve them directly
@@ -39,6 +39,28 @@ function mdtu_backup_ext()
 }
 
 /** Creates today's backup if it does not exist yet. Cheap to call on every page load. */
+/** Starts today's backup in the background so login does not wait for the whole database copy. */
+function mdtu_auto_backup_async()
+{
+    $name = 'mdtu_backup_' . date('Y-m-d') . mdtu_backup_ext();
+    if (is_file(MDTU_BACKUP_DIR . '/' . $name)) {
+        return;
+    }
+    $php = PHP_BINARY;
+    if (stripos($php, 'php-cgi') !== false) {
+        $php = dirname($php) . DIRECTORY_SEPARATOR . 'php.exe';
+    }
+    if (!is_file($php)) {
+        return;
+    }
+    $cmd = escapeshellarg($php) . ' ' . escapeshellarg(__FILE__);
+    if (stripos(PHP_OS, 'WIN') === 0) {
+        pclose(popen('start /B "" ' . $cmd, 'r'));
+    } else {
+        exec($cmd . ' > /dev/null 2>&1 &');
+    }
+}
+
 function mdtu_auto_backup(PDO $pdo)
 {
     $name = 'mdtu_backup_' . date('Y-m-d') . mdtu_backup_ext();
@@ -158,4 +180,13 @@ function mdtu_list_backups()
 function mdtu_valid_backup_name($name)
 {
     return (bool) preg_match('/^mdtu_backup_\d{4}-\d{2}-\d{2}(_\d{6})?\.json(\.gz)?$/', (string) $name);
+}
+
+if (PHP_SAPI === 'cli' && isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) === __FILE__) {
+    require __DIR__ . '/db.php';
+    try {
+        mdtu_auto_backup($pdo);
+    } catch (Throwable $e) {
+        error_log('MDTU backup: ' . $e->getMessage());
+    }
 }
