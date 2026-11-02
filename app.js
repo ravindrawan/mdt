@@ -1384,7 +1384,7 @@ function boardsFor(role, color) {
     tile("#console/finish2", "ic-finish2.svg", "වැඩසටහන අවසන් කිරීම පියවර 2", "நிகழ்ச்சியை முடித்தல் படி 2", "Finish the programme, step 2"),
     tile("#console/advsum", "ic-advance.svg", "අත්තිකාරම් සාරාංශ පත්‍රය", "முன்பணச் சுருக்கப் படிவம்", "Advance summary sheet"),
     tile("#console/cp_completedtrainings", "ic-completed.svg", "අවසන් කළ පුහුණු වැඩසටහන්", "முடிந்த பயிற்சிகள்", "Finished training programmes"),
-    tile("#console/cp_privatetrainings", "ic-pts.svg", "පෞද්ගලික පුහුණු පාඨමාලා සඳහා ප්‍රතිපාදන", "தனியார் படிப்பு நிதி", "Funds for private training courses"),
+    tile("#console/cp_privatetrainings", "ic-pts.svg", "බාහිර පුහුණු පාඨමාලා සඳහා ප්‍රතිපාදන ලබා දීම", "வெளிப்புற படிப்புகளுக்கான நிதி", "Funding for external courses"),
     tile("#console/cp_othertrainings", "ic-otheroffice.svg", "වෙනත් කාර්යාල මගින් පවත්වන ලද පුහුණු වැඩසටහන්", "பிற அலுவலகப் பயிற்சிகள்", "Programmes conducted by other offices"),
     tile("#console/letter", "ic-letter.svg", "කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"),
     role === "Administrator" ? tile("#console/signatory", "ic-signatory.svg", "නියෝජ්‍ය ප්‍රධාන ලේකම් (පුහුණු)", "துணைப் பிரதம செயலாளர் (பயிற்சி)", "Deputy Chief Secretary (Training)") : "",
@@ -1442,7 +1442,7 @@ function boardsFor(role, color) {
         tile("#console/cp_trrequirements", "ic-needs.svg", "අපේ අවශ්‍යතා", "எமது தேவைகள்", "Our needs"),
         tile("#console/apply", "ic-apply.svg", "පුහුණු වැඩසටහන් අයදුම් කිරීම", "பயிற்சி விண்ணப்பம்", "Apply for a programme"),
         tile("#console/cp_atp", "ic-editplan.svg", "වාර්ෂික සැලැස්ම", "ஆண்டுத் திட்டம்", "Annual plan"),
-        tile("#console/private", "ic-private.svg", "පෞද්ගලික පාඨමාලාව", "தனியார் படிப்பு", "Private course"),
+        tile("#console/private", "ic-private.svg", "බාහිර පුහුණු පාඨමාලාව", "வெளிப்புற படிப்பு", "External course"),
         tile("#console/letter", "ic-letter.svg", "කැඳවීමේ ලිපිය", "அழைப்புக் கடிதம்", "Call letter"),
         tile("#console/signsheet", "ic-sign.svg", "අත්සන් පත්‍රය", "கையொப்பப் படிவம்", "Sign sheet"),
       ].join("")),
@@ -1778,6 +1778,7 @@ function classicPages() {
         { name: "pvtt_nid", label: () => L("නිලධාරියාගේ හැඳුනුම්පත", "அதிகாரி அடையாள எண்", "Officer national ID"), required: true },
         { name: "pvtt_cname", label: () => L("පාඨමාලාවේ නම", "படிப்பின் பெயர்", "Course name"), required: true },
         { name: "pvtt_cinstitute", label: () => L("ආයතනය", "நிறுவனம்", "Institute"), required: true },
+        { name: "pvtt_applydate", label: () => L("අයදුම් දිනය", "விண்ணப்பத் திகதி", "Application date"), kind: "date", today: true },
         { name: "pvtt_cstartdate", label: () => L("ආරම්භක දිනය", "தொடக்க திகதி", "Start date"), kind: "date" },
         { name: "pvtt_cenddate", label: () => L("අවසන් දිනය", "முடியும் திகதி", "End date"), kind: "date" },
         { name: "pvtt_cduration", label: () => L("කාල සීමාව", "காலம்", "Duration") },
@@ -1969,10 +1970,10 @@ function classicControl(field, row) {
     if (row && field.name === "stf_office") {
       field = { ...field, kind: "offices" };
     } else if (state.user?.role === "User") {
-      const office = state.user?.office || value || "";
+    const office = state.user?.office || value || "";
       return `<input name="${esc(field.name)}" value="${esc(office)}" readonly>`;
     } else {
-      field = { ...field, kind: "offices" };
+    field = { ...field, kind: "offices" };
     }
   }
   if (field.kind === "area") return `<textarea name="${esc(field.name)}" ${required}>${esc(value)}</textarea>`;
@@ -3010,8 +3011,8 @@ function syncApplicantTicks() {
   const all = document.querySelector(".applicant-fit [data-act=pick-all]");
   const picked = boxes.filter((box) => box.checked).length;
   if (all) {
-    all.checked = boxes.length > 0 && picked === boxes.length;
-    all.indeterminate = picked > 0 && picked < boxes.length;
+  all.checked = boxes.length > 0 && picked === boxes.length;
+  all.indeterminate = picked > 0 && picked < boxes.length;
   }
   const count = document.querySelector("#pick-count");
   if (count) count.textContent = L(`තෝරාගත් ගණන: ${picked}`, `தேர்ந்த எண்ணிக்கை: ${picked}`, `Selected: ${picked}`);
@@ -3320,7 +3321,36 @@ function bindProvisionSendForm(work, data) {
     if (kindBox && plan.kind) kindBox.value = plan.kind;
   };
   pick.addEventListener("change", fill);
+  pick.addEventListener("click", fill);
   if (pick.value) fill();
+}
+
+async function saveProvisionSend(form) {
+  if (!form) throw new Error(L("පෝරමය හමු නොවුණා.", "படிவம் இல்லை.", "Form not found."));
+  const data = Object.fromEntries(new FormData(form));
+  const year = String(data.year || chosenYear());
+  data.year = year;
+  data.name = String(data.name || "").trim();
+  data.office = String(data.office || "").trim();
+  data.plan = String(data.plan || "").trim();
+  data.amount = String(data.amount || "").trim();
+  data.kind = String(data.kind || "").trim();
+  data.moved = String(data.moved || "").trim() || localToday();
+  if (!data.name) throw new Error(L("පුහුණු වැඩසටහනේ නම ඇතුළත් කරන්න.", "பயிற்சிப் பெயரை எழுதவும்.", "Enter the programme name."));
+  if (!data.office) throw new Error(L("මාරු කළ ආයතනය ඇතුළත් කරන්න.", "மாற்றிய நிறுவனத்தை எழுதவும்.", "Enter the institution transferred to."));
+  if (!data.kind) throw new Error(L("වැඩසටහන් වර්ගය තෝරන්න.", "நிகழ்ச்சி வகையைத் தேர்ந்தெடுக்கவும்.", "Choose the programme type."));
+  if (!(advanceNumber(data.amount) > 0)) throw new Error(L("මුදල බිංදුවට වඩා වැඩි විය යුතුයි.", "தொகை பூஜ்ஜியத்தை விட அதிகமாக இருக்க வேண்டும்.", "Amount must be greater than zero."));
+  // Clear a stuck in-flight lock from the earlier logout/navigation bug.
+  if (state.posts) delete state.posts["provision-send-save"];
+  await api("provision-send-save", { method: "POST", body: data });
+  rememberYear(year);
+  state.query = new URLSearchParams(`tab=move&year=${year}`);
+  const work = $("#work");
+  if (work) await renderProvisionMove(work, year);
+  const note = document.querySelector("#provision-send-form #form-msg");
+  if (note) {
+    note.innerHTML = `<div class="ok">${esc(L("ප්‍රතිපාදන මාරු කිරීම සුරැකුණා. මාරු ලැයිස්තුවට සහ කාර්යාල ප්‍රගතියේ වියදමට එකතු විය.", "மாற்றம் சேமிக்கப்பட்டது. பட்டியலிலும் அலுவலக முன்னேற்றச் செலவிலும் சேர்ந்தது.", "Transfer saved. It was added to the list and to office-progress expenditure."))}</div>`;
+  }
 }
 
 function provisionSendFormHtml(data) {
@@ -3335,30 +3365,30 @@ function provisionSendFormHtml(data) {
     .join("");
   const offices = (state.options?.offices || []).map((item) => `<option value="${esc(item.of_name)}"></option>`).join("");
   return `
-    <form class="classic-form old-plan" id="provision-send-form">
+    <form class="classic-form old-plan" id="provision-send-form" action="javascript:void(0)" method="post" novalidate>
       <input type="hidden" name="year" value="${esc(year)}">
       <input type="hidden" name="id" value="${esc(row.id || "")}">
+      <div id="form-msg"></div>
       <label class="classic-field provision-plan-pick"><span>${esc(L("සැලසුම් අංකය", "திட்ட எண்", "Plan number"))}</span>
         <select name="atp" size="8">${plans}</select>
       </label>
       <div class="annual-sheet">
         <div class="annual-col">
           <label class="classic-field"><span>${esc(L("සැලසුම් අංකය (අතින්)", "திட்ட எண் (கைமுறை)", "Plan number (typed)"))}</span><input name="plan" value="${esc(row.plan || "")}"></label>
-          <label class="classic-field"><span>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி நிகழ்ச்சி", "Training programme"))}</span><input name="name" value="${esc(row.name || "")}" required></label>
-          <label class="classic-field"><span>${esc(L("මාරු කළ ආයතනය", "மாற்றிய நிறுவனம்", "Institution transferred to"))}</span><input name="office" list="provision-send-offices" value="${esc(row.office || "")}" required></label>
+          <label class="classic-field"><span>${esc(L("පුහුණු වැඩසටහන", "பயிற்சி நிகழ்ச்சி", "Training programme"))}</span><input name="name" value="${esc(row.name || "")}"></label>
+          <label class="classic-field"><span>${esc(L("මාරු කළ ආයතනය", "மாற்றிய நிறுவனம்", "Institution transferred to"))}</span><input name="office" list="provision-send-offices" value="${esc(row.office || "")}"></label>
           <datalist id="provision-send-offices">${offices}</datalist>
         </div>
         <div class="annual-col">
-          <label class="classic-field"><span>${esc(L("මාරු කළ දිනය", "மாற்றிய திகதி", "Transfer date"))}</span><input type="date" name="moved" value="${esc(row.moved || localToday())}" required></label>
-          <label class="classic-field"><span>${esc(L("මුදල (රු.)", "தொகை (ரூ.)", "Amount (Rs.)"))}</span><input name="amount" inputmode="decimal" value="${esc(row.amount || "")}" required></label>
-          <label class="classic-field"><span>${esc(L("වැඩසටහන් වර්ගය", "நிகழ்ச்சி வகை", "Programme type"))}</span><select name="kind" required><option value="">—</option>${kinds}</select></label>
+          <label class="classic-field"><span>${esc(L("මාරු කළ දිනය", "மாற்றிய திகதி", "Transfer date"))}</span><input type="date" name="moved" value="${esc(row.moved || localToday())}"></label>
+          <label class="classic-field"><span>${esc(L("මුදල (රු.)", "தொகை (ரூ.)", "Amount (Rs.)"))}</span><input name="amount" inputmode="decimal" value="${esc(row.amount || "")}"></label>
+          <label class="classic-field"><span>${esc(L("වැඩසටහන් වර්ගය", "நிகழ்ச்சி வகை", "Programme type"))}</span><select name="kind"><option value="">—</option>${kinds}</select></label>
           <label class="classic-field"><span>${esc(L("ලිපියේ අංකය", "கடித எண்", "Letter number"))}</span><input name="letter" maxlength="120" value="${esc(row.letter || "")}"></label>
           <label class="classic-field"><span>${esc(L("දිනය", "திகதி", "Date"))}</span><input type="date" name="date" value="${esc(row.date || "")}"></label>
         </div>
       </div>
-      <button type="submit">${esc(row.id ? L("යාවත්කාලීන කරන්න", "புதுப்பி", "Update") : L("ඇතුළත් කරන්න", "சேர்", "Add"))}</button>
+      <button class="btn" type="button" data-act="provision-send-save">${esc(row.id ? L("යාවත්කාලීන කරන්න", "புதுப்பி", "Update") : L("ඇතුළත් කරන්න", "சேர்", "Add"))}</button>
       ${row.id ? `<a class="btn secondary" href="#console/provision?tab=move&year=${esc(year)}">${esc(L("අලුත් පෝරමය", "புதிய படிவம்", "New form"))}</a>` : ""}
-      <div id="form-msg"></div>
     </form>`;
 }
 
@@ -6302,7 +6332,7 @@ async function renderFinish2(work) {
   </tr>`).join("");
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("වැඩසටහන අවසන් කිරීම පියවර 2", "நிகழ்ச்சியை முடித்தல் படி 2", "Finish the programme, step 2"))}</h2>
-    <p class="pad-note">${esc(L("අත්තිකාරම සුරැකූ, නම් ලේඛනය තහවුරු කළ සියලුම වැඩසටහන්. වෙබ් අඩවියෙන් නොකැඳවූ පුහුණුවක් නම් ලේඛනය තහවුරු කර අත්තිකාරම් පිරවූ පසු මෙතන පේනවා.", "முன்பணம் சேமித்து பெயர்ப் பட்டியல் உறுதி செய்த அனைத்துப் பயிற்சிகளும். இணையம் வழியாக அழைக்காத பயிற்சி, பெயர்ப் பட்டியல் உறுதி செய்து முன்பணம் நிரப்பிய பின் இங்கே தெரியும்.", "Every programme whose advance was saved and whose name list was confirmed. A training not called through the website appears here after the name list is confirmed and the advance is filled in."))}</p>
+    <p class="pad-note">${esc(L("අත්තිකාරම සුරැකූ, නම් ලේඛනය තහවුරු කළ සියලුම වැඩසටහන්. වෙබ් අඩවියෙන් නොකැඳවූ පුහුණුවක් — පැමිණීම තහවුරු කළාම හෝ සහභාගි වූ සංඛ්‍යාව සංස්කරණය කළාම, අත්තිකාරම් පිරවූ පසු මෙතන පේනවා. ආහාර බිල් සහ දීමනා ගෙවීම සුරැකූ පසු වැඩසටහන අවසන් වෙනවා.", "முன்பணம் சேமித்து பெயர்ப் பட்டியல் உறுதி செய்த அனைத்தும். இணையம் வழியாக அழைக்காத பயிற்சி — வருகை உறுதி அல்லது பங்கேற்றோர் எண்ணை மாற்றிய பின், முன்பணம் நிரப்பியதும் இங்கே தெரியும். உணவுப் பட்டியலும் கொடுப்பனவும் சேமித்த பின் நிகழ்ச்சி முடியும்.", "Every programme whose advance was saved and whose name list was confirmed. An off-website training appears here after attendance is confirmed or the attended count is edited, and the advance is filled. After food bill and allowance are saved, the programme is completed."))}</p>
     <div class="table-wrap desig-list"><table>
       <thead><tr>
         <th>${esc(L("ආහාර බිල් පියවීම", "உணவுப் பட்டியல் தீர்வு", "Food bill settlement"))}</th>
@@ -6811,12 +6841,47 @@ async function renderOffweb(work) {
   }
   planLecturers = people;
   try { state.options = Object.assign(state.options || {}, await api("options")); } catch (error) { /* centres/team stay empty */ }
+  const editId = state.query?.get("edit") || "";
+  let editing = null;
+  if (editId) {
+    try {
+      const all = await api("list", { query: { table: "cp_atp", limit: 1000, page: 1, allYears: "1" } });
+      editing = (all.items || []).find((row) => String(row.atp_id) === String(editId) && inPlan(row.atp_offweb)) || null;
+    } catch (error) {
+      editing = null;
+    }
+    if (!editing) {
+      work.innerHTML = `<div class="error">${esc(L("ඒ පුහුණු වැඩසටහන හමු නොවුණා.", "அந்தப் பயிற்சி இல்லை.", "That programme was not found."))}</div>
+        <p><a href="#console/offweb">${esc(L("ආපසු", "பின்செல்", "Back"))}</a></p>`;
+      return;
+    }
+    const savedDates = storedPlanDates(editing);
+    const savedPeople = storedPlanPeople(editing);
+    const savedStaff = storedPlanStaff(editing);
+    work.innerHTML = `
+      <h2 class="classic-title">${esc(editing.atp_trname || L("පුහුණු වැඩසටහන වෙනස් කරන්න", "பயிற்சியைத் திருத்து", "Edit the programme"))}</h2>
+      <p class="pad-note">${esc(L("වෙබ් අඩවියෙන් නොකැඳවූ පුහුණුවේ විස්තර වෙනස් කර සුරකින්න.", "இணையம் வழியாக அழைக்காத பயிற்சி விவரத்தை மாற்றிச் சேமிக்கவும்.", "Change the details of this off-website programme, then save."))}</p>
+      <form class="classic-form old-plan" id="offweb-form" action="#" method="post">
+        <input type="hidden" name="atp_id" value="${esc(editing.atp_id)}">
+        ${annualFormFields(editing, true, true)}
+        <button type="submit">${esc(L("යාවත්කාලීන කරන්න", "புதுப்பிக்க", "Update"))}</button>
+        <a class="btn secondary" href="#console/offweb">${esc(L("ආපසු", "பின்செல்", "Back"))}</a>
+        <div id="form-msg"></div>
+      </form>`;
+    paintPlanDates(savedDates.length ? savedDates : [""]);
+    paintPlanPeople(savedPeople);
+    paintPlanStaff(savedStaff);
+    const coordId = document.querySelector("#offweb-form [name=atp_supportstaff1]");
+    const coordName = document.querySelector("#offweb-form [name=atp_coordname]");
+    if (coordId && coordName && coordId.value.trim() && !coordName.value.trim()) fillCoordinatorName(coordId);
+    return;
+  }
   const saved = await api("offweb-list");
   const canEditCame = state.user && (state.user.role === "Administrator" || state.user.role === "Super User");
   const rows = (saved.items || []).map((row, index) => `<tr>
     <td>${index + 1}</td>
     <td>${esc(showDate(row.day))}</td>
-    <td class="wrap-cell">${esc(row.name)}</td>
+    <td class="wrap-cell"><a href="#console/offweb?edit=${esc(row.id)}">${esc(row.name)}</a></td>
     <td class="wrap-cell">${esc(estimateFileNo(row.file))}</td>
     <td class="wrap-cell">${esc(row.place)}</td>
     <td><a href="#console/offweb?atp=${esc(row.id)}">${esc(L("ඇස්තමේන්තුව", "மதிப்பீடு", "Estimate"))}</a></td>
@@ -6826,7 +6891,7 @@ async function renderOffweb(work) {
   </tr>`).join("");
   work.innerHTML = `
     <h2 class="classic-title">${esc(L("වෙබ් අඩවිය මගින් කැඳවීම නොකර පවත්වන පුහුණු ඇතුළත් කිරීම හා ඇස්තමේන්තු සැකසීම", "இணையம் வழியாக அழைக்காமல் நடத்தும் பயிற்சியைச் சேர்த்தல் மற்றும் மதிப்பீடு", "Enter a training not called through the website and prepare the estimate"))}</h2>
-    <p class="pad-note">${esc(L("මෙතනින් ඇතුළත් කරන වැඩසටහන මුල් පිටුවේ පෙන්වන්නේ නැත. පුහුණු වැඩසටහන් සඳහා අයදුම් කරන තැනත් පෙන්වන්නේ නැත. ඇස්තමේන්තුව සුරැකූ පසු සංශෝධිත ඇස්තමේන්තුවේ හෝ පියවර 1 හි පෙන්වන්නේ නැත. නම් ලේඛනය තහවුරු කර අත්තිකාරම් පිරවූ පසු පියවර 2 හි පේනවා. වාර්තාවල සාමාන්‍ය වැඩසටහනක් වගේ යනවා. සහභාගි වූ සංඛ්‍යාව සුපිරි පරිශීලකයාට සහ පරිපාලකයාට විතරක් වෙනස් කරන්න පුළුවන්. සංස්කරණය කරලා සුරකින්න ඔබන්න. අත්තිකාරම් විස්තරවල ඒ සංඛ්‍යාව පේනවා.", "இங்கே சேர்க்கும் பயிற்சி முகப்பிலோ விண்ணப்பப் பக்கத்திலோ தெரியாது. மதிப்பீடு சேமித்த பின் திருத்திய மதிப்பீட்டிலோ படி 1 இலோ தெரியாது. பெயர்ப் பட்டியல் உறுதி செய்து முன்பணம் நிரப்பிய பின் படி 2 இல் தெரியும். அறிக்கைகளில் சாதாரண பயிற்சி போலச் சேரும். பங்கேற்றோர் எண்ணை சூப்பர் பயனரும் நிர்வாகியும் மட்டும் மாற்றலாம். திருத்திச் சேமி என்பதை அழுத்தவும். முன்பண விவரத்தில் அந்த எண் தெரியும்.", "A programme entered here does not appear on the home page or in the application list. After the estimate is saved it does not appear in the revised estimate or in step 1. It appears in step 2 after the name list is confirmed and the advance is filled in. Reports include it like any other programme. Only a Super User or an Administrator can change the number who attended. Edit it, then press Save. Advance details shows that number."))}</p>
+    <p class="pad-note">${esc(L("මෙතනින් ඇතුළත් කරන වැඩසටහන මුල් පිටුවේ පෙන්වන්නේ නැත. ඇස්තමේන්තුව සුරැකූ පසු සංශෝධිත ඇස්තමේන්තුවේ හෝ පියවර 1 හි පෙන්වන්නේ නැත. පැමිණීම තහවුරු කළාම හෝ සහභාගි වූ සංඛ්‍යාව සංස්කරණය කළාම, අත්තිකාරම් පිරවූ පසු පියවර 2 හි පේනවා. ආහාර බිල් හා දීමනා සුරැකූ පසු වැඩසටහන අවසන් වී ප්‍රගති වාර්තාවලට යනවා. මත්ද්‍රව්‍ය, රැස්වීම්, දෙමළ භාෂා වැඩසටහන්ත් ඒ විදිහටම. නම ඔබලා වැඩසටහන වෙනස් කරන්න පුළුවන්.", "இங்கே சேர்க்கும் பயிற்சி முகப்பில் தெரியாது. பெயரை அழுத்திப் பயிற்சியைத் திருத்தலாம்.", "A programme entered here does not appear on the home page. Click the name to edit the programme. After estimate, attendance or attended count, and advance, it appears in step 2."))}</p>
     <form class="classic-form old-plan" id="offweb-form" action="#" method="post">
       ${annualFormFields({
         atp_trtype: TYPE_MDTU,
@@ -7357,10 +7422,10 @@ function panelSheetHtml(data) {
     ${days.map(() => `<td class="sign-box"></td>`).join("")}
   </tr>`).join("");
   const panel = (data.panel || []).map((row, index) => `<tr class="panel-role">
-    <td>${String(index + 1).padStart(2, "0")}</td>
+      <td>${String(index + 1).padStart(2, "0")}</td>
     <td><input class="panel-edit" data-field="who" value="${esc(panelWho(row))}"></td>
     <td><input class="panel-edit center" data-field="role" value="${esc(row.role || "")}"></td>
-    <td class="sign-box"></td>
+      <td class="sign-box"></td>
   </tr>`).join("");
   return `<article class="panel-sign" data-name="${esc(data.name || "")}">
     <h2>කළමනාකරණ සංවර්ධන පුහුණු ඒකකය</h2>
@@ -8306,6 +8371,7 @@ function aheadSpec(kind) {
       title: "මත්ද්‍රව්‍ය නිවාරණ හා උපදේශන ප්‍රගතිය",
       empty: "මෙම වර්ෂයේ මත්ද්‍රව්‍ය නිවාරණ හා උපදේශන වැඩසටහන් නැත.",
       file: "mathdravya",
+      allocSource: "site",
       cards: [
         ["count", L("පුහුණු වැඩසටහන් ගණන", "பயிற்சி நிகழ்ச்சிகள்", "Programmes"), "පුහුණු වැඩසටහන් ගණන"],
         ["spent", L("වියදම", "செலவு", "Expenditure"), "වියදම"],
@@ -8357,10 +8423,12 @@ function aheadSpec(kind) {
     title: "දෙමළ භාෂා ප්‍රගතිය",
     empty: "මෙම වර්ෂයේ දෙමළ භාෂා වැඩසටහන් නැත.",
     file: "demala",
+    // Same pot as provision field "භාෂා වැඩසටහන් සඳහා වෙන් වූ ප්‍රතිපාදන" (pv_language).
+    allocSource: "site",
     cards: [
       ["count", L("පුහුණු වැඩසටහන් ගණන", "பயிற்சி நிகழ்ச்சிகள்", "Programmes"), "පුහුණු වැඩසටහන් ගණන"],
       ["spent", L("වියදම", "செலவு", "Expenditure"), "වියදම"],
-      ["alloc", L("දෙමළ වැඩමුළු සඳහා වෙන් වූ ප්‍රතිපාදන", "தமிழ் பட்டறைகளுக்காக ஒதுக்கிய ஒதுக்கீடு", "Provision set aside for Tamil workshops"), "දෙමළ වැඩමුළු සඳහා වෙන් වූ ප්‍රතිපාදන"],
+      ["alloc", L("භාෂා වැඩසටහන් සඳහා වෙන් වූ ප්‍රතිපාදන", "மொழி நிகழ்ச்சிகளுக்கான ஒதுக்கீடு", "Allocation for language programmes"), "භාෂා වැඩසටහන් සඳහා වෙන් වූ ප්‍රතිපාදන"],
       ["left", L("ඉතිරි ප්‍රතිපාදන", "மீதி", "Remaining provision"), "ඉතිරි ප්‍රතිපාදන"],
       ["people", L("පුහුණුලාභීන් ගණන", "பயனாளிகள்", "Trainees"), "පුහුණුලාභීන් ගණන"],
     ],
@@ -8426,9 +8494,14 @@ async function saveAheadForm(form, extra = {}) {
   if (note) note.textContent = L("සුරකින ලදී", "சேமிக்கப்பட்டது", "Saved");
 }
 
+function canEditAheadReports() {
+  return state.user?.role === "Administrator";
+}
+
 function tamilReportHtml(data, spec) {
   const rows = Array.isArray(data.rows) ? data.rows : [];
-  const canDrop = spec.kind === "general";
+  const canEdit = canEditAheadReports();
+  const canDrop = canEdit && spec.kind === "general";
   const omitted = canDrop && Array.isArray(data.omitted) ? data.omitted : [];
   const pack = {
     count: rows.length,
@@ -8439,6 +8512,9 @@ function tamilReportHtml(data, spec) {
       : rows.reduce((sum, row) => sum + tamilNum(row.money), 0),
   };
   pack.left = pack.alloc - pack.spent;
+  const cell = (name, value, mode) => canEdit
+    ? `<input name="${esc(name)}" value="${esc(value)}" inputmode="${esc(mode)}">`
+    : `<span>${esc(value)}</span>`;
   const body = rows.length
     ? rows.map((row, index) => `<tr data-id="${esc(row.id)}" data-name="${esc(row.name)}" data-days="${esc(row.days)}" data-place="${esc(row.place)}" data-coord="${esc(row.coord || "")}">
         <td>${index + 1}</td>
@@ -8446,9 +8522,9 @@ function tamilReportHtml(data, spec) {
         <td class="left">${esc(row.days)}</td>
         <td class="left">${esc(row.place)}</td>
         <td class="left">${esc(row.coord || "")}</td>
-        <td><input name="money" value="${esc(row.money)}" inputmode="decimal"></td>
-        <td><input name="spent" value="${esc(row.spent)}" inputmode="decimal"></td>
-        <td><input name="people" value="${esc(row.people)}" inputmode="numeric"></td>
+        <td>${cell("money", row.money, "decimal")}</td>
+        <td>${cell("spent", row.spent, "decimal")}</td>
+        <td>${cell("people", row.people, "numeric")}</td>
         ${canDrop ? `<td class="no-print"><button class="text-btn" type="button" data-act="ahead-drop">${esc(L("මකන්න", "நீக்கு", "Remove"))}</button></td>` : ""}
       </tr>`).join("")
     : `<tr><td class="left" colspan="${canDrop ? 9 : 8}">${esc(spec.empty)}</td></tr>`;
@@ -8457,7 +8533,7 @@ function tamilReportHtml(data, spec) {
     : "";
   return `<form id="ahead-form" data-kind="${esc(spec.kind)}" data-alloc-source="${esc(spec.allocSource || "rows")}" data-alloc="${esc(data.allocation || "")}" data-omit="${esc(omitted.map((item) => item.id).join(","))}">
     <div class="tamil-tools no-print">
-      <button class="btn" type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
+      ${canEdit ? `<button class="btn" type="submit">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>` : ""}
       <button class="btn secondary" type="button" data-act="tamil-detail-pdf">${esc(L("විස්තර PDF", "விவரம் PDF", "Detail PDF"))}</button>
       <button class="btn secondary" type="button" data-act="tamil-summary-pdf">${esc(L("සාරාංශ PDF", "சுருக்கம் PDF", "Summary PDF"))}</button>
       <button class="btn secondary" type="button" data-act="ahead-csv">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
@@ -8466,6 +8542,7 @@ function tamilReportHtml(data, spec) {
     </div>
     <p class="name-meta"><span>${esc(L("කළමනාකරණ සංවර්ධන හා පුහුණු ඒකකය - වයඹ පළාත", "முகாமைத்துவ அபிவிருத்தி மற்றும் பயிற்சிப் பிரிவு - வடமேல் மாகாணம்", "Management Development and Training Unit - North Western Province"))}</span><span>${esc(reportSpan(chosenYear()))}</span></p>
     ${canDrop ? `<p class="pad-note no-print">${esc(L("අනවශ්‍ය පුහුණුවක් මකන්න පුළුවන්. ඒක මේ වාර්තාවෙන් ඉවත් වෙනවා. පුහුණුවම මකන්නේ නැහැ. වැඩසටහන් ගණන, පුහුණුලාභීන්, වියදම සහ ඉතිරි ප්‍රතිපාදන ඒ අනුව යාවත්කාලීන වෙනවා.", "தேவையில்லாத பயிற்சியை நீக்கலாம். அது இந்த அறிக்கையிலிருந்து மட்டும் விலகும். பயிற்சி அழியாது. நிகழ்ச்சி, பயனாளி, செலவு, மீதி அதற்கேற்ப புதுப்பிக்கும்.", "An unnecessary programme can be removed from this report. The programme itself stays. Programme count, trainees, expenditure and the remainder update from the rows that remain."))}</p>` : ""}
+    ${!canEdit ? `<p class="pad-note no-print">${esc(L("මෙම වාර්තා සංස්කරණය කළ හැක්කේ පරිපාලකට පමණි.", "இந்த அறிக்கைகளைத் திருத்த நிர்வாகி மட்டும் அனுமதி.", "Only an Administrator can edit these reports."))}</p>` : ""}
     <div class="tamil-summary">
       ${spec.cards.map(([key, label]) => `<div class="tamil-card"><span>${esc(label)}</span><b id="tamil-${key}">${esc(aheadCardValue(key, pack))}</b></div>`).join("")}
     </div>
@@ -8800,13 +8877,15 @@ function officeReportHtml(data) {
     line("", L("මුළු එකතුව", "மொத்தம்", "Grand total"), sheet.grand, "grand"),
   ].join("");
   const outside = data.outside || {};
+  const canEdit = canEditAheadReports();
+  const sendTotal = officeMoney(outside.sendTotal || 0);
   const total = advanceNumber(data.totalProvision);
   const spent = advanceNumber(data.spentTotal);
   const left = total - spent;
   const span = reportSpan(year);
   return `
     <div class="tamil-tools no-print">
-      <button class="btn" type="submit" form="office-out">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>
+      ${canEdit ? `<button class="btn" type="submit" form="office-out">${esc(L("සුරකින්න", "சேமி", "Save"))}</button>` : ""}
       <button class="btn secondary" type="button" data-act="office-detail-pdf">${esc(L("විස්තර PDF", "விவரம் PDF", "Detail PDF"))}</button>
       <button class="btn secondary" type="button" data-act="office-summary-pdf">${esc(L("සාරාංශ PDF", "சுருக்கம் PDF", "Summary PDF"))}</button>
       <button class="btn secondary" type="button" data-act="office-csv">${esc(L("Excel බාගත කරන්න", "Excel பதிவிறக்கம்", "Download Excel"))}</button>
@@ -8836,11 +8915,12 @@ function officeReportHtml(data) {
     </article>
     <form class="classic-form old-plan no-print" id="office-out">
       <h3 class="classic-title">${esc(L("වෙනත් ආයතන වෙත මාරු කළ ප්‍රතිපාදන", "பிற நிறுவனங்களுக்கு மாற்றிய ஒதுக்கீடு", "Allocation transferred to other institutions"))}</h3>
-      <p class="muted">${esc(L("වර්ග අතර මාරු කිරීම් ඉහත තීරුවලම පෙනේ. මෙහි ලියන්නේ වෙනත් ආයතනයකට ලබා දුන් මුදල සහ ඒ සඳහා වියදම පමණයි.", "வகைகளுக்கிடையிலான மாற்றம் மேலுள்ள நிரல்களிலேயே தெரியும். இங்கே பிற நிறுவனத்துக்கு வழங்கிய தொகையையும் அதன் செலவையும் எழுதவும்.", "Transfers between categories already show in the columns above. Enter here only money given to another institution, and what was spent from it."))}</p>
+      <p class="muted">${esc(L(`ආයතනයකට ප්‍රතිපාදන මාරු කිරීම් මගින් ඇතුළත් කළ මුදල (${sendTotal}) ස්වයංක්‍රීයව වියදමට එකතු වේ. මෙහි ලියන්නේ ඊට අමතර මුදල් පමණයි.`, `நிறுவன ஒதுக்கீட்டு மாற்றங்கள் (${sendTotal}) தானாகச் செலவில் சேரும். இங்கே கூடுதல் தொகையை மட்டும் எழுதவும்.`, `Transfers to institutions (${sendTotal}) are added as expenditure automatically. Enter only any extra amounts here.`))}</p>
       <input type="hidden" name="year" value="${esc(year)}">
-      <label class="classic-field"><span>${esc(L("මාරු කළ ප්‍රතිපාදනය (රු.)", "மாற்றிய ஒதுக்கீடு (ரூ.)", "Amount transferred (Rs.)"))}</span><input name="amount" inputmode="decimal" value="${esc(outside.amount || "")}"></label>
-      <label class="classic-field"><span>${esc(L("ඒ සඳහා වියදම (රු.)", "அதற்கான செலவு (ரூ.)", "Expenditure from it (Rs.)"))}</span><input name="spent" inputmode="decimal" value="${esc(outside.spent || "")}"></label>
-      <label class="classic-field"><span>${esc(L("සටහන", "குறிப்பு", "Note"))}</span><input name="note" maxlength="500" value="${esc(outside.note || "")}"></label>
+      <label class="classic-field"><span>${esc(L("ආයතන මාරු එකතුව (ස්වයං)", "நிறுவன மாற்ற மொத்தம் (தானி)", "Institution transfers (auto)"))}</span><input value="${esc(sendTotal)}" readonly></label>
+      <label class="classic-field"><span>${esc(L("අමතර මාරු කළ ප්‍රතිපාදනය (රු.)", "கூடுதல் மாற்றிய ஒதுக்கீடு (ரூ.)", "Extra amount transferred (Rs.)"))}</span><input name="amount" inputmode="decimal" value="${esc(outside.manualAmount || "")}" ${canEdit ? "" : "readonly"}></label>
+      <label class="classic-field"><span>${esc(L("අමතර වියදම (රු.)", "கூடுதல் செலவு (ரூ.)", "Extra expenditure (Rs.)"))}</span><input name="spent" inputmode="decimal" value="${esc(outside.manualSpent || "")}" ${canEdit ? "" : "readonly"}></label>
+      <label class="classic-field"><span>${esc(L("සටහන", "குறிப்பு", "Note"))}</span><input name="note" maxlength="500" value="${esc(outside.note || "")}" ${canEdit ? "" : "readonly"}></label>
       <div id="form-msg"></div>
     </form>`;
 }
@@ -8878,8 +8958,13 @@ function officeView() {
   const copy = { ...data, outside: { ...(data.outside || {}) } };
   const form = document.getElementById("office-out");
   if (form) {
-    copy.outside.amount = form.elements.amount?.value ?? copy.outside.amount;
-    copy.outside.spent = form.elements.spent?.value ?? copy.outside.spent;
+    const sendTotal = advanceNumber(data.outside?.sendTotal);
+    const manualAmount = advanceNumber(form.elements.amount?.value ?? copy.outside.manualAmount);
+    const manualSpent = advanceNumber(form.elements.spent?.value ?? copy.outside.manualSpent);
+    copy.outside.manualAmount = officeMoney(manualAmount);
+    copy.outside.manualSpent = officeMoney(manualSpent);
+    copy.outside.amount = officeMoney(sendTotal + manualAmount);
+    copy.outside.spent = officeMoney(sendTotal + manualSpent);
     const previous = advanceNumber(data.outside?.spent);
     const next = advanceNumber(copy.outside.spent);
     copy.spentTotal = officeMoney(advanceNumber(data.spentTotal) - previous + next);
@@ -9969,9 +10054,9 @@ async function onClick(event) {
     const wait = new Promise((resolve) => setTimeout(resolve, 420));
     Promise.all([
       wait,
-      api("eval-answer", {
-        method: "POST",
-        body: { token: now.token, kind: now.kind, nid: now.nid, no: button.dataset.no, choice: button.dataset.letter },
+    api("eval-answer", {
+      method: "POST",
+      body: { token: now.token, kind: now.kind, nid: now.nid, no: button.dataset.no, choice: button.dataset.letter },
       }).then(() => api("eval-state", { query: { token: now.token, kind: now.kind, nid: now.nid } })),
     ]).then(([, status]) => {
       paintQuizQuestion(now.token, now.kind, now.nid, now.opened, status);
@@ -10332,6 +10417,20 @@ async function onClick(event) {
   if (act.act === "panel-pdf") savePanelPdf().catch((error) => alert(error.message));
   if (act.act === "namelist-pdf") saveNameListPdf().catch((error) => alert(error.message));
   if (act.act === "attended-pdf") saveAttendedPdf().catch((error) => alert(error.message));
+  if (act.act === "provision-send-save") {
+    event.preventDefault();
+    const form = document.getElementById("provision-send-form") || event.target.closest("form");
+    if (!form) return;
+    submitMessage(form, async () => {
+      try {
+        await saveProvisionSend(form);
+      } catch (error) {
+        alert(error.message);
+        throw error;
+      }
+    });
+    return;
+  }
   if (act.act === "provision-send-delete") {
     if (!confirm(L("මෙම ප්‍රතිපාදන මාරු කිරීම මකන්නද?", "இந்த மாற்றத்தை நீக்கவா?", "Delete this transfer?"))) return;
     const year = document.querySelector("#provision-send-form [name=year]")?.value || state.query?.get("year") || chosenYear();
@@ -10368,6 +10467,7 @@ async function onClick(event) {
   }
   if (act.act === "ahead-drop") {
     event.preventDefault();
+    if (!canEditAheadReports()) return;
     const form = document.getElementById("ahead-form");
     const tr = event.target.closest("tr[data-id]");
     if (!form || !tr || form.dataset.kind !== "general") return;
@@ -10396,6 +10496,7 @@ async function onClick(event) {
   }
   if (act.act === "ahead-restore") {
     event.preventDefault();
+    if (!canEditAheadReports()) return;
     const form = document.getElementById("ahead-form");
     const id = String(act.id || "");
     if (!form || !id) return;
@@ -10492,6 +10593,8 @@ function openLogin() {
 
 async function onSubmit(event) {
   const form = event.target;
+  // SPA: never allow a native form navigation (that fires pagehide → logout).
+  if (form instanceof HTMLFormElement) event.preventDefault();
   if (form.id === "settle-person") {
     event.preventDefault();
     const nid = String(new FormData(form).get("nid") || "").trim();
@@ -10535,6 +10638,10 @@ async function onSubmit(event) {
   }
   if (form.id === "ahead-form") {
     event.preventDefault();
+    if (!canEditAheadReports()) {
+      alert(L("මෙම වාර්තා සංස්කරණය කළ හැක්කේ පරිපාලකට පමණි.", "இந்த அறிக்கைகளைத் திருத்த நிர்வாகி மட்டும் அனுமதி.", "Only an Administrator can edit these reports."));
+      return;
+    }
     const note = document.getElementById("tamil-note");
     try {
       await saveAheadForm(form);
@@ -11197,14 +11304,7 @@ async function onSubmit(event) {
   }
   if (form.id === "provision-send-form") {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(form));
-    await submitMessage(form, async () => {
-      await api("provision-send-save", { method: "POST", body: data });
-      location.hash = `#console/provision?tab=move&year=${encodeURIComponent(data.year || "")}`;
-      await renderProvisionMove($("#work"), data.year);
-      const note = document.querySelector("#provision-send-form #form-msg");
-      if (note) note.innerHTML = `<div class="ok">${esc(L("ප්‍රතිපාදන මාරු කිරීම සුරැකුණා.", "மாற்றம் சேமிக்கப்பட்டது.", "The transfer was saved."))}</div>`;
-    });
+    await submitMessage(form, () => saveProvisionSend(form));
   }
   if (form.id === "provision-add-form") {
     event.preventDefault();
@@ -11218,6 +11318,10 @@ async function onSubmit(event) {
   }
   if (form.id === "office-out") {
     event.preventDefault();
+    if (!canEditAheadReports()) {
+      alert(L("මෙම වාර්තා සංස්කරණය කළ හැක්කේ පරිපාලකට පමණි.", "இந்த அறிக்கைகளைத் திருத்த நிர்வாகி மட்டும் அனுமதி.", "Only an Administrator can edit these reports."));
+      return;
+    }
     const data = Object.fromEntries(new FormData(form));
     await submitMessage(form, async () => {
       await api("ahead-office-save", { method: "POST", body: data });
@@ -11245,6 +11349,11 @@ async function onSubmit(event) {
       data.atp_isinatp = NO;
       data.atp_lastdateapply = "";
       const saved = await api("offweb-save", { method: "POST", body: { data } });
+      if (String(data.atp_id || "").trim()) {
+        location.hash = "#console/offweb";
+        route();
+        return;
+      }
       location.hash = `#console/offweb?atp=${encodeURIComponent(saved.id)}`;
     });
   }
@@ -11552,64 +11661,64 @@ async function drawLetterCanvas() {
   const room = Math.max(160, pageH - footH - 12 - contentTop);
   const blocks = [...article.children].filter((node) => !node.classList.contains("letter-head-wrap") && !node.classList.contains("letter-foot"));
   const paintBody = (ctx, factor) => {
-    ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, pageW, 5000);
-    ctx.fillStyle = "#111111";
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
+  ctx.fillStyle = "#111111";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
     let y = 0;
     const sz = (n) => Math.max(12, Math.round(n * factor));
-    const drawJustified = (text, x, maxWidth, lineH) => {
-      String(text || "").split("\n").forEach((paragraph) => {
-        const words = paragraph.trim().split(/\s+/).filter(Boolean);
-        if (!words.length) {
-          y += lineH;
-          return;
+  const drawJustified = (text, x, maxWidth, lineH) => {
+    String(text || "").split("\n").forEach((paragraph) => {
+      const words = paragraph.trim().split(/\s+/).filter(Boolean);
+      if (!words.length) {
+        y += lineH;
+        return;
+      }
+      const lines = [];
+      let line = [];
+      words.forEach((word) => {
+        const trial = [...line, word].join(" ");
+        if (ctx.measureText(trial).width > maxWidth && line.length) {
+          lines.push(line);
+          line = [word];
+        } else {
+          line.push(word);
         }
-        const lines = [];
-        let line = [];
-        words.forEach((word) => {
-          const trial = [...line, word].join(" ");
-          if (ctx.measureText(trial).width > maxWidth && line.length) {
-            lines.push(line);
-            line = [word];
-          } else {
-            line.push(word);
-          }
-        });
-        if (line.length) lines.push(line);
-        lines.forEach((parts, index) => {
-          const last = index === lines.length - 1 || parts.length < 2;
-          if (last) {
-            ctx.fillText(parts.join(" "), x, y);
-          } else {
-            const wordsWidth = parts.reduce((sum, word) => sum + ctx.measureText(word).width, 0);
-            const gap = (maxWidth - wordsWidth) / (parts.length - 1);
-            let cursor = x;
-            parts.forEach((word) => {
-              ctx.fillText(word, cursor, y);
-              cursor += ctx.measureText(word).width + gap;
-            });
-          }
-          y += lineH;
-        });
       });
-    };
-    blocks.forEach((block) => {
-      const title = block.classList.contains("letter-title");
-      const who = block.classList.contains("who");
-      const sign = block.classList.contains("sign");
-      const body = block.classList.contains("letter-body");
+      if (line.length) lines.push(line);
+      lines.forEach((parts, index) => {
+        const last = index === lines.length - 1 || parts.length < 2;
+        if (last) {
+          ctx.fillText(parts.join(" "), x, y);
+        } else {
+          const wordsWidth = parts.reduce((sum, word) => sum + ctx.measureText(word).width, 0);
+          const gap = (maxWidth - wordsWidth) / (parts.length - 1);
+          let cursor = x;
+          parts.forEach((word) => {
+            ctx.fillText(word, cursor, y);
+            cursor += ctx.measureText(word).width + gap;
+          });
+        }
+        y += lineH;
+      });
+    });
+  };
+  blocks.forEach((block) => {
+    const title = block.classList.contains("letter-title");
+    const who = block.classList.contains("who");
+    const sign = block.classList.contains("sign");
+    const body = block.classList.contains("letter-body");
       const size = title ? sz(24) : sign ? sz(20) : who ? sz(22) : sz(21);
-      ctx.font = `${title || who ? "700" : "400"} ${size}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
+    ctx.font = `${title || who ? "700" : "400"} ${size}px "Noto Sans Sinhala", "Source Sans 3", sans-serif`;
       const lineH = Math.round(size * (body || title ? 1.65 : sign ? 1.55 : 1.5));
       const left = margin;
       const maxWidth = sign ? Math.round(460 * factor) : pageW - margin * 2;
       if (block.classList.contains("letter-copy")) y += Math.round(28 * factor);
-      if (sign) {
+    if (sign) {
         y += Math.round(16 * factor);
-        const image = block.querySelector(".letter-sign-img");
-        if (image && image.complete && image.naturalWidth) {
+      const image = block.querySelector(".letter-sign-img");
+      if (image && image.complete && image.naturalWidth) {
           const signH = Math.round(108 * factor);
           const signW = Math.min(Math.round(300 * factor), signH * image.naturalWidth / image.naturalHeight);
           ctx.drawImage(image, left, y, signW, signH);
@@ -11668,13 +11777,13 @@ async function drawLetterCanvas() {
         y += Math.round(10 * factor);
         return;
       }
-      const text = block.innerText.trim();
-      if (body) {
-        drawJustified(text, margin, maxWidth, lineH);
+    const text = block.innerText.trim();
+    if (body) {
+      drawJustified(text, margin, maxWidth, lineH);
         y += Math.round(12 * factor);
-        return;
-      }
-      ctx.textAlign = title ? "center" : "left";
+      return;
+    }
+    ctx.textAlign = title ? "center" : "left";
       wrapLetterLines(ctx, text, title ? pageW - margin * 2 : maxWidth).forEach((line) => {
         ctx.fillText(line, title ? pageW / 2 : left, y);
         if (title && line) {
@@ -11687,9 +11796,9 @@ async function drawLetterCanvas() {
           ctx.lineTo(titleX + titleWidth, y + lineH - Math.round(7 * factor));
           ctx.stroke();
         }
-        y += lineH;
-      });
-      ctx.textAlign = "left";
+      y += lineH;
+    });
+    ctx.textAlign = "left";
       if (title) y += Math.round(14 * factor);
       else if (who) y += Math.round(4 * factor);
       else if (sign) y += Math.round(10 * factor);

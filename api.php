@@ -860,6 +860,18 @@ function action_save(): void
             $record['req_isadd'] = NO_SI;
         }
     }
+    if ($table === 'cp_privatetrainings') {
+        $apply = substr(trim((string) ($record['pvtt_applydate'] ?? '')), 0, 10);
+        if ($isInsert && ($apply === '' || str_starts_with($apply, '0000'))) {
+            $record['pvtt_applydate'] = date('Y-m-d');
+        }
+        if ($isInsert && trim((string) ($record['pvtt_approved'] ?? '')) === '') {
+            $record['pvtt_approved'] = NO_SI;
+        }
+        if ($isInsert && trim((string) ($record['pvtt_certificatesubmit'] ?? '')) === '') {
+            $record['pvtt_certificatesubmit'] = NO_SI;
+        }
+    }
     if ($table === 'cp_login' && $isInsert === false && trim((string) ($record['lg_pwd'] ?? '')) === '') {
         unset($record['lg_pwd']);
     }
@@ -1582,14 +1594,37 @@ function action_attendance_save(): void
     json_out(['ok' => true, 'id' => db()->insert_id]);
 }
 
+function programme_attendance_ready(int $id, ?array $plan = null): bool
+{
+    $attendance = rows(
+        "SELECT tratt_id FROM cp_trainingattendance
+         WHERE tratt_atpid = ? AND tratt_isparti IS NOT NULL AND TRIM(tratt_isparti) <> ''
+         LIMIT 1",
+        'i',
+        [$id]
+    );
+    if ($attendance) {
+        return true;
+    }
+    if ($plan === null) {
+        $found = rows('SELECT atp_offweb, atp_offcame FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
+        $plan = $found[0] ?? null;
+    }
+    if (!$plan || !programme_is_offweb($plan)) {
+        return false;
+    }
+    // Off-web: editing සහභාගි වූ සංඛ්‍යාව (atp_offcame) counts as attendance ready.
+    $typed = trim((string) ($plan['atp_offcame'] ?? ''));
+    return $typed !== '' && preg_match('/^\d+$/', $typed) === 1;
+}
+
 function programme_steps_done(int $id): bool
 {
     $advance = rows('SELECT ad_id FROM cp_advances WHERE ad_atpid = ? LIMIT 1', 'i', [$id]);
     if (!$advance) {
         return false;
     }
-    $attendance = rows("SELECT tratt_id FROM cp_trainingattendance WHERE tratt_atpid = ? AND tratt_isparti IS NOT NULL AND TRIM(tratt_isparti) <> '' LIMIT 1", 'i', [$id]);
-    if (!$attendance) {
+    if (!programme_attendance_ready($id)) {
         return false;
     }
     $food = rows('SELECT fb_id FROM cp_foodbills WHERE fb_atpid = ? LIMIT 1', 'i', [$id]);
@@ -1646,14 +1681,20 @@ function finish_programme_if_ready(int $id): bool
         return false;
     }
     $counts = advance_attended_map();
-    $actual = (string) ($counts[$id] ?? 0);
+    $actual = (string) offweb_came_count($plan[0], (int) ($counts[$id] ?? 0));
     $saved = rows('SELECT se_total FROM cp_savedestimates WHERE se_atpid = ? LIMIT 1', 'i', [$id]);
     $estimate = trim((string) ($saved[0]['se_total'] ?? ''));
     if ($estimate === '') {
         $estimate = trim((string) ($plan[0]['atp_bdjet'] ?? ''));
     }
     $money = rows('SELECT d.ad_spent, f.fb_food FROM cp_atp a LEFT JOIN cp_advances d ON d.ad_atpid = a.atp_id LEFT JOIN cp_foodbills f ON f.fb_atpid = a.atp_id WHERE a.atp_id = ? LIMIT 1', 'i', [$id]);
-    $spent = advance_money(advance_number((string) ($money[0]['ad_spent'] ?? '0')) + advance_number((string) ($money[0]['fb_food'] ?? '0')));
+    $allow = rows('SELECT al_spent FROM cp_allowances WHERE al_atpid = ? LIMIT 1', 'i', [$id]);
+    $spentFromAdvance = advance_number((string) ($money[0]['ad_spent'] ?? '0'));
+    $spentFromFood = advance_number((string) ($money[0]['fb_food'] ?? '0'));
+    $spentFromPay = advance_number((string) ($allow[0]['al_spent'] ?? '0'));
+    // Prefer allowance total when set; else advance spent + food bill.
+    $spentValue = $spentFromPay > 0 ? $spentFromPay : ($spentFromAdvance + $spentFromFood);
+    $spent = advance_money($spentValue);
     $existing = rows('SELECT ct_comments FROM cp_completedtrainings WHERE ct_atpid = ? LIMIT 1', 's', [(string) $id]);
     $comments = $existing ? (string) ($existing[0]['ct_comments'] ?? '') : '';
     save_completed_copy($plan[0], $actual, $estimate, $spent, $comments);
@@ -6117,14 +6158,23 @@ function action_finish2(): void
     if (!is_super($user)) {
         json_out(['ok' => false, 'error' => 'මෙම ලැයිස්තුව බලන්න පුළුවන් පුහුණු කාර්ය මණ්ඩලයට පමණයි.'], 403);
     }
-    $ready = [];
+    $hasAdvance = [];
     foreach (rows('SELECT ad_atpid FROM cp_advances') as $row) {
-        $ready[(int) $row['ad_atpid']] = false;
+        $hasAdvance[(int) $row['ad_atpid']] = true;
     }
+    $attendanceOk = [];
     foreach (rows("SELECT DISTINCT tratt_atpid FROM cp_trainingattendance WHERE tratt_isparti IS NOT NULL AND TRIM(tratt_isparti) <> ''") as $row) {
-        $id = (int) $row['tratt_atpid'];
-        if (array_key_exists($id, $ready)) {
-            $ready[$id] = true;
+        $attendanceOk[(int) $row['tratt_atpid']] = true;
+    }
+    $offwebCame = [];
+    foreach (rows(
+        'SELECT atp_id, atp_offcame FROM cp_atp WHERE atp_offweb = ? OR atp_offweb = ? OR atp_offweb = ?',
+        'sss',
+        [YES_SI, 'Yes', 'yes']
+    ) as $row) {
+        $typed = trim((string) ($row['atp_offcame'] ?? ''));
+        if ($typed !== '' && preg_match('/^\d+$/', $typed)) {
+            $offwebCame[(int) $row['atp_id']] = true;
         }
     }
     $foodDone = [];
@@ -6138,7 +6188,11 @@ function action_finish2(): void
     $items = [];
     foreach (saved_estimate_items() as $item) {
         $id = (int) $item['id'];
-        if (empty($ready[$id])) {
+        if (empty($hasAdvance[$id])) {
+            continue;
+        }
+        $ready = !empty($attendanceOk[$id]) || !empty($offwebCame[$id]);
+        if (!$ready) {
             continue;
         }
         $item['closed'] = !empty($foodDone[$id]) && !empty($payDone[$id]);
@@ -6217,6 +6271,25 @@ function action_offweb_save(): void
     $row['atp_isinatp'] = NO_SI;
     $row['atp_isaddatp'] = NO_SI;
     $row['atp_lastdateapply'] = '0000-00-00';
+    $id = (int) ($data['atp_id'] ?? 0);
+    if ($id > 0) {
+        $found = rows('SELECT atp_id, atp_offweb FROM cp_atp WHERE atp_id = ? LIMIT 1', 'i', [$id]);
+        if (!$found || !programme_is_offweb($found[0])) {
+            json_out(['ok' => false, 'error' => 'ඒ පුහුණු වැඩසටහන හමු නොවුණා.'], 404);
+        }
+        $sets = [];
+        $params = [];
+        foreach ($row as $field => $value) {
+            $sets[] = '`' . $field . '` = ?';
+            $params[] = $value;
+        }
+        $params[] = $id;
+        $stmt = db()->prepare('UPDATE cp_atp SET ' . implode(',', $sets) . ' WHERE atp_id = ?');
+        if (!$stmt || !bind_and_run($stmt, str_repeat('s', count($row)) . 'i', $params)) {
+            json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහන යාවත්කාලීන කළ නොහැකි විය.'], 500);
+        }
+        json_out(['ok' => true, 'id' => $id, 'updated' => true]);
+    }
     $row['atp_requestDate'] = date('Y-m-d');
     $fields = array_keys($row);
     $marks = implode(',', array_fill(0, count($fields), '?'));
@@ -6227,7 +6300,7 @@ function action_offweb_save(): void
     if (!$stmt || !bind_and_run($stmt, $types, $params)) {
         json_out(['ok' => false, 'error' => 'පුහුණු වැඩසටහන ඇතුළත් කළ නොහැකි විය.'], 500);
     }
-    json_out(['ok' => true, 'id' => (int) db()->insert_id]);
+    json_out(['ok' => true, 'id' => (int) db()->insert_id, 'updated' => false]);
 }
 
 function programme_is_offweb(array $plan): bool
@@ -6274,7 +6347,8 @@ function action_offweb_came(): void
     if ($sync) {
         bind_and_run($sync, 'si', [$shown, $id]);
     }
-    json_out(['ok' => true, 'attended' => $shown]);
+    $closed = finish_programme_if_ready($id);
+    json_out(['ok' => true, 'attended' => $shown, 'closed' => $closed]);
 }
 
 function action_offweb_delete(): void
@@ -7588,7 +7662,7 @@ function pace_bundle(string $year): array
     }
     $came = advance_attended_map();
     $plans = rows(
-        'SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_noofparticipants,
+        'SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_noofparticipants, atp_offweb, atp_offcame,
                 atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_requestDate
          FROM cp_atp WHERE TRIM(atp_trname) <> \'\''
     );
@@ -7618,7 +7692,7 @@ function pace_bundle(string $year): array
             continue;
         }
         $id = (int) $plan['atp_id'];
-        $camePeople = (int) ($came[$id] ?? 0);
+        $camePeople = offweb_came_count($plan, (int) ($came[$id] ?? 0));
         $held = !empty($heldSaved[$id]) || $camePeople > 0 ? 1 : 0;
         $spent = (float) ($spentSaved[$id] ?? 0);
         $category = pace_category_id($name, (string) ($plan['atp_trtype'] ?? ''), (string) ($plan['atp_reqoffice'] ?? ''));
@@ -7636,6 +7710,27 @@ function pace_bundle(string $year): array
             'category' => $category,
             'held' => $held,
             'people' => $camePeople,
+            'spent' => advance_box($spent),
+        ];
+    }
+    foreach (private_training_rows($year) as $course) {
+        $month = (string) ($course['month'] ?? '');
+        if (!isset($months[$month])) {
+            continue;
+        }
+        $held = (int) ($course['held'] ?? 0);
+        $people = (int) ($course['people'] ?? 0);
+        $spent = (float) ($course['spent'] ?? 0);
+        $months[$month]['rows']['external']['held'] += $held;
+        $months[$month]['rows']['external']['people'] += $people;
+        $months[$month]['rows']['external']['spent'] += $spent;
+        $items[] = [
+            'name' => $course['name'],
+            'day' => $course['day'],
+            'month' => $month,
+            'category' => 'external',
+            'held' => $held,
+            'people' => $people,
             'spent' => advance_box($spent),
         ];
     }
@@ -7685,6 +7780,120 @@ function ahead_kept(array $edit, string $key, string $fallback): string
     return $saved === '' ? $fallback : $saved;
 }
 
+/** Offset so private-course rows can share cp_aheadsave with ATP ids. */
+function private_ahead_id(int $pvttId): int
+{
+    return 900000000 + max(0, $pvttId);
+}
+
+function foreign_ahead_id(int $schId): int
+{
+    return 910000000 + max(0, $schId);
+}
+
+function yesish_flag(mixed $value): bool
+{
+    $text = trim((string) $value);
+    if ($text === '') {
+        return false;
+    }
+    $low = mb_strtolower($text);
+    return $text === YES_SI || $low === 'yes' || $low === 'y' || $low === '1' || $text === 'ඔව්';
+}
+
+function private_training_day(array $row): string
+{
+    foreach (['pvtt_cstartdate', 'pvtt_applydate', 'pvtt_chequeissuedate', 'pvtt_chequedate'] as $key) {
+        $day = substr(trim((string) ($row[$key] ?? '')), 0, 10);
+        if (preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $day)) {
+            return $day;
+        }
+    }
+    return '';
+}
+
+function private_training_rows(string $year): array
+{
+    $out = [];
+    foreach (rows(
+        'SELECT pvtt_id, pvtt_nid, pvtt_cname, pvtt_cinstitute, pvtt_cstartdate, pvtt_cenddate,
+                pvtt_applydate, pvtt_fees, pvtt_amount, pvtt_approved, pvtt_chequeissuedate, pvtt_chequedate
+         FROM cp_privatetrainings WHERE TRIM(pvtt_cname) <> \'\''
+    ) as $row) {
+        $day = private_training_day($row);
+        if ($day === '' || substr($day, 0, 4) !== $year) {
+            continue;
+        }
+        $fees = advance_number((string) ($row['pvtt_fees'] ?? ''));
+        $paid = advance_number((string) ($row['pvtt_amount'] ?? ''));
+        $approved = yesish_flag($row['pvtt_approved'] ?? '');
+        $spent = $paid > 0 ? $paid : ($approved ? $fees : 0.0);
+        $place = split_plain((string) ($row['pvtt_cinstitute'] ?? ''));
+        $name = split_plain((string) ($row['pvtt_cname'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $out[] = [
+            'id' => private_ahead_id((int) $row['pvtt_id']),
+            'pvtt_id' => (int) $row['pvtt_id'],
+            'name' => $name,
+            'day' => $day,
+            'month' => substr($day, 5, 2),
+            'place' => $place,
+            'fees' => $fees,
+            'spent' => $spent,
+            'approved' => $approved,
+            'held' => ($approved || $spent > 0) ? 1 : 0,
+            'people' => 1,
+        ];
+    }
+    return $out;
+}
+
+function foreign_scholar_day(array $row): string
+{
+    foreach (['sch_depaturedate', 'sch_arrivedate'] as $key) {
+        $day = substr(trim((string) ($row[$key] ?? '')), 0, 10);
+        if (preg_match('/^(19|2[0-2])\d{2}-\d{2}-\d{2}$/', $day)) {
+            return $day;
+        }
+    }
+    return '';
+}
+
+function foreign_scholar_rows(string $year): array
+{
+    $out = [];
+    foreach (rows(
+        'SELECT sch_id, sch_nid, sch_name, sch_country, sch_depaturedate, sch_arrivedate, sch_spendamnt, sch_duration
+         FROM cp_foriegnscholars WHERE TRIM(sch_name) <> \'\''
+    ) as $row) {
+        $day = foreign_scholar_day($row);
+        if ($day === '' || substr($day, 0, 4) !== $year) {
+            continue;
+        }
+        $name = split_plain((string) ($row['sch_name'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $spent = advance_number((string) ($row['sch_spendamnt'] ?? ''));
+        $who = staff_name_for((string) ($row['sch_nid'] ?? ''));
+        $out[] = [
+            'id' => foreign_ahead_id((int) $row['sch_id']),
+            'name' => $name,
+            'day' => $day,
+            'month' => substr($day, 5, 2),
+            'place' => split_plain((string) ($row['sch_country'] ?? '')),
+            'coord' => $who,
+            'fees' => $spent,
+            'spent' => $spent,
+            'held' => 1,
+            'people' => 1,
+        ];
+    }
+    return $out;
+}
+
 function ahead_progress_bundle(string $year, string $kind): array
 {
     if (!in_array($kind, ['drug', 'tamil', 'external', 'foreign', 'general', 'special', 'department'], true)) {
@@ -7692,7 +7901,7 @@ function ahead_progress_bundle(string $year, string $kind): array
     }
     $plans = rows(
         'SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_location, atp_noofparticipants, atp_bdjet,
-                atp_supportstaff1, atp_coordname,
+                atp_supportstaff1, atp_coordname, atp_offweb, atp_offcame,
                 atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_requestDate
          FROM cp_atp WHERE TRIM(atp_trname) <> \'\''
     );
@@ -7740,7 +7949,7 @@ function ahead_progress_bundle(string $year, string $kind): array
             continue;
         }
         $edit = $saved[$id] ?? [];
-        $cameCount = (int) ($came[$id] ?? 0);
+        $cameCount = offweb_came_count($plan, (int) ($came[$id] ?? 0));
         $planned = (int) advance_number((string) $plan['atp_noofparticipants']);
         $coordName = trim((string) ($plan['atp_coordname'] ?? ''));
         if ($coordName === '') {
@@ -7758,6 +7967,50 @@ function ahead_progress_bundle(string $year, string $kind): array
             'sort' => $day,
         ];
     }
+    // External course funding lives in cp_privatetrainings (dashboard: බාහිර/පෞද්ගලික ප්‍රතිපාදන).
+    if ($kind === 'external') {
+        foreach (private_training_rows($year) as $course) {
+            $id = (int) $course['id'];
+            if (!empty($hidden[$id])) {
+                $omitted[] = ['id' => $id, 'name' => $course['name']];
+                continue;
+            }
+            $edit = $saved[$id] ?? [];
+            $out[] = [
+                'id' => $id,
+                'name' => $course['name'],
+                'days' => $course['day'],
+                'place' => $course['place'],
+                'coord' => '',
+                'money' => ahead_kept($edit, 'as_money', advance_box((float) $course['fees'])),
+                'spent' => ahead_kept($edit, 'as_spent', advance_box((float) $course['spent'])),
+                'people' => ahead_kept($edit, 'as_people', (string) $course['people']),
+                'sort' => $course['day'],
+            ];
+        }
+    }
+    // Foreign scholarship officers live in cp_foriegnscholars.
+    if ($kind === 'foreign') {
+        foreach (foreign_scholar_rows($year) as $course) {
+            $id = (int) $course['id'];
+            if (!empty($hidden[$id])) {
+                $omitted[] = ['id' => $id, 'name' => $course['name']];
+                continue;
+            }
+            $edit = $saved[$id] ?? [];
+            $out[] = [
+                'id' => $id,
+                'name' => $course['name'],
+                'days' => $course['day'],
+                'place' => $course['place'],
+                'coord' => $course['coord'],
+                'money' => ahead_kept($edit, 'as_money', advance_box((float) $course['fees'])),
+                'spent' => ahead_kept($edit, 'as_spent', advance_box((float) $course['spent'])),
+                'people' => ahead_kept($edit, 'as_people', (string) $course['people']),
+                'sort' => $course['day'],
+            ];
+        }
+    }
     usort($out, static function (array $a, array $b): int {
         $byDay = strcmp($a['sort'], $b['sort']);
         return $byDay !== 0 ? $byDay : strcmp($a['name'], $b['name']);
@@ -7767,11 +8020,14 @@ function ahead_progress_bundle(string $year, string $kind): array
     }
     unset($row);
     $allocation = '';
+    // භාෂා ප්‍රතිපාදන (pv_language) = දෙමළ භාෂා ප්‍රගතිය — same bucket.
     $allocKey = [
         'general' => 'pv_general',
         'special' => 'pv_special',
         'department' => 'pv_department',
         'external' => 'pv_external',
+        'tamil' => 'pv_language',
+        'drug' => 'pv_drug',
     ];
     if (isset($allocKey[$kind])) {
         $allocation = (string) (provision_row($year)[$allocKey[$kind]] ?? '');
@@ -7823,7 +8079,7 @@ function office_progress(string $year): array
         $came[(int) $row['tratt_atpid']] = (int) $row['n'];
     }
     $plans = rows(
-        'SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_noofparticipants, atp_isaddatp,
+        'SELECT atp_id, atp_trname, atp_trtype, atp_reqoffice, atp_noofparticipants, atp_isaddatp, atp_offweb, atp_offcame,
                 atp_day1, atp_day2, atp_day3, atp_day4, atp_day5, atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_requestDate
          FROM cp_atp WHERE TRIM(atp_trname) <> \'\''
     );
@@ -7844,16 +8100,32 @@ function office_progress(string $year): array
             $category = 'meeting';
         }
         $id = (int) $plan['atp_id'];
-        $attended = (int) ($came[$id] ?? 0);
+        $attended = offweb_came_count($plan, (int) ($came[$id] ?? 0));
         $held = !empty($heldSaved[$id]) || $attended > 0;
-        if (in_array((string) ($plan['atp_isaddatp'] ?? ''), [YES_SI, 'Yes', 'yes'], true)) {
+        $inAnnual = in_array((string) ($plan['atp_isaddatp'] ?? ''), [YES_SI, 'Yes', 'yes'], true);
+        $isOffweb = programme_is_offweb($plan);
+        if ($inAnnual || $isOffweb) {
             $rows[$category]['plan']++;
-            $rows[$category]['target'] += (int) advance_number((string) ($plan['atp_noofparticipants'] ?? ''));
+            $targetPeople = (int) advance_number((string) ($plan['atp_noofparticipants'] ?? ''));
+            if ($targetPeople < 1 && $attended > 0) {
+                $targetPeople = $attended;
+            }
+            $rows[$category]['target'] += $targetPeople;
         }
         if ($held) {
             $rows[$category]['held']++;
             $rows[$category]['came'] += $attended;
             $rows[$category]['spent'] += (float) ($spentSaved[$id] ?? 0);
+        }
+    }
+    // External course funding (cp_privatetrainings) feeds office "බාහිර" row + totals.
+    foreach (private_training_rows($year) as $course) {
+        $rows['external']['plan']++;
+        $rows['external']['target'] += (int) $course['people'];
+        if (!empty($course['held'])) {
+            $rows['external']['held']++;
+            $rows['external']['came'] += (int) $course['people'];
+            $rows['external']['spent'] += (float) $course['spent'];
         }
     }
     $out = [];
@@ -7869,11 +8141,18 @@ function office_progress(string $year): array
         ];
     }
     $outside = rows('SELECT po_amount, po_spent, po_note FROM cp_provision_out WHERE po_year = ? LIMIT 1', 's', [$year]);
+    $sendRows = rows('SELECT COALESCE(SUM(ps_amount), 0) AS total FROM cp_provision_sends WHERE ps_year = ?', 's', [$year]);
+    $sendTotal = (float) ($sendRows[0]['total'] ?? 0);
+    $manualAmount = advance_number((string) ($outside[0]['po_amount'] ?? ''));
+    $manualSpent = advance_number((string) ($outside[0]['po_spent'] ?? ''));
+    // Institution transfers count as allocation-out and as expenditure on the progress report.
+    $outAmount = $sendTotal + $manualAmount;
+    $outSpent = $sendTotal + $manualSpent;
     $spentSum = 0.0;
     foreach ($rows as $row) {
         $spentSum += $row['spent'];
     }
-    $spentSum += advance_number((string) ($outside[0]['po_spent'] ?? ''));
+    $spentSum += $outSpent;
     $total = advance_number((string) ($provision['pv_total'] ?? ''));
     if ($total <= 0) {
         $total = array_sum($alloc);
@@ -7885,8 +8164,11 @@ function office_progress(string $year): array
         'spentTotal' => advance_money($spentSum),
         'leftProvision' => advance_money($total - $spentSum),
         'outside' => [
-            'amount' => (string) ($outside[0]['po_amount'] ?? ''),
-            'spent' => (string) ($outside[0]['po_spent'] ?? ''),
+            'amount' => advance_money($outAmount),
+            'spent' => advance_money($outSpent),
+            'sendTotal' => advance_money($sendTotal),
+            'manualAmount' => advance_money($manualAmount),
+            'manualSpent' => advance_money($manualSpent),
             'note' => (string) ($outside[0]['po_note'] ?? ''),
         ],
     ];
@@ -7903,11 +8185,12 @@ function action_ahead_office_save(): void
 {
     csrf_check();
     $user = require_user();
-    if (!is_super($user)) {
-        json_out(['ok' => false, 'error' => 'මෙය සුරකින්න පුළුවන් පරිපාලක සහ Super User ට පමණයි.'], 403);
+    if (!is_admin($user)) {
+        json_out(['ok' => false, 'error' => 'මෙය සුරකින්න පුළුවන් පරිපාලකට පමණයි.'], 403);
     }
     $data = body();
     $year = provision_year((string) ($data['year'] ?? ''));
+    // Manual extras only — institution transfers (cp_provision_sends) are applied in office_progress().
     $amount = advance_money(advance_number((string) ($data['amount'] ?? '')));
     $spent = advance_money(advance_number((string) ($data['spent'] ?? '')));
     $note = mb_substr(trim((string) ($data['note'] ?? '')), 0, 500);
@@ -7942,7 +8225,10 @@ function action_ahead_drug(): void
 function ahead_progress_save(string $kind): void
 {
     csrf_check();
-    total_staff();
+    $user = require_user();
+    if (!is_admin($user)) {
+        json_out(['ok' => false, 'error' => 'මෙම වාර්තා සංස්කරණය කළ හැක්කේ පරිපාලකට පමණි.'], 403);
+    }
     $data = body();
     $year = provision_year((string) ($data['year'] ?? ''));
     $db = db();
@@ -8613,6 +8899,7 @@ function action_provision_send_save(): void
     if (!is_super($user)) {
         json_out(['ok' => false, 'error' => 'ප්‍රතිපාදන මාරු කරන්න පුළුවන් පරිපාලක සහ Super User ට පමණයි.'], 403);
     }
+    ensure_provisions(db());
     $data = body();
     $year = provision_year((string) ($data['year'] ?? ''));
     $id = (int) ($data['id'] ?? 0);
@@ -8636,22 +8923,33 @@ function action_provision_send_save(): void
     }
     $by = (string) ($user['username'] ?? '');
     $saved = date('Y-m-d H:i:s');
-    $dateValue = $date !== '' ? $date : '';
+    $amountSql = advance_money($amount);
+    $hasDate = $date !== '';
     if ($id > 0) {
         $existing = rows('SELECT ps_id FROM cp_provision_sends WHERE ps_id = ? LIMIT 1', 'i', [$id]);
         if (!$existing) {
             json_out(['ok' => false, 'error' => 'ඒ මාරු කිරීම හමු නොවුණා.'], 404);
         }
-        $stmt = db()->prepare('UPDATE cp_provision_sends SET ps_year=?, ps_atp=?, ps_plan=?, ps_name=?, ps_office=?, ps_moved=?, ps_amount=?, ps_kind=?, ps_letter=?, ps_date=?, ps_by=?, ps_saved=? WHERE ps_id=?');
-        $params = [$year, $atp, $plan, $name, $office, $moved, advance_money($amount), $kind, $letter, $dateValue, $by, $saved, (string) $id];
-        if (!$stmt || !bind_and_run($stmt, str_repeat('s', count($params)), $params)) {
+        if ($hasDate) {
+            $stmt = db()->prepare('UPDATE cp_provision_sends SET ps_year=?, ps_atp=?, ps_plan=?, ps_name=?, ps_office=?, ps_moved=?, ps_amount=?, ps_kind=?, ps_letter=?, ps_date=?, ps_by=?, ps_saved=? WHERE ps_id=?');
+            $ok = $stmt && bind_and_run($stmt, 'ssssssssssssi', [$year, $atp, $plan, $name, $office, $moved, $amountSql, $kind, $letter, $date, $by, $saved, $id]);
+        } else {
+            $stmt = db()->prepare('UPDATE cp_provision_sends SET ps_year=?, ps_atp=?, ps_plan=?, ps_name=?, ps_office=?, ps_moved=?, ps_amount=?, ps_kind=?, ps_letter=?, ps_date=NULL, ps_by=?, ps_saved=? WHERE ps_id=?');
+            $ok = $stmt && bind_and_run($stmt, 'sssssssssssi', [$year, $atp, $plan, $name, $office, $moved, $amountSql, $kind, $letter, $by, $saved, $id]);
+        }
+        if (!$ok) {
             json_out(['ok' => false, 'error' => 'ප්‍රතිපාදන මාරු කිරීම සුරැකිය නොහැකි විය.'], 500);
         }
         json_out(['ok' => true, 'id' => $id, 'year' => $year]);
     }
-    $stmt = db()->prepare('INSERT INTO cp_provision_sends (ps_year, ps_atp, ps_plan, ps_name, ps_office, ps_moved, ps_amount, ps_kind, ps_letter, ps_date, ps_by, ps_saved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $params = [$year, $atp, $plan, $name, $office, $moved, advance_money($amount), $kind, $letter, $dateValue, $by, $saved];
-    if (!$stmt || !bind_and_run($stmt, str_repeat('s', count($params)), $params)) {
+    if ($hasDate) {
+        $stmt = db()->prepare('INSERT INTO cp_provision_sends (ps_year, ps_atp, ps_plan, ps_name, ps_office, ps_moved, ps_amount, ps_kind, ps_letter, ps_date, ps_by, ps_saved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $ok = $stmt && bind_and_run($stmt, 'ssssssssssss', [$year, $atp, $plan, $name, $office, $moved, $amountSql, $kind, $letter, $date, $by, $saved]);
+    } else {
+        $stmt = db()->prepare('INSERT INTO cp_provision_sends (ps_year, ps_atp, ps_plan, ps_name, ps_office, ps_moved, ps_amount, ps_kind, ps_letter, ps_date, ps_by, ps_saved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)');
+        $ok = $stmt && bind_and_run($stmt, 'sssssssssss', [$year, $atp, $plan, $name, $office, $moved, $amountSql, $kind, $letter, $by, $saved]);
+    }
+    if (!$ok) {
         json_out(['ok' => false, 'error' => 'ප්‍රතිපාදන මාරු කිරීම සුරැකිය නොහැකි විය.'], 500);
     }
     json_out(['ok' => true, 'id' => (int) db()->insert_id, 'year' => $year]);
