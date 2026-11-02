@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="32" fill="#eef2ff"/>
+  <circle cx="22" cy="18" r="12" fill="#fff" fill-opacity=".22"/>
+  
+    <path d="M13 32c1 14 21 14 22 0z" fill="#4338ca"/>
+    <circle cx="24" cy="27" r="7.2" fill="#f4c7a2"/>
+    <path d="M16.8 26.6a7.2 7.2 0 0 1 14.4 0q-1.2-6.2-7.2-6.2-6 0-7.2 6.2z" fill="#3b2a1c"/>
+    <circle cx="21.7" cy="27.8" r=".95" fill="#3b2a1c"/>
+    <circle cx="26.3" cy="27.8" r=".95" fill="#3b2a1c"/>
+    <polygon points="14,22 24,16 34,22 24,26" fill="#1e293b"/>
+    <path d="M40 28l16-6-4 8z" fill="#fff"/>
+    <path d="M40 30l12-2 2 4-10 2z" fill="#38bdf8"/>
+    <path d="M52 24l4 6" stroke="#1d4ed8" stroke-width="2"/>
+</svg>
