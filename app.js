@@ -2755,10 +2755,12 @@ function personSelect(name, current, people) {
   return `<select name="${esc(name)}"><option value="">—</option>${extra}${options}</select>`;
 }
 
-function annualFormFields(editing, publish = true) {
+function annualFormFields(editing, publish = true, requireCoordId = false) {
   const text = (name, si, ta, en, required = false) => annualControl(name, L(si, ta, en), "text", editing, "", required);
   const area = (name, si, ta, en) => annualControl(name, L(si, ta, en), "area", editing);
   const date = (name, si, ta, en) => annualControl(name, L(si, ta, en), "date", editing);
+  // Required only when editing an existing plan (or when caller asks, e.g. offweb).
+  const coordRequired = requireCoordId || Boolean(String(editing?.atp_id || "").trim());
   const startTime = String(editing.atp_stime || "").trim() || "9.00 am";
   const endTime = String(editing.atp_etime || "").trim() || "4.15 pm";
   const team = trainingTeam();
@@ -2795,7 +2797,7 @@ function annualFormFields(editing, publish = true) {
           <div class="annual-col">
             <label class="classic-field"><span>${esc(L("එකතු කරන සම්පත් දායකයන් ගණන", "சேர்க்கும் வள ஆள்கள்", "Resource persons to add"))}</span><span class="plan-add-row"><input id="plan-people-count" type="number" min="1" max="100" value="1"><button type="button" class="pick-yes" data-act="add-plan-people">${esc(L("සම්පත් දායකයන් එකතු කරන්න", "வள ஆள்களைச் சேர்க்க", "Add resource persons"))}</button></span></label>
             <div id="plan-people"></div>
-            ${text("atp_supportstaff1", "සම්බන්ධීකරණය (ජා.හැ.අංකය)", "ஒருங்கிணைப்பு (அடையாள எண்)", "Coordination (national ID)", true)}
+            ${text("atp_supportstaff1", "සම්බන්ධීකරණය (ජා.හැ.අංකය)", "ஒருங்கிணைப்பு (அடையாள எண்)", "Coordination (national ID)", coordRequired)}
             ${text("atp_coordname", "සම්බන්ධීකරණ නිලධාරියාගේ නම", "ஒருங்கிணைப்பாளர் பெயர்", "Coordination officer's name")}
             <label class="classic-field"><span>${esc(L("එකතු කරන සහාය කාර්ය මණ්ඩලය ගණන", "சேர்க்கும் உதவி பணியாளர்", "Support staff to add"))}</span><span class="plan-add-row"><input id="plan-staff-count" type="number" min="1" max="20" value="1"><button type="button" class="pick-yes" data-act="add-plan-staff">${esc(L("සහාය කාර්ය මණ්ඩලය එකතු කරන්න", "உதவி பணியாளரைச் சேர்க்க", "Add support staff"))}</button></span></label>
             <div id="plan-staff"></div>
@@ -2845,7 +2847,11 @@ async function renderAnnual(work) {
     if (coordId && coordName && coordId.value.trim() && !coordName.value.trim()) fillCoordinatorName(coordId);
     return;
   }
-  const rows = list.items.filter((row) => inPlan(row.atp_isaddatp) && (String(row.atp_trname || "").trim() || state.user.role === "Administrator")).map((row, index) => {
+  const rows = list.items
+    .filter((row) => (inPlan(row.atp_isaddatp) || inPlan(row.atp_isinatp)) && (String(row.atp_trname || "").trim() || state.user.role === "Administrator"))
+    .slice()
+    .sort((a, b) => Number(b.atp_id) - Number(a.atp_id) || String(showDate(b.atp_requestDate) || "").localeCompare(String(showDate(a.atp_requestDate) || "")))
+    .map((row, index) => {
     const named = String(row.atp_trname || "").trim() !== "";
     const edit = state.user.role === "User" ? "" : `<a href="#console/cp_atp?edit=${esc(row.atp_id)}">${esc(L("වෙනස් කරන්න", "திருத்து", "Edit"))}</a>`;
     const remove = !named && state.user.role === "Administrator" ? ` <button class="text-btn small" type="button" data-act="annual-remove" data-id="${esc(row.atp_id)}">delete</button>` : "";
@@ -6828,7 +6834,7 @@ async function renderOffweb(work) {
         atp_specialfinletter: NO,
         atp_isaddatp: NO,
         atp_addhome: NO,
-      }, true)}
+      }, true, true)}
       <button type="submit">${esc(L("ඇතුළත් කරලා ඇස්තමේන්තුව සකසන්න", "சேர்த்து மதிப்பீடு அமைக்க", "Enter and prepare the estimate"))}</button>
       <div id="form-msg"></div>
     </form>
@@ -10713,8 +10719,9 @@ async function onSubmit(event) {
     event.preventDefault();
     await submitMessage(form, async () => {
       const data = annualPayload(form);
-      if (!String(data.atp_supportstaff1 || "").trim()) {
-        throw new Error(L("සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි.", "ஒருங்கிணைப்பு (அடையாள எண்) கட்டாயம்.", "Coordination (national ID) is required."));
+      // Required only when editing an existing programme (atp_id present).
+      if (String(data.atp_id || "").trim() && !String(data.atp_supportstaff1 || "").trim()) {
+        throw new Error(L("සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි. සැලැස්ම වෙනස් කරන විට ජා.හැ. අංකය දෙන්න.", "ஒருங்கிணைப்பு (அடையாள எண்) கட்டாயம்.", "Coordination (national ID) is required when editing the plan."));
       }
       await api("save", { method: "POST", body: { table: "cp_atp", data } });
       location.hash = "#console/cp_atp?tab=all";
@@ -12640,14 +12647,18 @@ function letterThrough(post) {
 }
 
 async function addNeedToPlan(need) {
-  const today = new Date().toISOString().slice(0, 10);
+  const year = chosenYear();
+  const today = localToday();
+  // Stamp the selected plan year so the new programme appears under that year in edit.
+  const requestDate = dateYear(today) === year ? today : `${year}-01-01`;
   await api("save", {
     method: "POST",
     body: {
       table: "cp_atp",
       data: {
         atp_trReqID: need.req_id,
-        atp_requestDate: today,
+        atp_requestDate: requestDate,
+        atp_panelno: "",
         atp_trname: need.req_training,
         atp_reqdesig: need.req_post,
         atp_reqoffice: need.req_addoffice,

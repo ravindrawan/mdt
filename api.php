@@ -457,19 +457,19 @@ function public_programme_rows(string $like, string $typeValue): array
     $columns = 'atp_id, atp_trname, atp_location, atp_day1, atp_day2, atp_day3, atp_day4, atp_day5,
                 atp_day6, atp_day7, atp_day8, atp_day9, atp_day10, atp_moredays, atp_stime, atp_etime, atp_trtype,
                 atp_targetgroup, atp_noofdays, atp_lastdateapply, atp_purpose, atp_fundsource';
-    if ($typeValue === '') {
-        $items = rows(
+        if ($typeValue === '') {
+            $items = rows(
             "SELECT $columns FROM cp_atp WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?) AND atp_trname LIKE ? ORDER BY atp_day1 DESC LIMIT 500",
-            'ssss',
-            [YES_SI, 'Yes', 'yes', $like]
-        );
-    } else {
-        $items = rows(
+                'ssss',
+                [YES_SI, 'Yes', 'yes', $like]
+            );
+        } else {
+            $items = rows(
             "SELECT $columns FROM cp_atp WHERE TRIM(atp_trname) <> '' AND atp_offweb NOT IN (?, ?, ?) AND atp_trtype = ? AND atp_trname LIKE ? ORDER BY atp_day1 DESC LIMIT 500",
-            'sssss',
-            [YES_SI, 'Yes', 'yes', $typeValue, $like]
-        );
-    }
+                'sssss',
+                [YES_SI, 'Yes', 'yes', $typeValue, $like]
+            );
+        }
     return array_values(array_filter($items, static fn(array $row): bool => programme_still_on($row, $today)));
 }
 
@@ -931,13 +931,21 @@ function action_save(): void
         }
     }
     if ($table === 'cp_atp') {
-        $coordId = trim((string) ($record['atp_supportstaff1'] ?? ''));
-        $named = trim((string) ($record['atp_trname'] ?? ''));
-        if ($named !== '' && $coordId === '') {
-            json_out(['ok' => false, 'error' => 'සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි.'], 422);
+        // NIC is required only when the edit form sends the coordination field
+        // (සැලැස්ම වෙනස් කිරීම). Membership ticks / need→plan updates omit it.
+        $coordSent = array_key_exists('atp_supportstaff1', $record);
+        $coordId = $coordSent ? trim((string) $record['atp_supportstaff1']) : '';
+        if (!$isInsert && $coordSent && $coordId === '') {
+            json_out(['ok' => false, 'error' => 'සම්බන්ධීකරණය (ජා.හැ.අංකය) අනිවාර්යයි. සැලැස්ම වෙනස් කරන විට ජා.හැ. අංකය දෙන්න.'], 422);
         }
         if ($coordId !== '' && coord_nid_key($coordId) === '') {
             json_out(['ok' => false, 'error' => 'සම්බන්ධීකරණය සඳහා වලංගු ජාතික හැඳුනුම්පත් අංකයක් දෙන්න.'], 422);
+        }
+        if ($isInsert && trim((string) ($record['atp_requestDate'] ?? '')) === '') {
+            $record['atp_requestDate'] = date('Y-m-d');
+        }
+        if ($isInsert && !array_key_exists('atp_panelno', $record) && trim((string) ($record['atp_trname'] ?? '')) !== '') {
+            $record['atp_panelno'] = next_panel_number(panel_year_of($record));
         }
     }
     if ($table === 'cp_atp' && array_key_exists('atp_coordname', $record)) {
@@ -1426,7 +1434,7 @@ function action_apply(): void
         if ($person) {
             $staff = [$person];
             $nid = trim((string) ($person['stf_Nid'] ?? $nid));
-        }
+    }
     }
     if (!$staff) {
         json_out(['ok' => false, 'error' => 'That national ID is not in the staff register.'], 422);
@@ -5431,7 +5439,7 @@ function action_messages_send(): void
             $subject = 'පණිවිඩය';
             $body = str_replace(['{name}', '{Name}', '{NAME}'], $who !== '' ? $who : 'නිලධාරියා', $custom);
         } else {
-            [$subject, $body] = notify_letter($kind, $who, $programme, $day, $place);
+        [$subject, $body] = notify_letter($kind, $who, $programme, $day, $place);
         }
         try {
             if ($channel === 'email') {
@@ -5633,9 +5641,9 @@ function action_officer_letter(): void
     if (!$application) {
         $application = [
             'tapp_trname' => $attended[0]['tratt_atpname'] ?? '',
-            'tapp_isselected' => YES_SI,
-            'tapp_office' => $staff[0]['stf_office'] ?? '',
-        ];
+        'tapp_isselected' => YES_SI,
+        'tapp_office' => $staff[0]['stf_office'] ?? '',
+    ];
     }
     $officeName = trim((string) ($staff[0]['stf_office'] ?? $application['tapp_office'] ?? ''));
     $headPost = office_head_post($officeName);
@@ -9622,7 +9630,7 @@ function allowance_item(int $id): ?array
         $nid = trim((string) ($person['nid'] ?? ''));
         $name = trim((string) ($person['name'] ?? ''));
         if ($nid !== '') {
-            $foundName = advance_coordinator($nid, $names);
+        $foundName = advance_coordinator($nid, $names);
             if ($foundName !== '') {
                 $name = $foundName;
             }
