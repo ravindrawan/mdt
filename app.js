@@ -6965,10 +6965,16 @@ function estimateShowsAnswer(raw, amount) {
 
 function syncEstimateParents(form) {
   form.querySelectorAll("[data-sum-of]").forEach((parent) => {
-    if (parent.dataset.auto !== "1") return;
-    const parts = [...form.querySelectorAll(`[data-group="${parent.dataset.sumOf}"]`)]
+    const kids = [...form.querySelectorAll(`[data-group="${parent.dataset.sumOf}"]`)];
+    const parts = kids
       .map((input) => String(input.dataset.formula || "").trim().replace(/^=/, "").trim())
       .filter((part) => part && estimateAmount(part) !== null);
+    // Keep auto parents in sync. If auto was turned off but parent has no real amount, restore auto.
+    if (parent.dataset.auto !== "1") {
+      const own = estimateAmount(parent.dataset.formula || "");
+      if (!(parts.length && (own === null || own === 0))) return;
+      parent.dataset.auto = "1";
+    }
     parent.dataset.formula = parts.length ? `=${parts.join("+")}` : "";
   });
 }
@@ -7000,8 +7006,22 @@ function refreshEstimate(form) {
     }
     input.value = amount === null ? "" : estimateMoney(amount);
   });
+  // Grand total: detail children of auto groups (6.1 food, 6.5 lectures) + other sum rows.
+  // Do not rely only on parent auto formulas — those can be zero if auto was turned off.
   let total = 0;
+  form.querySelectorAll(".est-formula[data-est='sum'][data-sum-of]").forEach((parent) => {
+    const group = parent.dataset.sumOf;
+    const kids = [...form.querySelectorAll(`.est-formula[data-group="${group}"]`)];
+    if (kids.length) {
+      kids.forEach((kid) => {
+        total += Number(kid.dataset.amount || 0);
+      });
+      return;
+    }
+    total += Number(parent.dataset.amount || 0);
+  });
   form.querySelectorAll('.est-formula[data-est="sum"]').forEach((input) => {
+    if (input.dataset.sumOf) return;
     total += Number(input.dataset.amount || 0);
   });
   const money = estimateMoney(total);
@@ -7475,25 +7495,51 @@ async function renderPanelSign(work) {
   }
 }
 
+function programmeResourceNames(plan) {
+  const names = [];
+  for (let n = 1; n <= 10; n += 1) {
+    const name = String(plan?.[`atp_resourcep${n}`] || "").trim();
+    if (name) names.push(name);
+  }
+  String(plan?.atp_moreresource || "")
+    .split(/[\n;,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((name) => {
+      if (!names.includes(name)) names.push(name);
+    });
+  return names;
+}
+
 async function renderProgramme() {
   const data = await api("programme", { query: { id: state.module } });
   const plan = data.programme;
-  const days = (plan.days || []).map((day) => `<li>${esc(day)}</li>`).join("") || "<li>Dates have not been set.</li>";
+  const days = (plan.days || []).map((day) => `<li>${esc(day)}</li>`).join("") || `<li>${esc(L("දින නියම කර නැත.", "திகதிகள் அமைக்கப்படவில்லை.", "Dates have not been set."))}</li>`;
+  const people = programmeResourceNames(plan);
+  const peopleHtml = people.length
+    ? `<p><strong>${esc(L("සම්පත් දායකයන්", "வள ஆள்கள்", "Resource persons"))}</strong></p><ul class="list">${people.map((name) => `<li>${esc(name)}</li>`).join("")}</ul>`
+    : "";
+  const special = specialText(plan);
+  const specialHtml = special
+    ? `<div class="programme-special"><p><strong>${esc(L("විශේෂ කරුණු", "சிறப்பு விவரங்கள்", "Special facts"))}</strong></p><p class="facts">${esc(special).replaceAll("\n", "<br>")}</p></div>`
+    : "";
   $("#stage").innerHTML = `
     <section class="wrap section">
       <h1>${esc(plan.atp_trname)}</h1>
-      <p class="kicker">${esc(plan.atp_trtype || "Training programme")}</p>
+      <p class="kicker">${esc(plan.atp_trtype || L("පුහුණු වැඩසටහන", "பயிற்சி நிகழ்ச்சி", "Training programme"))}</p>
       <div class="grid-2">
         <article class="card">
-          <p><strong>Place</strong> ${esc(plan.atp_location)}</p>
-          <p><strong>Time</strong> ${esc(plan.atp_stime)} – ${esc(plan.atp_etime)}</p>
-          <p><strong>Target group</strong> ${esc(plan.atp_targetgroup)}</p>
-          <p><strong>Participants</strong> ${esc(plan.atp_noofparticipants)}</p>
-          <p><strong>Apply by</strong> ${esc(showDate(plan.atp_lastdateapply))}</p>
+          <p><strong>${esc(L("ස්ථානය", "இடம்", "Place"))}</strong> ${esc(plan.atp_location)}</p>
+          <p><strong>${esc(L("වේලාව", "நேரம்", "Time"))}</strong> ${esc(plan.atp_stime)} – ${esc(plan.atp_etime)}</p>
+          <p><strong>${esc(L("ඉලක්කගත කණ්ඩායම", "இலக்குக் குழு", "Target group"))}</strong> ${esc(plan.atp_targetgroup)}</p>
+          <p><strong>${esc(L("සහභාගිවන්නන්", "பங்கேற்பாளர்கள்", "Participants"))}</strong> ${esc(plan.atp_noofparticipants)}</p>
+          <p><strong>${esc(L("අයදුම් අවසන් දිනය", "விண்ணப்ப இறுதித் திகதி", "Apply by"))}</strong> ${esc(showDate(plan.atp_lastdateapply))}</p>
           <p>${esc(plan.atp_purpose)}</p>
           <p>${esc(plan.atp_content)}</p>
+          ${peopleHtml}
+          ${specialHtml}
         </article>
-        <article class="card"><h2>Dates</h2><ul class="list">${days}</ul><p class="muted">Offices nominate officers after signing in.</p></article>
+        <article class="card"><h2>${esc(L("දින", "திகதிகள்", "Dates"))}</h2><ul class="list">${days}</ul><p class="muted">${esc(L("පිවිසුණු පසු කාර්යාල නිලධාරීන් නම් කරයි.", "உள்நுழைந்த பின் அலுவலகங்கள் அதிகாரிகளை நியமிக்கின்றன.", "Offices nominate officers after signing in."))}</p></article>
       </div>
     </section>`;
 }
