@@ -862,6 +862,19 @@ function openOnHome(value) {
   return !date || date >= localToday();
 }
 
+function programmeEvalLinks(token) {
+  const key = String(token || "").trim();
+  if (!key) return "";
+  return `<div class="programme-eval-links">
+    <p><strong>${esc(L("ඇගයීම", "மதிப்பீடு", "Evaluation"))}</strong></p>
+    <p>
+      <a href="#quiz/${esc(key)}/pre">${esc(L("පෙර ඇගයීම", "முன் மதிப்பீடு", "Pre-evaluation"))}</a>
+      <span aria-hidden="true"> · </span>
+      <a href="#quiz/${esc(key)}/post">${esc(L("පසු ඇගයීම", "பின் மதிப்பீடு", "Post-evaluation"))}</a>
+    </p>
+  </div>`;
+}
+
 function programmeItem(item) {
   const start = showDate(item.atp_day1);
   const end = programmeEnd(item);
@@ -7006,19 +7019,17 @@ function refreshEstimate(form) {
     }
     input.value = amount === null ? "" : estimateMoney(amount);
   });
-  // Grand total: detail children of auto groups (6.1 food, 6.5 lectures) + other sum rows.
-  // Do not rely only on parent auto formulas — those can be zero if auto was turned off.
+  // Grouped rows (6.1 food, 6.5 lectures): take the larger of parent vs children sum.
+  // - Food: children hold tea/lunch → kids sum wins (equals parent when auto-synced).
+  // - Lecture: fee often sits on the parent while named sub-rows are 0 → parent wins.
+  // Never add both, so there is no double counting.
   let total = 0;
   form.querySelectorAll(".est-formula[data-est='sum'][data-sum-of]").forEach((parent) => {
     const group = parent.dataset.sumOf;
     const kids = [...form.querySelectorAll(`.est-formula[data-group="${group}"]`)];
-    if (kids.length) {
-      kids.forEach((kid) => {
-        total += Number(kid.dataset.amount || 0);
-      });
-      return;
-    }
-    total += Number(parent.dataset.amount || 0);
+    const parentAmt = Number(parent.dataset.amount || 0);
+    const kidsSum = kids.reduce((sum, kid) => sum + Number(kid.dataset.amount || 0), 0);
+    total += Math.max(parentAmt, kidsSum);
   });
   form.querySelectorAll('.est-formula[data-est="sum"]').forEach((input) => {
     if (input.dataset.sumOf) return;
@@ -7523,6 +7534,12 @@ async function renderProgramme() {
   const specialHtml = special
     ? `<div class="programme-special"><p><strong>${esc(L("විශේෂ කරුණු", "சிறப்பு விவரங்கள்", "Special facts"))}</strong></p><p class="facts">${esc(special).replaceAll("\n", "<br>")}</p></div>`
     : "";
+  const purpose = String(plan.atp_purpose || "").trim();
+  const content = String(plan.atp_content || "").trim();
+  const purposeHtml = purpose ? `<p><strong>${esc(L("අරමුණ", "நோக்கம்", "Purpose"))}</strong><br>${esc(purpose).replaceAll("\n", "<br>")}</p>` : "";
+  const contentHtml = content ? `<p><strong>${esc(L("අන්තර්ගතය", "உள்ளடக்கம்", "Content"))}</strong><br>${esc(content).replaceAll("\n", "<br>")}</p>` : "";
+  // Clickable pre/post links only — no QR codes on this public programme page.
+  const evalHtml = programmeEvalLinks(plan.evalToken || data.evalToken);
   $("#stage").innerHTML = `
     <section class="wrap section">
       <h1>${esc(plan.atp_trname)}</h1>
@@ -7534,10 +7551,11 @@ async function renderProgramme() {
           <p><strong>${esc(L("ඉලක්කගත කණ්ඩායම", "இலக்குக் குழு", "Target group"))}</strong> ${esc(plan.atp_targetgroup)}</p>
           <p><strong>${esc(L("සහභාගිවන්නන්", "பங்கேற்பாளர்கள்", "Participants"))}</strong> ${esc(plan.atp_noofparticipants)}</p>
           <p><strong>${esc(L("අයදුම් අවසන් දිනය", "விண்ணப்ப இறுதித் திகதி", "Apply by"))}</strong> ${esc(showDate(plan.atp_lastdateapply))}</p>
-          <p>${esc(plan.atp_purpose)}</p>
-          <p>${esc(plan.atp_content)}</p>
+          ${purposeHtml}
+          ${contentHtml}
           ${peopleHtml}
           ${specialHtml}
+          ${evalHtml}
         </article>
         <article class="card"><h2>${esc(L("දින", "திகதிகள்", "Dates"))}</h2><ul class="list">${days}</ul><p class="muted">${esc(L("පිවිසුණු පසු කාර්යාල නිලධාරීන් නම් කරයි.", "உள்நுழைந்த பின் அலுவலகங்கள் அதிகாரிகளை நியமிக்கின்றன.", "Offices nominate officers after signing in."))}</p></article>
       </div>

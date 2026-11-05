@@ -156,6 +156,8 @@ h2 { font-size: 1.55rem; }
   border-top: 1px solid var(--line);
 }
 .list li:first-child { border-top: 0; padding-top: 0; }
+.programme-eval-links { margin: 6px 0 0; font-size: 0.92rem; }
+.programme-eval-links a { font-weight: 600; }
 .person { display: flex; gap: 10px; align-items: center; }
 .avatar, .avatar-lg {
   width: 42px; height: 42px; border-radius: 50%; object-fit: cover; background: #e7f3ee;

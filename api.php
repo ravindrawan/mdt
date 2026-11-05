@@ -290,6 +290,38 @@ function sort_by_closing(array $rows, string $dateKey, string $idKey): array
     return $rows;
 }
 
+function attach_eval_tokens(array $items): array
+{
+    if ($items === []) {
+        return $items;
+    }
+    $ids = [];
+    foreach ($items as $row) {
+        $id = (int) ($row['atp_id'] ?? 0);
+        if ($id > 0) {
+            $ids[$id] = $id;
+        }
+    }
+    if ($ids === []) {
+        return $items;
+    }
+    $marks = implode(',', array_fill(0, count($ids), '?'));
+    $found = rows(
+        "SELECT ev_atp, ev_token FROM cp_eval WHERE ev_atp IN ($marks)",
+        str_repeat('i', count($ids)),
+        array_values($ids)
+    );
+    $tokens = [];
+    foreach ($found as $row) {
+        $tokens[(int) $row['ev_atp']] = (string) $row['ev_token'];
+    }
+    foreach ($items as &$row) {
+        $row['evalToken'] = $tokens[(int) ($row['atp_id'] ?? 0)] ?? '';
+    }
+    unset($row);
+    return $items;
+}
+
 function action_home(): void
 {
     $today = date('Y-m-d');
@@ -2739,7 +2771,9 @@ function action_programme(): void
     }
     $plan = $found[0];
     $plan['days'] = programme_days($plan, 'atp_day');
-    json_out(['ok' => true, 'programme' => $plan]);
+    $withToken = attach_eval_tokens([$plan]);
+    $plan = $withToken[0];
+    json_out(['ok' => true, 'programme' => $plan, 'evalToken' => (string) ($plan['evalToken'] ?? '')]);
 }
 
 function action_calendar(): void
