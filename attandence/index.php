@@ -612,7 +612,7 @@ mdtu_security_headers();
                             <select id="trainingNameSelect" required onchange="onProgramSelected()" class="w-full p-2.5 text-sm border rounded-lg outline-none bg-white">
                                 <option value="">-- Select the program you attended --</option>
                             </select>
-                            <p class="text-[10px] text-slate-500 mt-1">A program stays in this list from its last day until one week later, then it is removed.</p>
+                            <p class="text-[10px] text-slate-500 mt-1">A program appears here from its first day until one week after its last day, then it is removed. Same program name is allowed on different dates.</p>
                         </div>
 
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">

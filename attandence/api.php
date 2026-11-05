@@ -258,15 +258,39 @@ function program_end_date(array $program)
     return valid_date($first) ? $first : '';
 }
 
+function program_start_date(array $program)
+{
+    $dates = $program['dates'] ?? [];
+    if (is_string($dates)) {
+        $decoded = json_decode($dates, true);
+        $dates = is_array($decoded) ? $decoded : [];
+    }
+    $clean = [];
+    foreach ((array) $dates as $d) {
+        $d = trim((string) $d);
+        if (valid_date($d)) {
+            $clean[] = $d;
+        }
+    }
+    sort($clean);
+    if ($clean) {
+        return $clean[0];
+    }
+    $first = trim((string) ($program['firstDate'] ?? ''));
+    return valid_date($first) ? $first : '';
+}
+
+/** Open for Add Training Record from the first program day through 7 days after the last day. */
 function program_open_for_record(array $program)
 {
+    $start = program_start_date($program);
     $end = program_end_date($program);
-    if ($end === '') {
+    if ($start === '' || $end === '') {
         return false;
     }
     $today = date('Y-m-d');
     $last = (new DateTime($end))->modify('+7 days')->format('Y-m-d');
-    return $today >= $end && $today <= $last;
+    return $today >= $start && $today <= $last;
 }
 
 function parse_dates($value)
@@ -1105,7 +1129,7 @@ switch ($action) {
             fail('Please select a training program from the list.');
         }
         if (!program_open_for_record($program)) {
-            fail('This program can only be submitted from its last day until one week later.');
+            fail('This program can only be submitted from its first day until one week after its last day.');
         }
 
         $evals = [];
@@ -1329,6 +1353,12 @@ switch ($action) {
         if ($id && !$before) {
             fail('Program not found.', 404);
         }
+        // Same name is allowed on different start dates; block only same name + same first day.
+        $dup = $pdo->prepare('SELECT id, name FROM programs WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND firstDate = ? AND id <> ? LIMIT 1');
+        $dup->execute([$name, $dates[0], $id ?: 0]);
+        if ($dup->fetch()) {
+            fail("A program named \"$name\" starting on {$dates[0]} already exists. Use the same name only on a different date.", 409);
+        }
         try {
             if ($id) {
                 $pdo->prepare("UPDATE programs SET name = ?, venue = ?, fileNo = ?, dates = ?, firstDate = ?, hours = ?, resourcePersons = ?, coordinators = ?, assistantCoordinators = ?, kksHelpers = ?, issueCompletion = ?, issueAttendance = ? WHERE id = ?")
@@ -1341,7 +1371,7 @@ switch ($action) {
             }
         } catch (PDOException $e) {
             if (is_duplicate($e)) {
-                fail("A program named \"$name\" starting on {$dates[0]} already exists.", 409);
+                fail("A program named \"$name\" starting on {$dates[0]} already exists. Use the same name only on a different date.", 409);
             }
             throw $e;
         }
